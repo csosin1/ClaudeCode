@@ -79,6 +79,7 @@
         let frameCount = 0;
         let lastTime = 0;
         let deathMessage = '';
+        let finalScore = 0;
 
         best = parseInt(localStorage.getItem('adlerDinoBest') || '0');
         document.getElementById('best').textContent = best;
@@ -618,6 +619,8 @@
             c.bob += 0.05;
             const by = c.y + Math.sin(c.bob) * 4;
 
+            ctx.save();
+
             // Glow
             ctx.fillStyle = 'rgba(255, 215, 0, 0.15)';
             ctx.beginPath();
@@ -627,13 +630,14 @@
             // Star shape
             ctx.fillStyle = '#FFD700';
             ctx.beginPath();
-            for (let i = 0; i < 5; i++) {
-                const angle = (i * 4 * Math.PI / 5) - Math.PI / 2;
-                const r = i === 0 ? c.size : c.size;
-                const method = i === 0 ? 'moveTo' : 'lineTo';
-                ctx[method](c.x + Math.cos(angle) * c.size, by + Math.sin(angle) * c.size);
-                const innerAngle = angle + 2 * Math.PI / 10;
-                ctx.lineTo(c.x + Math.cos(innerAngle) * c.size * 0.45, by + Math.sin(innerAngle) * c.size * 0.45);
+            for (let i = 0; i < 10; i++) {
+                const angle = (i * Math.PI / 5) - Math.PI / 2;
+                const r = (i % 2 === 0) ? c.size : c.size * 0.45;
+                if (i === 0) {
+                    ctx.moveTo(c.x + Math.cos(angle) * r, by + Math.sin(angle) * r);
+                } else {
+                    ctx.lineTo(c.x + Math.cos(angle) * r, by + Math.sin(angle) * r);
+                }
             }
             ctx.closePath();
             ctx.fill();
@@ -646,6 +650,8 @@
             ctx.font = 'bold 9px sans-serif';
             ctx.textAlign = 'center';
             ctx.fillText('+50', c.x, by + c.size + 14);
+
+            ctx.restore();
         }
 
         function drawParticles() {
@@ -757,8 +763,8 @@
 
                         if (player.lives <= 0) {
                             gameOver = true;
-                            document.getElementById('message').textContent = deathMessage + ' Restarting...';
-                            setTimeout(() => { init(); startAutoGame(); }, 2000);
+                            finalScore = score;
+                            document.getElementById('message').textContent = 'Press any arrow key to play again!';
                             return;
                         }
                         break;
@@ -767,7 +773,9 @@
             }
 
             // Check coin collection
-            coins = coins.filter(c => {
+            let newCoins = [];
+            for (let i = 0; i < coins.length; i++) {
+                const c = coins[i];
                 const dx = (player.x + player.w / 2) - c.x;
                 const dy = (player.y + player.h / 2) - c.y;
                 if (Math.sqrt(dx * dx + dy * dy) < c.size + 18) {
@@ -779,10 +787,11 @@
                         localStorage.setItem('adlerDinoBest', best);
                         document.getElementById('best').textContent = best;
                     }
-                    return false;
+                } else {
+                    newCoins.push(c);
                 }
-                return true;
-            });
+            }
+            coins = newCoins;
 
             // Score for surviving
             if (frameCount % 30 === 0) {
@@ -815,21 +824,36 @@
         }
 
         function drawGameOverScreen() {
-            ctx.fillStyle = 'rgba(0,0,0,0.5)';
+            ctx.fillStyle = 'rgba(0,0,0,0.6)';
             ctx.fillRect(0, 0, W, H);
 
+            // Big GAME OVER
             ctx.fillStyle = '#FF5252';
-            ctx.font = 'bold 44px sans-serif';
+            ctx.font = 'bold 56px sans-serif';
             ctx.textAlign = 'center';
-            ctx.fillText(deathMessage, W / 2, H / 2 - 20);
+            ctx.fillText('GAME OVER!', W / 2, H / 2 - 60);
 
+            // What got Adler
+            ctx.fillStyle = '#fff';
+            ctx.font = '24px sans-serif';
+            ctx.fillText(deathMessage, W / 2, H / 2 - 15);
+
+            // Score
             ctx.fillStyle = '#FFD700';
-            ctx.font = 'bold 28px sans-serif';
-            ctx.fillText('Score: ' + score, W / 2, H / 2 + 25);
+            ctx.font = 'bold 32px sans-serif';
+            ctx.fillText('Score: ' + finalScore, W / 2, H / 2 + 30);
 
+            // Best score
             ctx.fillStyle = '#aaa';
             ctx.font = '20px sans-serif';
-            ctx.fillText('Restarting...', W / 2, H / 2 + 60);
+            ctx.fillText('Best: ' + best, W / 2, H / 2 + 60);
+
+            // Play again prompt (blinks)
+            if (Math.floor(Date.now() / 500) % 2 === 0) {
+                ctx.fillStyle = '#4CAF50';
+                ctx.font = 'bold 22px sans-serif';
+                ctx.fillText('Press any arrow key to play again!', W / 2, H / 2 + 105);
+            }
         }
 
         function draw() {
@@ -881,7 +905,12 @@
             if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) {
                 e.preventDefault();
                 keys[e.key] = true;
-                if (!started && !gameOver) {
+                if (gameOver) {
+                    init();
+                    startAutoGame();
+                    return;
+                }
+                if (!started) {
                     startAutoGame();
                 }
             }
