@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Ski Snake Baseball!</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #1a1a2e;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            font-family: 'Segoe UI', Tahoma, sans-serif;
+            color: white;
+            overflow: hidden;
+        }
+        h1 {
+            font-size: 36px;
+            margin-bottom: 5px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+        }
+        #subtitle {
+            font-size: 16px;
+            color: #aaa;
+            margin-bottom: 15px;
+        }
+        #scoreboard {
+            display: flex;
+            gap: 40px;
+            margin-bottom: 10px;
+            font-size: 22px;
+            font-weight: bold;
+        }
+        #scoreboard span { color: #FFD700; }
+        canvas {
+            border: 3px solid #4a90d9;
+            border-radius: 8px;
+            background: #f0f8ff;
+            box-shadow: 0 0 30px rgba(74, 144, 217, 0.3);
+        }
+        #message {
+            margin-top: 12px;
+            font-size: 18px;
+            color: #aaa;
+            height: 24px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Ski Snake Baseball!</h1>
+    <div id="subtitle">Use arrow keys to move. Collect baseballs. Don't crash!</div>
+    <div id="scoreboard">
+        Score: <span id="score">0</span>
+        &nbsp;&nbsp;
+        Best: <span id="best">0</span>
+    </div>
+    <canvas id="game" width="600" height="600"></canvas>
+    <div id="message">Press any arrow key to start!</div>
+
+    <script>
+        const canvas = document.getElementById('game');
+        const ctx = canvas.getContext('2d');
+        const GRID = 25;
+        const COLS = canvas.width / GRID;
+        const ROWS = canvas.height / GRID;
+
+        let snake, dir, nextDir, food, score, best, speed, gameOver, started, moveTimer;
+
+        best = parseInt(localStorage.getItem('skiSnakeBest') || '0');
+        document.getElementById('best').textContent = best;
+
+        // Snow particles
+        let snowflakes = [];
+        for (let i = 0; i < 60; i++) {
+            snowflakes.push({
+                x: Math.random() * canvas.width,
+                y: Math.random() * canvas.height,
+                size: 1 + Math.random() * 3,
+                speed: 0.3 + Math.random() * 1,
+                drift: (Math.random() - 0.5) * 0.5
+            });
+        }
+
+        function init() {
+            const cx = Math.floor(COLS / 2);
+            const cy = Math.floor(ROWS / 2);
+            snake = [
+                { x: cx, y: cy },
+                { x: cx - 1, y: cy },
+                { x: cx - 2, y: cy }
+            ];
+            dir = { x: 1, y: 0 };
+            nextDir = { x: 1, y: 0 };
+            score = 0;
+            speed = 130;
+            gameOver = false;
+            started = false;
+            document.getElementById('score').textContent = '0';
+            document.getElementById('message').textContent = 'Press any arrow key to start!';
+            placeFood();
+            if (moveTimer) clearInterval(moveTimer);
+        }
+
+        function placeFood() {
+            let pos;
+            do {
+                pos = {
+                    x: Math.floor(Math.random() * COLS),
+                    y: Math.floor(Math.random() * ROWS)
+                };
+            } while (snake.some(s => s.x === pos.x && s.y === pos.y));
+            food = pos;
+        }
+
+        function startGame() {
+            started = true;
+            document.getElementById('message').textContent = '';
+            if (moveTimer) clearInterval(moveTimer);
+            moveTimer = setInterval(update, speed);
+        }
+
+        function update() {
+            dir = { ...nextDir };
+
+            const head = {
+                x: snake[0].x + dir.x,
+                y: snake[0].y + dir.y
+            };
+
+            // Wall collision
+            if (head.x < 0 || head.x >= COLS || head.y < 0 || head.y >= ROWS) {
+                die();
+                return;
+            }
+
+            // Self collision
+            if (snake.some(s => s.x === head.x && s.y === head.y)) {
+                die();
+                return;
+            }
+
+            snake.unshift(head);
+
+            // Eat food
+            if (head.x === food.x && head.y === food.y) {
+                score += 10;
+                document.getElementById('score').textContent = score;
+                if (score > best) {
+                    best = score;
+                    localStorage.setItem('skiSnakeBest', best);
+                    document.getElementById('best').textContent = best;
+                }
+                placeFood();
+                // Speed up slightly
+                if (speed > 60) {
+                    speed -= 3;
+                    clearInterval(moveTimer);
+                    moveTimer = setInterval(update, speed);
+                }
+            } else {
+                snake.pop();
+            }
+        }
+
+        function die() {
+            gameOver = true;
+            clearInterval(moveTimer);
+            document.getElementById('message').textContent = 'You crashed! Restarting...';
+            setTimeout(() => {
+                init();
+                // Auto-start moving in the same direction
+                started = true;
+                document.getElementById('message').textContent = '';
+                moveTimer = setInterval(update, speed);
+            }, 1500);
+        }
+
+        // Drawing functions
+        function drawSnow() {
+            snowflakes.forEach(s => {
+                s.y += s.speed;
+                s.x += s.drift;
+                if (s.y > canvas.height) { s.y = -5; s.x = Math.random() * canvas.width; }
+                if (s.x > canvas.width) s.x = 0;
+                if (s.x < 0) s.x = canvas.width;
+
+                ctx.fillStyle = 'rgba(200, 220, 255, 0.6)';
+                ctx.beginPath();
+                ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+                ctx.fill();
+            });
+        }
+
+        function drawSnowGround() {
+            // Snowy background with subtle mountain shapes
+            ctx.fillStyle = '#e8f4f8';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Distant mountains
+            ctx.fillStyle = '#c8dce8';
+            ctx.beginPath();
+            ctx.moveTo(0, 80);
+            ctx.lineTo(80, 30);
+            ctx.lineTo(150, 65);
+            ctx.lineTo(250, 15);
+            ctx.lineTo(350, 55);
+            ctx.lineTo(450, 20);
+            ctx.lineTo(550, 50);
+            ctx.lineTo(600, 35);
+            ctx.lineTo(600, 80);
+            ctx.fill();
+
+            // Ski tracks (faint diagonal lines)
+            ctx.strokeStyle = 'rgba(180, 200, 220, 0.3)';
+            ctx.lineWidth = 1;
+            for (let i = -600; i < 600; i += 40) {
+                ctx.beginPath();
+                ctx.moveTo(i, 0);
+                ctx.lineTo(i + 600, 600);
+                ctx.stroke();
+            }
+
+            // Grid lines (very subtle)
+            ctx.strokeStyle = 'rgba(180, 200, 220, 0.15)';
+            for (let x = 0; x < COLS; x++) {
+                ctx.beginPath();
+                ctx.moveTo(x * GRID, 0);
+                ctx.lineTo(x * GRID, canvas.height);
+                ctx.stroke();
+            }
+            for (let y = 0; y < ROWS; y++) {
+                ctx.beginPath();
+                ctx.moveTo(0, y * GRID);
+                ctx.lineTo(canvas.width, y * GRID);
+                ctx.stroke();
+            }
+        }
+
+        function drawSkier(x, y, size, isHead) {
+            const cx = x * GRID + GRID / 2;
+            const cy = y * GRID + GRID / 2;
+            const s = size * 0.45;
+
+            if (isHead) {
+                // Skier body (head segment)
+                // Body
+                ctx.fillStyle = '#2196F3';
+                ctx.fillRect(cx - s * 0.6, cy - s * 0.4, s * 1.2, s * 1.0);
+
+                // Head
+                ctx.fillStyle = '#FFD4A8';
+                ctx.beginPath();
+                ctx.arc(cx, cy - s * 0.6, s * 0.45, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Ski goggles
+                ctx.fillStyle = '#FF5722';
+                ctx.fillRect(cx - s * 0.4, cy - s * 0.75, s * 0.8, s * 0.25);
+                ctx.fillStyle = '#333';
+                ctx.fillRect(cx - s * 0.35, cy - s * 0.7, s * 0.3, s * 0.15);
+                ctx.fillRect(cx + s * 0.05, cy - s * 0.7, s * 0.3, s * 0.15);
+
+                // Ski hat
+                ctx.fillStyle = '#F44336';
+                ctx.beginPath();
+                ctx.arc(cx, cy - s * 0.85, s * 0.4, Math.PI, 0);
+                ctx.fill();
+                ctx.fillStyle = '#fff';
+                ctx.beginPath();
+                ctx.arc(cx, cy - s * 1.1, s * 0.15, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Skis
+                ctx.fillStyle = '#1565C0';
+                ctx.fillRect(cx - s * 0.9, cy + s * 0.6, s * 1.8, s * 0.2);
+            } else {
+                // Body segments - ski trail / body
+                ctx.fillStyle = '#42A5F5';
+                ctx.beginPath();
+                ctx.arc(cx, cy, s * 0.7, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.fillStyle = '#64B5F6';
+                ctx.beginPath();
+                ctx.arc(cx - s * 0.15, cy - s * 0.15, s * 0.3, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        function drawBaseball(x, y) {
+            const cx = x * GRID + GRID / 2;
+            const cy = y * GRID + GRID / 2;
+            const r = GRID * 0.4;
+
+            // Ball
+            ctx.fillStyle = '#FFFFFF';
+            ctx.beginPath();
+            ctx.arc(cx, cy, r, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = '#ccc';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+
+            // Stitching
+            ctx.strokeStyle = '#FF0000';
+            ctx.lineWidth = 1.5;
+
+            ctx.beginPath();
+            ctx.arc(cx - r * 0.3, cy, r * 0.6, -0.8, 0.8);
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.arc(cx + r * 0.3, cy, r * 0.6, Math.PI - 0.8, Math.PI + 0.8);
+            ctx.stroke();
+
+            // Glow effect
+            ctx.shadowColor = '#FFD700';
+            ctx.shadowBlur = 10;
+            ctx.strokeStyle = 'rgba(255, 215, 0, 0.3)';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(cx, cy, r + 3, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+        }
+
+        function drawGameOver() {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            ctx.fillStyle = '#FF5252';
+            ctx.font = 'bold 48px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('Wipeout!', canvas.width / 2, canvas.height / 2 - 20);
+
+            ctx.fillStyle = '#fff';
+            ctx.font = '24px sans-serif';
+            ctx.fillText('Score: ' + score, canvas.width / 2, canvas.height / 2 + 20);
+
+            ctx.fillStyle = '#aaa';
+            ctx.font = '18px sans-serif';
+            ctx.fillText('Restarting...', canvas.width / 2, canvas.height / 2 + 55);
+        }
+
+        function draw() {
+            drawSnowGround();
+            drawSnow();
+
+            // Draw food (baseball)
+            drawBaseball(food.x, food.y);
+
+            // Draw snake (skier)
+            for (let i = snake.length - 1; i >= 0; i--) {
+                drawSkier(snake[i].x, snake[i].y, GRID, i === 0);
+            }
+
+            if (gameOver) {
+                drawGameOver();
+            }
+
+            if (!started && !gameOver) {
+                ctx.fillStyle = 'rgba(0,0,0,0.3)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = '#fff';
+                ctx.font = 'bold 32px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('Press an arrow key!', canvas.width / 2, canvas.height / 2);
+                ctx.font = '20px sans-serif';
+                ctx.fillText('Collect baseballs, don\'t crash!', canvas.width / 2, canvas.height / 2 + 35);
+            }
+
+            requestAnimationFrame(draw);
+        }
+
+        // Controls
+        document.addEventListener('keydown', (e) => {
+            if (!['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) return;
+            e.preventDefault();
+
+            if (!started && !gameOver) {
+                switch (e.key) {
+                    case 'ArrowUp':    nextDir = { x: 0, y: -1 }; break;
+                    case 'ArrowDown':  nextDir = { x: 0, y: 1 }; break;
+                    case 'ArrowLeft':  nextDir = { x: -1, y: 0 }; break;
+                    case 'ArrowRight': nextDir = { x: 1, y: 0 }; break;
+                }
+                dir = { ...nextDir };
+                startGame();
+                return;
+            }
+
+            switch (e.key) {
+                case 'ArrowUp':    if (dir.y !== 1)  nextDir = { x: 0, y: -1 }; break;
+                case 'ArrowDown':  if (dir.y !== -1) nextDir = { x: 0, y: 1 }; break;
+                case 'ArrowLeft':  if (dir.x !== 1)  nextDir = { x: -1, y: 0 }; break;
+                case 'ArrowRight': if (dir.x !== -1) nextDir = { x: 1, y: 0 }; break;
+            }
+        });
+
+        // Start
+        init();
+        draw();
+    </script>
+</body>
+</html>
