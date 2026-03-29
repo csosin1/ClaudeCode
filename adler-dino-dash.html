@@ -604,15 +604,17 @@
 
             ctx.restore();
 
-            // Danger glow
-            ctx.shadowColor = '#FF0000';
-            ctx.shadowBlur = 8;
-            ctx.strokeStyle = 'rgba(255,0,0,0.15)';
-            ctx.lineWidth = 2;
+            // Danger glow (red circle around knife, no shadow)
+            ctx.strokeStyle = 'rgba(255,0,0,0.25)';
+            ctx.lineWidth = 3;
             ctx.beginPath();
             ctx.arc(o.x, o.y, 18, 0, Math.PI * 2);
             ctx.stroke();
-            ctx.shadowBlur = 0;
+            ctx.strokeStyle = 'rgba(255,0,0,0.1)';
+            ctx.lineWidth = 6;
+            ctx.beginPath();
+            ctx.arc(o.x, o.y, 22, 0, Math.PI * 2);
+            ctx.stroke();
         }
 
         function drawCoin(c) {
@@ -655,18 +657,23 @@
         }
 
         function drawParticles() {
-            particles = particles.filter(p => p.life > 0);
-            particles.forEach(p => {
+            let alive = [];
+            for (let i = 0; i < particles.length; i++) {
+                const p = particles[i];
                 p.x += p.vx;
                 p.y += p.vy;
                 p.vy += 0.1;
                 p.life -= p.decay;
+                if (p.life <= 0) continue;
+                alive.push(p);
+                const radius = Math.max(0.1, p.size * p.life);
                 ctx.globalAlpha = p.life;
                 ctx.fillStyle = p.color;
                 ctx.beginPath();
-                ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+                ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
                 ctx.fill();
-            });
+            }
+            particles = alive;
             ctx.globalAlpha = 1;
         }
 
@@ -857,41 +864,54 @@
         }
 
         function draw() {
-            drawBackground();
+            try {
+                ctx.save();
+                ctx.globalAlpha = 1;
+                ctx.shadowBlur = 0;
+                ctx.shadowColor = 'transparent';
 
-            // Draw coins
-            coins.forEach(c => drawCoin(c));
+                drawBackground();
 
-            // Draw obstacles
-            obstacles.forEach(o => {
-                if (o.kind === 'knife') drawKnife(o);
-                else drawDino(o);
-            });
+                // Draw coins
+                coins.forEach(c => drawCoin(c));
 
-            // Draw player
-            drawAdler();
+                // Draw obstacles
+                obstacles.forEach(o => {
+                    if (o.kind === 'knife') drawKnife(o);
+                    else drawDino(o);
+                });
 
-            // Draw particles
-            drawParticles();
+                // Draw player
+                drawAdler();
 
-            // Warning label in corner
-            ctx.fillStyle = 'rgba(255,0,0,0.5)';
-            ctx.font = 'bold 11px sans-serif';
-            ctx.textAlign = 'right';
-            const knifeCount = obstacles.filter(o => o.kind === 'knife').length;
-            if (knifeCount > 0) {
-                ctx.fillText('KNIVES: ' + knifeCount, W - 15, groundY + 25);
+                // Draw particles
+                drawParticles();
+
+                // Warning label in corner
+                ctx.fillStyle = 'rgba(255,0,0,0.5)';
+                ctx.font = 'bold 11px sans-serif';
+                ctx.textAlign = 'right';
+                const knifeCount = obstacles.filter(o => o.kind === 'knife').length;
+                if (knifeCount > 0) {
+                    ctx.fillText('KNIVES: ' + knifeCount, W - 15, groundY + 25);
+                }
+                const dinoCount = obstacles.filter(o => o.kind === 'dino').length;
+                if (dinoCount > 0) {
+                    ctx.fillStyle = 'rgba(76,175,80,0.7)';
+                    ctx.fillText('DINOS: ' + dinoCount, W - 15, groundY + 40);
+                }
+
+                if (!started && !gameOver) drawStartScreen();
+                if (gameOver) drawGameOverScreen();
+
+                ctx.restore();
+                update();
+            } catch(e) {
+                // Recover from any drawing errors
+                ctx.restore();
+                ctx.globalAlpha = 1;
+                ctx.shadowBlur = 0;
             }
-            const dinoCount = obstacles.filter(o => o.kind === 'dino').length;
-            if (dinoCount > 0) {
-                ctx.fillStyle = 'rgba(76,175,80,0.7)';
-                ctx.fillText('DINOS: ' + dinoCount, W - 15, groundY + 40);
-            }
-
-            if (!started && !gameOver) drawStartScreen();
-            if (gameOver) drawGameOverScreen();
-
-            update();
             requestAnimationFrame(draw);
         }
 
