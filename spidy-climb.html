@@ -1,0 +1,708 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spidy Climb - Sawyer's Game!</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0a2e;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    font-family: 'Segoe UI', Arial, sans-serif;
+    overflow: hidden;
+  }
+  #gameWrapper {
+    position: relative;
+    border: 3px solid #ff1744;
+    border-radius: 8px;
+    box-shadow: 0 0 30px rgba(255, 23, 68, 0.5), 0 0 60px rgba(255, 23, 68, 0.2);
+  }
+  canvas { display: block; background: #1a1a3e; border-radius: 5px; }
+  #startScreen, #deathScreen {
+    position: absolute;
+    top: 0; left: 0; width: 100%; height: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    background: rgba(10, 10, 46, 0.92);
+    z-index: 10;
+    border-radius: 5px;
+  }
+  #startScreen h1 {
+    font-size: 52px;
+    color: #ff1744;
+    text-shadow: 0 0 20px rgba(255, 23, 68, 0.7);
+    margin-bottom: 10px;
+  }
+  #startScreen .subtitle {
+    font-size: 22px;
+    color: #64b5f6;
+    margin-bottom: 30px;
+  }
+  #startScreen .instructions {
+    color: #aaa;
+    font-size: 16px;
+    line-height: 1.8;
+    text-align: center;
+    margin-bottom: 30px;
+  }
+  #startScreen .instructions span { color: #fff; font-weight: bold; }
+  .btn {
+    padding: 15px 50px;
+    font-size: 24px;
+    font-weight: bold;
+    color: #fff;
+    background: #ff1744;
+    border: none;
+    border-radius: 50px;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    box-shadow: 0 0 20px rgba(255, 23, 68, 0.5);
+    transition: all 0.2s;
+  }
+  .btn:hover {
+    background: #ff5252;
+    box-shadow: 0 0 30px rgba(255, 23, 68, 0.8);
+    transform: scale(1.05);
+  }
+  #deathScreen { display: none; }
+  #deathScreen h2 {
+    font-size: 42px;
+    color: #ff1744;
+    text-shadow: 0 0 20px rgba(255, 23, 68, 0.7);
+    margin-bottom: 10px;
+  }
+  #deathMessage {
+    font-size: 20px;
+    color: #ffd54f;
+    margin: 15px 30px;
+    text-align: center;
+    line-height: 1.5;
+  }
+  #deathScore {
+    font-size: 26px;
+    color: #64b5f6;
+    margin-bottom: 5px;
+  }
+  #deathHighScore {
+    font-size: 18px;
+    color: #aaa;
+    margin-bottom: 25px;
+  }
+  #hud {
+    position: absolute;
+    top: 10px; left: 15px; right: 15px;
+    display: flex;
+    justify-content: space-between;
+    z-index: 5;
+    pointer-events: none;
+  }
+  #hud span {
+    color: #fff;
+    font-size: 18px;
+    font-weight: bold;
+    text-shadow: 0 0 8px rgba(0,0,0,0.8);
+  }
+  #levelBanner {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 40px;
+    font-weight: bold;
+    color: #ffd54f;
+    text-shadow: 0 0 20px rgba(255, 213, 79, 0.8);
+    z-index: 6;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+</style>
+</head>
+<body>
+<div id="gameWrapper">
+  <canvas id="game"></canvas>
+  <div id="hud">
+    <span id="scoreDisplay">Score: 0</span>
+    <span id="levelDisplay">Level: 1</span>
+    <span id="livesDisplay">Lives: ❤️❤️❤️</span>
+  </div>
+  <div id="levelBanner"></div>
+  <div id="startScreen">
+    <h1>🕷️ SPIDY CLIMB 🕷️</h1>
+    <div class="subtitle">Sawyer's Super Spider Adventure!</div>
+    <div class="instructions">
+      <span>⬆️ Up Arrow</span> - Climb Up<br>
+      <span>⬇️ Down Arrow</span> - Climb Down<br>
+      <span>⬅️ Left Arrow</span> - Move Left<br>
+      <span>➡️ Right Arrow</span> - Move Right<br><br>
+      Dodge villains & obstacles!<br>
+      Collect webs for bonus points! 🕸️
+    </div>
+    <button class="btn" onclick="startGame()">SWING IN!</button>
+  </div>
+  <div id="deathScreen">
+    <h2>OH NO!</h2>
+    <div id="deathMessage"></div>
+    <div id="deathScore"></div>
+    <div id="deathHighScore"></div>
+    <button class="btn" onclick="startGame()">TRY AGAIN!</button>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const W = 480, H = 640;
+canvas.width = W;
+canvas.height = H;
+
+// Game state
+let spidy, obstacles, collectibles, particles, buildings;
+let score, level, lives, highScore, gameRunning, frameCount;
+let keys = {};
+let levelBannerTimer = 0;
+let invincibleTimer = 0;
+let scrollSpeed, baseScrollSpeed;
+
+const deathMessages = [
+  "Sawyer! Even Spider-Man falls off buildings sometimes... but usually on PURPOSE! 😂",
+  "Hey Sawyer, was that a spider or a splat-er? 🕷️💥",
+  "Sawyer's spidy-sense was on a coffee break! ☕🕷️",
+  "Whoa Sawyer! That villain didn't even break a sweat! You got this next time! 💪",
+  "Sawyer, that building was clearly greased... totally not your fault! 😉",
+  "Plot twist: Sawyer's Spidy forgot his sticky gloves at home! 🧤",
+  "Sawyer! Quick, tell everyone that was just a practice round! 🤫",
+  "Even superheroes need a warm-up, right Sawyer? Let's call that one a warm-up! 🔥",
+  "Sawyer's Spidy just set the world record for... fastest fall! 🏆😂",
+  "Oops! Sawyer, your Spidy was too busy being awesome and forgot to dodge! 😎",
+  "Breaking News: Sawyer's Spidy discovers gravity is REAL! 📰",
+  "Don't worry Sawyer, that villain cheated! I saw it! (I didn't see it) 👀",
+  "Sawyer! Your web-shooters must have been out of web-juice! 🧃🕸️",
+  "Legend says Sawyer's Spidy will return stronger... like RIGHT NOW! ⚡",
+  "Hey Sawyer, that obstacle came out of NOWHERE! ...ok it was there the whole time 😅",
+];
+
+const villainTypes = [
+  { name: 'Goblin', color: '#4caf50', emoji: '👺', speed: 1.5 },
+  { name: 'Venom', color: '#212121', emoji: '👾', speed: 2 },
+  { name: 'Doc Ock', color: '#ff9800', emoji: '🐙', speed: 1.2 },
+  { name: 'Electro', color: '#ffeb3b', emoji: '⚡', speed: 2.5 },
+  { name: 'Rhino', color: '#9e9e9e', emoji: '🦏', speed: 3 },
+];
+
+function initBuildings() {
+  buildings = [];
+  for (let i = 0; i < 8; i++) {
+    buildings.push({
+      x: Math.random() * W,
+      y: i * 100 - 100,
+      w: 60 + Math.random() * 80,
+      h: 600,
+      color: `hsl(${220 + Math.random() * 30}, ${20 + Math.random() * 20}%, ${15 + Math.random() * 15}%)`,
+      windows: Math.random() > 0.3,
+    });
+  }
+}
+
+function resetGame() {
+  spidy = {
+    x: W / 2,
+    y: H - 100,
+    w: 30,
+    h: 30,
+    vx: 0,
+    vy: 0,
+    speed: 4,
+    frame: 0,
+  };
+  obstacles = [];
+  collectibles = [];
+  particles = [];
+  score = 0;
+  level = 1;
+  lives = 3;
+  frameCount = 0;
+  baseScrollSpeed = 1;
+  scrollSpeed = baseScrollSpeed;
+  invincibleTimer = 0;
+  initBuildings();
+}
+
+function startGame() {
+  document.getElementById('startScreen').style.display = 'none';
+  document.getElementById('deathScreen').style.display = 'none';
+  resetGame();
+  gameRunning = true;
+  showLevelBanner("GO SAWYER!");
+  requestAnimationFrame(gameLoop);
+}
+
+function showLevelBanner(text) {
+  const banner = document.getElementById('levelBanner');
+  banner.textContent = text;
+  banner.style.opacity = '1';
+  levelBannerTimer = 90;
+}
+
+function spawnObstacle() {
+  const lvl = Math.min(level, 10);
+  const roll = Math.random();
+
+  if (roll < 0.4) {
+    // Static obstacle (girder, satellite dish, etc.)
+    const side = Math.random() < 0.5 ? 0 : 1;
+    obstacles.push({
+      type: 'static',
+      x: side === 0 ? Math.random() * (W * 0.4) : W * 0.6 + Math.random() * (W * 0.4) - 40,
+      y: -40,
+      w: 50 + Math.random() * 40,
+      h: 15 + Math.random() * 10,
+      color: '#78909c',
+      emoji: ['🏗️', '📡', '🪟', '🧱'][Math.floor(Math.random() * 4)],
+    });
+  } else if (roll < 0.75) {
+    // Moving villain
+    const vType = villainTypes[Math.min(Math.floor(Math.random() * (1 + lvl * 0.4)), villainTypes.length - 1)];
+    const side = Math.random() < 0.5;
+    obstacles.push({
+      type: 'villain',
+      x: side ? -30 : W + 30,
+      y: -30 - Math.random() * 100,
+      w: 35,
+      h: 35,
+      vx: (side ? 1 : -1) * vType.speed * (0.8 + Math.random() * 0.4 + lvl * 0.1),
+      color: vType.color,
+      emoji: vType.emoji,
+      name: vType.name,
+    });
+  } else {
+    // Dropping obstacle
+    obstacles.push({
+      type: 'dropping',
+      x: 30 + Math.random() * (W - 60),
+      y: -30,
+      w: 25,
+      h: 25,
+      vy: 1.5 + lvl * 0.3,
+      color: '#e53935',
+      emoji: ['💣', '🪨', '🔥'][Math.floor(Math.random() * 3)],
+    });
+  }
+}
+
+function spawnCollectible() {
+  collectibles.push({
+    x: 30 + Math.random() * (W - 60),
+    y: -20,
+    w: 20,
+    h: 20,
+    type: Math.random() < 0.8 ? 'web' : 'heart',
+    bobOffset: Math.random() * Math.PI * 2,
+  });
+}
+
+function addParticles(x, y, color, count) {
+  for (let i = 0; i < count; i++) {
+    particles.push({
+      x, y,
+      vx: (Math.random() - 0.5) * 6,
+      vy: (Math.random() - 0.5) * 6,
+      life: 30 + Math.random() * 20,
+      maxLife: 50,
+      color,
+      size: 2 + Math.random() * 4,
+    });
+  }
+}
+
+function drawSpidy() {
+  const { x, y, w, h } = spidy;
+  const blinking = invincibleTimer > 0 && Math.floor(frameCount / 4) % 2;
+  if (blinking) return;
+
+  ctx.save();
+  ctx.translate(x, y);
+
+  // Body (red suit)
+  ctx.fillStyle = '#e53935';
+  ctx.beginPath();
+  ctx.ellipse(0, 0, w / 2, h / 2, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Web pattern on suit
+  ctx.strokeStyle = '#1a1a1a';
+  ctx.lineWidth = 1;
+  // Horizontal lines
+  for (let i = -2; i <= 2; i++) {
+    ctx.beginPath();
+    ctx.moveTo(-w / 2, i * 5);
+    ctx.lineTo(w / 2, i * 5);
+    ctx.stroke();
+  }
+  // Diagonal lines
+  for (let i = -2; i <= 2; i++) {
+    ctx.beginPath();
+    ctx.moveTo(0, -h / 2);
+    ctx.lineTo(i * 8, h / 2);
+    ctx.stroke();
+  }
+
+  // Eyes (big white spider eyes)
+  ctx.fillStyle = '#fff';
+  // Left eye
+  ctx.beginPath();
+  ctx.ellipse(-6, -4, 6, 8, -0.2, 0, Math.PI * 2);
+  ctx.fill();
+  // Right eye
+  ctx.beginPath();
+  ctx.ellipse(6, -4, 6, 8, 0.2, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Eye outlines
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.ellipse(-6, -4, 6, 8, -0.2, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.ellipse(6, -4, 6, 8, 0.2, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // Arms/legs (animated)
+  ctx.strokeStyle = '#e53935';
+  ctx.lineWidth = 3;
+  const wave = Math.sin(frameCount * 0.15) * 5;
+  // Left arm
+  ctx.beginPath();
+  ctx.moveTo(-w/2 + 2, -3);
+  ctx.lineTo(-w/2 - 8, -12 + wave);
+  ctx.stroke();
+  // Right arm
+  ctx.beginPath();
+  ctx.moveTo(w/2 - 2, -3);
+  ctx.lineTo(w/2 + 8, -12 - wave);
+  ctx.stroke();
+  // Left leg
+  ctx.beginPath();
+  ctx.moveTo(-w/2 + 5, h/2 - 5);
+  ctx.lineTo(-w/2 - 3, h/2 + 8 - wave);
+  ctx.stroke();
+  // Right leg
+  ctx.beginPath();
+  ctx.moveTo(w/2 - 5, h/2 - 5);
+  ctx.lineTo(w/2 + 3, h/2 + 8 + wave);
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+function drawBuildings() {
+  buildings.forEach(b => {
+    ctx.fillStyle = b.color;
+    ctx.fillRect(b.x, b.y, b.w, b.h);
+
+    if (b.windows) {
+      const winSize = 8;
+      const gap = 18;
+      ctx.fillStyle = 'rgba(255, 235, 59, 0.3)';
+      for (let wy = b.y + 15; wy < b.y + b.h; wy += gap) {
+        for (let wx = b.x + 10; wx < b.x + b.w - 10; wx += gap) {
+          if (wy > 0 && wy < H) {
+            ctx.fillRect(wx, wy, winSize, winSize);
+          }
+        }
+      }
+    }
+
+    // Building edge highlight
+    ctx.fillStyle = 'rgba(255,255,255,0.05)';
+    ctx.fillRect(b.x, b.y, 3, b.h);
+  });
+}
+
+function drawStars() {
+  ctx.fillStyle = '#fff';
+  for (let i = 0; i < 50; i++) {
+    const sx = (i * 97 + frameCount * 0.02 * (i % 3 + 1)) % W;
+    const sy = (i * 151) % H;
+    const size = (i % 3 === 0) ? 2 : 1;
+    const alpha = 0.3 + 0.3 * Math.sin(frameCount * 0.03 + i);
+    ctx.globalAlpha = alpha;
+    ctx.fillRect(sx, sy, size, size);
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawObstacles() {
+  obstacles.forEach(o => {
+    if (o.type === 'static') {
+      ctx.fillStyle = o.color;
+      ctx.fillRect(o.x, o.y, o.w, o.h);
+      ctx.fillStyle = 'rgba(255,255,255,0.1)';
+      ctx.fillRect(o.x, o.y, o.w, 3);
+      ctx.font = '18px serif';
+      ctx.fillText(o.emoji, o.x + o.w / 2 - 9, o.y - 3);
+    } else if (o.type === 'villain') {
+      // Villain glow
+      ctx.shadowColor = o.color;
+      ctx.shadowBlur = 15;
+      ctx.font = '30px serif';
+      ctx.fillText(o.emoji, o.x - 15, o.y + 10);
+      ctx.shadowBlur = 0;
+    } else if (o.type === 'dropping') {
+      ctx.font = '22px serif';
+      ctx.fillText(o.emoji, o.x - 11, o.y + 8);
+      // Warning line
+      ctx.strokeStyle = 'rgba(255, 0, 0, 0.2)';
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(o.x, o.y + 20);
+      ctx.lineTo(o.x, H);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  });
+}
+
+function drawCollectibles() {
+  collectibles.forEach(c => {
+    const bob = Math.sin(frameCount * 0.08 + c.bobOffset) * 3;
+    ctx.font = '18px serif';
+    if (c.type === 'web') {
+      ctx.fillText('🕸️', c.x - 9, c.y + 9 + bob);
+    } else {
+      ctx.fillText('❤️', c.x - 9, c.y + 9 + bob);
+    }
+    // Sparkle
+    ctx.fillStyle = `rgba(255, 255, 255, ${0.3 + 0.3 * Math.sin(frameCount * 0.1 + c.bobOffset)})`;
+    ctx.fillRect(c.x - 1 + Math.sin(frameCount * 0.15) * 5, c.y - 5 + bob, 2, 2);
+  });
+}
+
+function drawParticles() {
+  particles.forEach(p => {
+    ctx.globalAlpha = p.life / p.maxLife;
+    ctx.fillStyle = p.color;
+    ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+  });
+  ctx.globalAlpha = 1;
+}
+
+function drawWebStrings() {
+  // Decorative web strings from spidy when moving
+  if (keys['ArrowUp'] || keys['ArrowLeft'] || keys['ArrowRight']) {
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(spidy.x, spidy.y + spidy.h / 2);
+    ctx.quadraticCurveTo(
+      spidy.x + Math.sin(frameCount * 0.1) * 20,
+      spidy.y + 40,
+      spidy.x + Math.sin(frameCount * 0.05) * 10,
+      Math.min(spidy.y + 80, H)
+    );
+    ctx.stroke();
+  }
+}
+
+function rectCollide(a, b) {
+  return a.x - a.w/2 < b.x + b.w/2 &&
+         a.x + a.w/2 > b.x - b.w/2 &&
+         a.y - a.h/2 < b.y + b.h/2 &&
+         a.y + a.h/2 > b.y - b.h/2;
+}
+
+function obstacleHitbox(o) {
+  if (o.type === 'static') {
+    return { x: o.x + o.w/2, y: o.y + o.h/2, w: o.w, h: o.h };
+  }
+  return { x: o.x, y: o.y, w: o.w, h: o.h };
+}
+
+function update() {
+  frameCount++;
+
+  // Difficulty scaling
+  const newLevel = Math.floor(score / 500) + 1;
+  if (newLevel > level) {
+    level = newLevel;
+    showLevelBanner(`LEVEL ${level}!`);
+    baseScrollSpeed = 1 + (level - 1) * 0.3;
+  }
+  scrollSpeed = baseScrollSpeed;
+
+  // Move spidy
+  const spd = spidy.speed;
+  if (keys['ArrowUp']) spidy.y -= spd;
+  if (keys['ArrowDown']) spidy.y += spd * 0.7;
+  if (keys['ArrowLeft']) spidy.x -= spd;
+  if (keys['ArrowRight']) spidy.x += spd;
+
+  // Keep in bounds
+  spidy.x = Math.max(spidy.w / 2, Math.min(W - spidy.w / 2, spidy.x));
+  spidy.y = Math.max(spidy.h / 2, Math.min(H - spidy.h / 2, spidy.y));
+
+  // Scroll everything down
+  score += Math.ceil(scrollSpeed);
+
+  // Scroll buildings
+  buildings.forEach(b => {
+    b.y += scrollSpeed;
+    if (b.y > H + 100) {
+      b.y = -500 - Math.random() * 200;
+      b.x = Math.random() * W;
+      b.w = 60 + Math.random() * 80;
+    }
+  });
+
+  // Spawn obstacles
+  const spawnRate = Math.max(25, 70 - level * 5);
+  if (frameCount % spawnRate === 0) spawnObstacle();
+  if (frameCount % 120 === 0) spawnCollectible();
+
+  // Update obstacles
+  obstacles.forEach(o => {
+    o.y = (o.y || 0) + scrollSpeed;
+    if (o.type === 'villain') {
+      o.x += o.vx || 0;
+      // Bounce villains
+      if (o.x < -50 || o.x > W + 50) {
+        o.vx = -(o.vx || 0);
+      }
+    }
+    if (o.type === 'dropping') {
+      o.y += o.vy || 0;
+    }
+  });
+
+  // Update collectibles
+  collectibles.forEach(c => { c.y += scrollSpeed; });
+
+  // Collision detection
+  if (invincibleTimer > 0) {
+    invincibleTimer--;
+  } else {
+    for (let i = obstacles.length - 1; i >= 0; i--) {
+      const hb = obstacleHitbox(obstacles[i]);
+      if (rectCollide(spidy, hb)) {
+        addParticles(spidy.x, spidy.y, '#ff1744', 15);
+        lives--;
+        obstacles.splice(i, 1);
+        invincibleTimer = 90;
+        if (lives <= 0) {
+          gameOver();
+          return;
+        }
+        break;
+      }
+    }
+  }
+
+  // Collectible pickup
+  for (let i = collectibles.length - 1; i >= 0; i--) {
+    const c = collectibles[i];
+    const dist = Math.hypot(spidy.x - c.x, spidy.y - c.y);
+    if (dist < 22) {
+      if (c.type === 'web') {
+        score += 100;
+        addParticles(c.x, c.y, '#ffffff', 8);
+      } else if (c.type === 'heart') {
+        lives = Math.min(lives + 1, 5);
+        addParticles(c.x, c.y, '#ff4081', 10);
+      }
+      collectibles.splice(i, 1);
+    }
+  }
+
+  // Cleanup off-screen
+  obstacles = obstacles.filter(o => o.y < H + 60 && o.y > -200);
+  collectibles = collectibles.filter(c => c.y < H + 40);
+
+  // Update particles
+  particles.forEach(p => {
+    p.x += p.vx;
+    p.y += p.vy;
+    p.life--;
+    p.vx *= 0.96;
+    p.vy *= 0.96;
+  });
+  particles = particles.filter(p => p.life > 0);
+
+  // Level banner fade
+  if (levelBannerTimer > 0) {
+    levelBannerTimer--;
+    if (levelBannerTimer === 0) {
+      document.getElementById('levelBanner').style.opacity = '0';
+    }
+  }
+
+  // Update HUD
+  document.getElementById('scoreDisplay').textContent = `Score: ${score}`;
+  document.getElementById('levelDisplay').textContent = `Level: ${level}`;
+  document.getElementById('livesDisplay').textContent = 'Lives: ' + '❤️'.repeat(lives);
+}
+
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+
+  // Night sky gradient
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, '#0a0a2e');
+  grad.addColorStop(0.5, '#1a1a4e');
+  grad.addColorStop(1, '#0d0d3a');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+
+  drawStars();
+  drawBuildings();
+  drawWebStrings();
+  drawObstacles();
+  drawCollectibles();
+  drawParticles();
+  drawSpidy();
+}
+
+function gameLoop() {
+  if (!gameRunning) return;
+  update();
+  draw();
+  requestAnimationFrame(gameLoop);
+}
+
+function gameOver() {
+  gameRunning = false;
+
+  highScore = Math.max(score, parseInt(localStorage.getItem('spidyHighScore') || '0'));
+  localStorage.setItem('spidyHighScore', highScore);
+
+  const msg = deathMessages[Math.floor(Math.random() * deathMessages.length)];
+  document.getElementById('deathMessage').textContent = msg;
+  document.getElementById('deathScore').textContent = `Score: ${score}`;
+  document.getElementById('deathHighScore').textContent =
+    score >= highScore ? '🎉 NEW HIGH SCORE! 🎉' : `High Score: ${highScore}`;
+  document.getElementById('deathScreen').style.display = 'flex';
+}
+
+// Controls
+document.addEventListener('keydown', e => {
+  if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) {
+    e.preventDefault();
+    keys[e.key] = true;
+  }
+});
+document.addEventListener('keyup', e => {
+  keys[e.key] = false;
+});
+
+// Init high score
+highScore = parseInt(localStorage.getItem('spidyHighScore') || '0');
+</script>
+</body>
+</html>
