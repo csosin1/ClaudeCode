@@ -40,9 +40,21 @@ def fetch_url(url: str, max_retries: int = 4, as_json: bool = False) -> Optional
             if as_json:
                 return resp.json()
             return resp
+        except requests.exceptions.HTTPError as e:
+            # Don't retry 404s — the URL is wrong, retrying won't help
+            if resp.status_code == 404:
+                logger.debug(f"404 Not Found: {url}")
+                return None
+            if attempt < max_retries:
+                wait = 2 ** (attempt + 1)
+                logger.warning(f"Request failed ({e}), retrying in {wait}s... (attempt {attempt + 1}/{max_retries})")
+                time.sleep(wait)
+            else:
+                logger.error(f"Request failed after {max_retries} retries: {url} - {e}")
+                return None
         except requests.exceptions.RequestException as e:
             if attempt < max_retries:
-                wait = 2 ** (attempt + 1)  # 2, 4, 8, 16 seconds
+                wait = 2 ** (attempt + 1)
                 logger.warning(f"Request failed ({e}), retrying in {wait}s... (attempt {attempt + 1}/{max_retries})")
                 time.sleep(wait)
             else:
@@ -68,7 +80,7 @@ def get_filing_index(accession_number: str, cik: str) -> Optional[dict]:
     """
     # Accession number format: 0001234567-21-012345 -> 0001234567/21/012345
     acc_no_dashes = accession_number.replace("-", "")
-    url = f"https://www.sec.gov/Archives/edgar/data/{cik.lstrip('0')}/{acc_no_dashes}/{accession_number}-index.json"
+    url = f"https://www.sec.gov/Archives/edgar/data/{cik.lstrip('0')}/{acc_no_dashes}/index.json"
     logger.info(f"Fetching filing index for {accession_number}")
     return fetch_url(url, as_json=True)
 
@@ -79,7 +91,7 @@ def get_filing_page(accession_number: str, cik: str) -> Optional[str]:
     Returns HTML content of the filing index page.
     """
     acc_no_dashes = accession_number.replace("-", "")
-    url = f"https://www.sec.gov/Archives/edgar/data/{cik.lstrip('0')}/{acc_no_dashes}/{accession_number}-index.htm"
+    url = f"https://www.sec.gov/Archives/edgar/data/{cik.lstrip('0')}/{acc_no_dashes}/index.htm"
     logger.info(f"Fetching filing page for {accession_number}")
     resp = fetch_url(url)
     return resp.text if resp else None

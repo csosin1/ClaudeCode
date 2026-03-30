@@ -66,13 +66,20 @@ def _extract_filings_from_submissions(submissions: dict) -> list[dict]:
 
 
 def _discover_exhibit_urls(accession_number: str, cik: str) -> dict:
-    """Fetch the filing index and extract exhibit URLs."""
+    """Fetch the filing index and extract exhibit URLs.
+
+    SEC EDGAR index format: /Archives/edgar/data/{cik}/{acc_no_nodashes}/index.json
+    The JSON contains a 'directory' with 'item' array listing all files.
+    """
     acc_no_dashes = accession_number.replace("-", "")
     cik_clean = cik.lstrip("0")
-    index_url = f"{ARCHIVES_BASE}/{cik_clean}/{acc_no_dashes}/{accession_number}-index.json"
 
+    # Try the correct EDGAR index URL format
+    index_url = f"{ARCHIVES_BASE}/{cik_clean}/{acc_no_dashes}/index.json"
     index_data = fetch_url(index_url, as_json=True)
+
     if not index_data:
+        # Fallback to HTML index page
         return _discover_exhibit_urls_html(accession_number, cik)
 
     result = {"absee_url": None, "servicer_cert_url": None}
@@ -82,9 +89,14 @@ def _discover_exhibit_urls(accession_number: str, cik: str) -> dict:
 
     for item in items:
         name = item.get("name", "").lower()
-        if "ex-102" in name or "ex102" in name or (name.endswith(".xml") and "absee" in name):
+        # EX-102 is the XML asset data file (auto loan data)
+        if "ex-102" in name or "ex102" in name or (name.endswith(".xml") and ("absee" in name or "ex102" in name)):
             result["absee_url"] = _build_doc_url(cik, accession_number, item["name"])
-        elif "ex-99" in name or "ex99" in name:
+        # EX-99.1 is the servicer certificate
+        elif ("ex-99" in name or "ex99" in name) and name.endswith(".htm"):
+            result["servicer_cert_url"] = _build_doc_url(cik, accession_number, item["name"])
+        # Also match "servicer" in the filename
+        elif "servicer" in name and name.endswith(".htm"):
             result["servicer_cert_url"] = _build_doc_url(cik, accession_number, item["name"])
 
     return result
