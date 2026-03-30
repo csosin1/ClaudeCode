@@ -1,10 +1,10 @@
-"""Discover all 10-D and ABS-EE filings for Carvana 2020-P1 from SEC EDGAR."""
+"""Discover all 10-D and ABS-EE filings for a Carvana deal from SEC EDGAR."""
 
 import logging
 import re
 from typing import Optional
 
-from carvana_abs.config import CIK, ARCHIVES_BASE
+from carvana_abs.config import ARCHIVES_BASE, DEALS, DEFAULT_DEAL
 from carvana_abs.ingestion.edgar_client import get_submissions, fetch_url
 from carvana_abs.db.schema import get_connection
 
@@ -19,10 +19,7 @@ def _build_doc_url(cik: str, accession_number: str, filename: str) -> str:
 
 
 def _extract_filings_from_submissions(submissions: dict) -> list[dict]:
-    """Extract all 10-D and ABS-EE filings from the submissions JSON.
-
-    Returns a list of dicts with accession_number, filing_type, filing_date.
-    """
+    """Extract all 10-D and ABS-EE filings from the submissions JSON."""
     filings = []
     recent = submissions.get("filings", {}).get("recent", {})
     if not recent:
@@ -68,18 +65,14 @@ def _extract_filings_from_submissions(submissions: dict) -> list[dict]:
     return filings
 
 
-def _discover_exhibit_urls(accession_number: str, cik: str = CIK) -> dict:
-    """Fetch the filing index and extract exhibit URLs.
-
-    Returns dict with keys: absee_url, servicer_cert_url
-    """
+def _discover_exhibit_urls(accession_number: str, cik: str) -> dict:
+    """Fetch the filing index and extract exhibit URLs."""
     acc_no_dashes = accession_number.replace("-", "")
     cik_clean = cik.lstrip("0")
     index_url = f"{ARCHIVES_BASE}/{cik_clean}/{acc_no_dashes}/{accession_number}-index.json"
 
     index_data = fetch_url(index_url, as_json=True)
     if not index_data:
-        # Try the HTML index as fallback
         return _discover_exhibit_urls_html(accession_number, cik)
 
     result = {"absee_url": None, "servicer_cert_url": None}
@@ -89,17 +82,15 @@ def _discover_exhibit_urls(accession_number: str, cik: str = CIK) -> dict:
 
     for item in items:
         name = item.get("name", "").lower()
-        # EX-102 is the XML asset data file
         if "ex-102" in name or "ex102" in name or (name.endswith(".xml") and "absee" in name):
             result["absee_url"] = _build_doc_url(cik, accession_number, item["name"])
-        # EX-99.1 is typically the servicer certificate
         elif "ex-99" in name or "ex99" in name:
             result["servicer_cert_url"] = _build_doc_url(cik, accession_number, item["name"])
 
     return result
 
 
-def _discover_exhibit_urls_html(accession_number: str, cik: str = CIK) -> dict:
+def _discover_exhibit_urls_html(accession_number: str, cik: str) -> dict:
     """Fallback: discover exhibit URLs by parsing the filing index HTML page."""
     from carvana_abs.ingestion.edgar_client import get_filing_page
 
@@ -108,7 +99,6 @@ def _discover_exhibit_urls_html(accession_number: str, cik: str = CIK) -> dict:
     if not html:
         return result
 
-    # Look for XML files (likely EX-102)
     xml_pattern = re.compile(r'href="([^"]*\.xml)"', re.IGNORECASE)
     for match in xml_pattern.finditer(html):
         url = match.group(1)
@@ -118,7 +108,6 @@ def _discover_exhibit_urls_html(accession_number: str, cik: str = CIK) -> dict:
             result["absee_url"] = url
             break
 
-    # Look for servicer cert (EX-99)
     ex99_pattern = re.compile(r'href="([^"]*(?:ex-?99|servicer)[^"]*\.htm[l]?)"', re.IGNORECASE)
     for match in ex99_pattern.finditer(html):
         url = match.group(1)
@@ -130,25 +119,25 @@ def _discover_exhibit_urls_html(accession_number: str, cik: str = CIK) -> dict:
     return result
 
 
-def discover_all_filings(db_path: Optional[str] = None) -> int:
-    """Discover all 10-D and ABS-EE filings and store metadata in the database.
+def discover_all_filings(deal: str = DEFAULT_DEAL, db_path: Optional[str] = None) -> int:
+    """Discover all 10-D and ABS-EE filings for a deal and store metadata.
 
     Returns the number of new filings discovered.
     """
-    from carvana_abs.db.schema import get_connection
-    from carvana_abs.config import DB_PATH
+    from carvana_abs.config import DB_PATH, get_deal_config
+
+    deal_cfg = get_deal_config(deal)
+    cik = deal_cfg["cik"]
 
     conn = get_connection(db_path or DB_PATH)
     cursor = conn.cursor()
 
-    # Get existing accession numbers to skip
-    cursor.execute("SELECT accession_number FROM filings")
+    cursor.execute("SELECT accession_number FROM filings WHERE deal = ?", (deal,))
     existing = {row["accession_number"] for row in cursor.fetchall()}
 
-    # Fetch submissions from SEC EDGAR
-    submissions = get_submissions(CIK)
+    submissions = get_submissions(cik)
     if not submissions:
-        logger.error("Failed to fetch submissions from SEC EDGAR")
+        logger.error(f"Failed to fetch submissions for {deal} (CIK {cik})")
         return 0
 
     all_filings = _extract_filings_from_submissions(submissions)
@@ -159,23 +148,22 @@ def discover_all_filings(db_path: Optional[str] = None) -> int:
         if acc in existing:
             continue
 
-        # For 10-D filings, try to discover exhibit URLs
         exhibit_urls = {"absee_url": None, "servicer_cert_url": None}
         if filing["filing_type"] in ("10-D", "10-D/A"):
-            exhibit_urls = _discover_exhibit_urls(acc)
+            exhibit_urls = _discover_exhibit_urls(acc, cik)
 
         filing_url = _build_doc_url(
-            CIK, acc,
+            cik, acc,
             filing.get("primary_document", f"{acc}.txt")
         )
 
         cursor.execute("""
             INSERT OR IGNORE INTO filings
-            (accession_number, filing_type, filing_date, filing_url,
+            (accession_number, deal, filing_type, filing_date, filing_url,
              absee_url, servicer_cert_url)
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
         """, (
-            acc,
+            acc, deal,
             filing["filing_type"],
             filing["filing_date"],
             filing_url,
@@ -186,45 +174,40 @@ def discover_all_filings(db_path: Optional[str] = None) -> int:
 
     conn.commit()
     conn.close()
-    logger.info(f"Discovered {new_count} new filings")
+    logger.info(f"Discovered {new_count} new filings for {deal}")
     return new_count
 
 
-def link_absee_to_10d(db_path: Optional[str] = None) -> None:
-    """Link ABS-EE filings (with EX-102 XML data) to their corresponding 10-D filings.
+def link_absee_to_10d(deal: str = DEFAULT_DEAL, db_path: Optional[str] = None) -> None:
+    """Link ABS-EE filings to their corresponding 10-D filings."""
+    from carvana_abs.config import DB_PATH, get_deal_config
 
-    ABS-EE filings are filed separately but correspond to the same reporting period
-    as a 10-D filing. This function finds ABS-EE filings and updates the absee_url
-    on the corresponding 10-D filing record.
-    """
-    from carvana_abs.config import DB_PATH
+    deal_cfg = get_deal_config(deal)
+    cik = deal_cfg["cik"]
 
     conn = get_connection(db_path or DB_PATH)
     cursor = conn.cursor()
 
-    # Find ABS-EE filings
     cursor.execute("""
         SELECT accession_number, filing_date
-        FROM filings WHERE filing_type IN ('ABS-EE', 'ABS-EE/A')
-    """)
+        FROM filings WHERE deal = ? AND filing_type IN ('ABS-EE', 'ABS-EE/A')
+    """, (deal,))
     absee_filings = cursor.fetchall()
 
     for absee in absee_filings:
-        # Find the XML data file in this ABS-EE filing
-        exhibit_urls = _discover_exhibit_urls(absee["accession_number"])
+        exhibit_urls = _discover_exhibit_urls(absee["accession_number"], cik)
         xml_url = exhibit_urls.get("absee_url")
         if not xml_url:
             continue
 
-        # Find the 10-D filed on the same date (or closest date)
         cursor.execute("""
             SELECT accession_number FROM filings
-            WHERE filing_type IN ('10-D', '10-D/A')
+            WHERE deal = ? AND filing_type IN ('10-D', '10-D/A')
             AND filing_date = ?
             AND absee_url IS NULL
             ORDER BY filing_date
             LIMIT 1
-        """, (absee["filing_date"],))
+        """, (deal, absee["filing_date"]))
         matching_10d = cursor.fetchone()
 
         if matching_10d:

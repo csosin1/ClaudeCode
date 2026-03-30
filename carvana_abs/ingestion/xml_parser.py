@@ -137,7 +137,8 @@ def parse_auto_loan_xml(xml_content: str) -> dict:
     return {"loans": loans, "performance": performance}
 
 
-def store_loan_data(xml_content: str, accession_number: str, db_path: Optional[str] = None) -> tuple[int, int]:
+def store_loan_data(xml_content: str, accession_number: str,
+                    deal: str, db_path: Optional[str] = None) -> tuple[int, int]:
     """Parse XML and store loan data in the database.
 
     Returns (loans_stored, performance_records_stored).
@@ -158,15 +159,15 @@ def store_loan_data(xml_content: str, accession_number: str, db_path: Optional[s
         try:
             cursor.execute("""
                 INSERT OR IGNORE INTO loans
-                (asset_number, originator_name, origination_date, original_loan_amount,
+                (deal, asset_number, originator_name, origination_date, original_loan_amount,
                  original_loan_term, original_interest_rate, loan_maturity_date, original_ltv,
                  vehicle_manufacturer, vehicle_model, vehicle_new_used, vehicle_model_year,
                  vehicle_type, vehicle_value, obligor_credit_score, obligor_credit_score_type,
                  obligor_geographic_location, co_obligor_indicator, payment_to_income_ratio,
                  income_verification_level, payment_type, subvention_indicator)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
-                loan["asset_number"], loan["originator_name"], loan["origination_date"],
+                deal, loan["asset_number"], loan["originator_name"], loan["origination_date"],
                 loan["original_loan_amount"], loan["original_loan_term"],
                 loan["original_interest_rate"], loan["loan_maturity_date"],
                 loan["original_ltv"], loan["vehicle_manufacturer"], loan["vehicle_model"],
@@ -187,15 +188,15 @@ def store_loan_data(xml_content: str, accession_number: str, db_path: Optional[s
         try:
             cursor.execute("""
                 INSERT OR REPLACE INTO loan_performance
-                (asset_number, reporting_period_end, beginning_balance, ending_balance,
+                (deal, asset_number, reporting_period_end, beginning_balance, ending_balance,
                  scheduled_payment, actual_amount_paid, actual_interest_collected,
                  actual_principal_collected, current_interest_rate, current_delinquency_status,
                  days_delinquent, remaining_term, paid_through_date, zero_balance_code,
                  zero_balance_date, charged_off_amount, recoveries, modification_indicator,
                  servicing_fee)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
-                perf["asset_number"], perf["reporting_period_end"],
+                deal, perf["asset_number"], perf["reporting_period_end"],
                 perf["beginning_balance"], perf["ending_balance"],
                 perf["scheduled_payment"], perf["actual_amount_paid"],
                 perf["actual_interest_collected"], perf["actual_principal_collected"],
@@ -218,5 +219,5 @@ def store_loan_data(xml_content: str, accession_number: str, db_path: Optional[s
     conn.commit()
     conn.close()
 
-    logger.info(f"Stored {loan_count} loans, {perf_count} performance records for {accession_number}")
+    logger.info(f"Stored {loan_count} loans, {perf_count} performance records for {deal}/{accession_number}")
     return (loan_count, perf_count)

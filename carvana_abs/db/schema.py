@@ -1,4 +1,4 @@
-"""SQLite database schema and initialization for Carvana 2020-P1 ABS data."""
+"""SQLite database schema and initialization for Carvana ABS data (multi-deal)."""
 
 import sqlite3
 import os
@@ -24,7 +24,8 @@ def init_db(db_path: str = DB_PATH) -> None:
         -- Tracks each SEC filing discovered
         CREATE TABLE IF NOT EXISTS filings (
             accession_number TEXT PRIMARY KEY,
-            filing_type TEXT NOT NULL,           -- '10-D' or 'ABS-EE'
+            deal TEXT NOT NULL,                  -- deal slug, e.g. '2020-P1'
+            filing_type TEXT NOT NULL,           -- '10-D', '10-D/A', 'ABS-EE', 'ABS-EE/A'
             filing_date TEXT,
             reporting_period_start TEXT,
             reporting_period_end TEXT,
@@ -38,26 +39,38 @@ def init_db(db_path: str = DB_PATH) -> None:
 
         -- Pool-level performance data from Servicer Certificate (Exhibit 99.1)
         CREATE TABLE IF NOT EXISTS pool_performance (
-            distribution_date TEXT PRIMARY KEY,
+            deal TEXT NOT NULL,                  -- deal slug
+            distribution_date TEXT NOT NULL,
             accession_number TEXT REFERENCES filings(accession_number),
+            -- Pool balance rollforward
             beginning_pool_balance REAL,
             ending_pool_balance REAL,
             beginning_pool_count INTEGER,
             ending_pool_count INTEGER,
+            -- Collections
             principal_collections REAL,
             interest_collections REAL,
             recoveries REAL,
-            charged_off_amount REAL,
+            -- Losses
+            gross_charged_off_amount REAL,
+            liquidation_proceeds REAL,
+            net_charged_off_amount REAL,
             cumulative_net_losses REAL,
+            -- Delinquency buckets (balance)
             delinquent_31_60_balance REAL,
             delinquent_61_90_balance REAL,
             delinquent_91_120_balance REAL,
             delinquent_121_plus_balance REAL,
             total_delinquent_balance REAL,
+            -- Delinquency buckets (count)
             delinquent_31_60_count INTEGER,
             delinquent_61_90_count INTEGER,
             delinquent_91_120_count INTEGER,
             delinquent_121_plus_count INTEGER,
+            -- Delinquency trigger
+            delinquency_trigger_level REAL,
+            delinquency_trigger_actual REAL,
+            -- Note balances
             note_balance_a1 REAL,
             note_balance_a2 REAL,
             note_balance_a3 REAL,
@@ -65,13 +78,27 @@ def init_db(db_path: str = DB_PATH) -> None:
             note_balance_b REAL,
             note_balance_c REAL,
             note_balance_d REAL,
+            note_balance_n REAL,
+            aggregate_note_balance REAL,
+            -- Pool statistics
+            weighted_avg_apr REAL,
+            weighted_avg_remaining_term REAL,
+            weighted_avg_original_term REAL,
+            avg_principal_balance REAL,
+            -- Overcollateralization & reserves
             overcollateralization_amount REAL,
-            reserve_account_balance REAL
+            reserve_account_balance REAL,
+            specified_reserve_amount REAL,
+            -- Extensions
+            extensions_count INTEGER,
+            extensions_balance REAL,
+            PRIMARY KEY (deal, distribution_date)
         );
 
         -- Static loan origination data (from EX-102 XML, one row per loan)
         CREATE TABLE IF NOT EXISTS loans (
-            asset_number TEXT PRIMARY KEY,
+            deal TEXT NOT NULL,                  -- deal slug
+            asset_number TEXT NOT NULL,
             originator_name TEXT,
             origination_date TEXT,
             original_loan_amount REAL,
@@ -92,12 +119,14 @@ def init_db(db_path: str = DB_PATH) -> None:
             payment_to_income_ratio REAL,
             income_verification_level TEXT,
             payment_type TEXT,
-            subvention_indicator TEXT
+            subvention_indicator TEXT,
+            PRIMARY KEY (deal, asset_number)
         );
 
         -- Monthly loan performance snapshots (from EX-102 XML)
         CREATE TABLE IF NOT EXISTS loan_performance (
-            asset_number TEXT NOT NULL REFERENCES loans(asset_number),
+            deal TEXT NOT NULL,                  -- deal slug
+            asset_number TEXT NOT NULL,
             reporting_period_end TEXT NOT NULL,
             beginning_balance REAL,
             ending_balance REAL,
@@ -116,22 +145,29 @@ def init_db(db_path: str = DB_PATH) -> None:
             recoveries REAL,
             modification_indicator TEXT,
             servicing_fee REAL,
-            PRIMARY KEY (asset_number, reporting_period_end)
+            PRIMARY KEY (deal, asset_number, reporting_period_end),
+            FOREIGN KEY (deal, asset_number) REFERENCES loans(deal, asset_number)
         );
 
         -- Indexes for common queries
-        CREATE INDEX IF NOT EXISTS idx_loan_perf_period
-            ON loan_performance(reporting_period_end);
-        CREATE INDEX IF NOT EXISTS idx_loan_perf_delinquency
-            ON loan_performance(reporting_period_end, current_delinquency_status);
-        CREATE INDEX IF NOT EXISTS idx_loans_state
-            ON loans(obligor_geographic_location);
-        CREATE INDEX IF NOT EXISTS idx_loans_score
-            ON loans(obligor_credit_score);
+        CREATE INDEX IF NOT EXISTS idx_filings_deal
+            ON filings(deal);
         CREATE INDEX IF NOT EXISTS idx_filings_date
             ON filings(filing_date);
         CREATE INDEX IF NOT EXISTS idx_filings_type
             ON filings(filing_type);
+        CREATE INDEX IF NOT EXISTS idx_pool_deal
+            ON pool_performance(deal);
+        CREATE INDEX IF NOT EXISTS idx_loan_perf_deal_period
+            ON loan_performance(deal, reporting_period_end);
+        CREATE INDEX IF NOT EXISTS idx_loan_perf_delinquency
+            ON loan_performance(deal, reporting_period_end, current_delinquency_status);
+        CREATE INDEX IF NOT EXISTS idx_loans_deal
+            ON loans(deal);
+        CREATE INDEX IF NOT EXISTS idx_loans_state
+            ON loans(deal, obligor_geographic_location);
+        CREATE INDEX IF NOT EXISTS idx_loans_score
+            ON loans(deal, obligor_credit_score);
     """)
 
     conn.commit()
