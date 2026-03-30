@@ -45,108 +45,120 @@ conn = get_db()
 if conn is None:
     st.error(
         f"Database not found at `{DB_PATH}`. "
-        "Run the ingestion script first:\n\n"
-        "```bash\n"
-        "export SEC_USER_AGENT='YourName your-email@example.com'\n"
-        "cd carvana_abs && python run_ingestion.py\n"
-        "```"
+        "Run the ingestion script first."
     )
     st.stop()
 
-# --- Sidebar: Deal Selector ---
+# --- Sidebar ---
 available_deals = query_df("SELECT DISTINCT deal FROM filings ORDER BY deal")
 deal_list = available_deals["deal"].tolist() if not available_deals.empty else list(DEALS.keys())
 
 with st.sidebar:
     st.header("Deal Selection")
     selected_deal = st.selectbox("Deal", deal_list, index=0)
-
     deal_cfg = DEALS.get(selected_deal, {})
     if deal_cfg:
         st.caption(deal_cfg.get("entity_name", ""))
 
     st.markdown("---")
     st.header("Data Summary")
-
-    filing_df = query_df(
-        "SELECT filing_type, COUNT(*) as cnt, SUM(ingested_pool) as pool, SUM(ingested_loans) as loans "
-        "FROM filings WHERE deal = ? GROUP BY filing_type", (selected_deal,)
-    )
-    if not filing_df.empty:
-        for _, row in filing_df.iterrows():
-            st.metric(f"{row['filing_type']} Filings", int(row["cnt"]))
-
-    pool_count = query_df(
-        "SELECT COUNT(*) as n FROM pool_performance WHERE deal = ?", (selected_deal,)
-    )
-    loan_count = query_df(
-        "SELECT COUNT(*) as n FROM loans WHERE deal = ?", (selected_deal,)
-    )
-
-    if not pool_count.empty:
-        st.metric("Pool Data Points", int(pool_count.iloc[0]["n"]))
+    loan_count = query_df("SELECT COUNT(*) as n FROM loans WHERE deal = ?", (selected_deal,))
+    perf_periods = query_df("SELECT COUNT(DISTINCT reporting_period_end) as n FROM loan_performance WHERE deal = ?", (selected_deal,))
     if not loan_count.empty:
-        st.metric("Unique Loans", int(loan_count.iloc[0]["n"]))
+        st.metric("Unique Loans", f"{int(loan_count.iloc[0]['n']):,}")
+    if not perf_periods.empty:
+        st.metric("Monthly Periods", int(perf_periods.iloc[0]["n"]))
 
     st.markdown("---")
+    st.caption("Data sourced from SEC EDGAR ABS-EE filings")
 
-    # Deal comparison toggle (only if multiple deals)
-    compare_mode = False
-    compare_deals = []
-    if len(deal_list) > 1:
-        compare_mode = st.checkbox("Compare Deals")
-        if compare_mode:
-            compare_deals = st.multiselect(
-                "Compare with", [d for d in deal_list if d != selected_deal]
-            )
-
-    st.caption("Data sourced from SEC EDGAR 10-D filings")
-
+# --- Get original pool balance ---
+ORIGINAL_BALANCE = deal_cfg.get("original_pool_balance", 405_000_000)
 
 # --- Data Loading ---
-def load_pool(deal: str) -> pd.DataFrame:
-    return query_df(
-        "SELECT * FROM pool_performance WHERE deal = ? ORDER BY distribution_date",
-        (deal,)
-    )
+# The key fix: exclude zero-balance loans from pool totals, and use
+# currentDelinquencyStatus correctly (it's months delinquent as integer: 0,1,2,3...)
+# Interest rates are stored as decimals (0.10986 = 10.986%)
 
-
-def load_loans(deal: str) -> pd.DataFrame:
-    return query_df(
-        "SELECT * FROM loans WHERE deal = ?", (deal,)
-    )
-
-
+@st.cache_data(ttl=300)
 def load_loan_perf_agg(deal: str) -> pd.DataFrame:
     return query_df("""
         SELECT
             reporting_period_end,
-            COUNT(*) as active_loans,
-            SUM(ending_balance) as total_balance,
-            SUM(CASE WHEN current_delinquency_status IS NOT NULL
-                AND current_delinquency_status != '0'
-                AND current_delinquency_status != ''
-                THEN ending_balance ELSE 0 END) as delinquent_balance,
+            -- Only count loans with positive balance as "active"
+            COUNT(CASE WHEN ending_balance > 0 THEN 1 END) as active_loans,
+            -- Sum only positive balances (exclude paid-off/charged-off)
+            SUM(CASE WHEN ending_balance > 0 THEN ending_balance ELSE 0 END) as total_balance,
+            -- Delinquency: currentDelinquencyStatus is months delinquent (0=current, 1=30d, 2=60d, etc.)
+            SUM(CASE WHEN CAST(current_delinquency_status AS INTEGER) = 1 AND ending_balance > 0
+                THEN ending_balance ELSE 0 END) as dq_30_balance,
+            SUM(CASE WHEN CAST(current_delinquency_status AS INTEGER) = 2 AND ending_balance > 0
+                THEN ending_balance ELSE 0 END) as dq_60_balance,
+            SUM(CASE WHEN CAST(current_delinquency_status AS INTEGER) = 3 AND ending_balance > 0
+                THEN ending_balance ELSE 0 END) as dq_90_balance,
+            SUM(CASE WHEN CAST(current_delinquency_status AS INTEGER) >= 4 AND ending_balance > 0
+                THEN ending_balance ELSE 0 END) as dq_120_plus_balance,
+            COUNT(CASE WHEN CAST(current_delinquency_status AS INTEGER) = 1 AND ending_balance > 0 THEN 1 END) as dq_30_count,
+            COUNT(CASE WHEN CAST(current_delinquency_status AS INTEGER) = 2 AND ending_balance > 0 THEN 1 END) as dq_60_count,
+            COUNT(CASE WHEN CAST(current_delinquency_status AS INTEGER) = 3 AND ending_balance > 0 THEN 1 END) as dq_90_count,
+            COUNT(CASE WHEN CAST(current_delinquency_status AS INTEGER) >= 4 AND ending_balance > 0 THEN 1 END) as dq_120_plus_count,
+            -- Losses
             SUM(COALESCE(charged_off_amount, 0)) as period_chargeoffs,
-            SUM(COALESCE(recoveries, 0)) as period_recoveries,
-            COUNT(CASE WHEN days_delinquent >= 30 AND days_delinquent < 60 THEN 1 END) as dq_30_59,
-            COUNT(CASE WHEN days_delinquent >= 60 AND days_delinquent < 90 THEN 1 END) as dq_60_89,
-            COUNT(CASE WHEN days_delinquent >= 90 AND days_delinquent < 120 THEN 1 END) as dq_90_119,
-            COUNT(CASE WHEN days_delinquent >= 120 THEN 1 END) as dq_120_plus
+            SUM(COALESCE(recoveries, 0)) as period_recoveries
         FROM loan_performance WHERE deal = ?
         GROUP BY reporting_period_end
         ORDER BY reporting_period_end
     """, (deal,))
 
 
-pool_df = load_pool(selected_deal)
+@st.cache_data(ttl=300)
+def load_loans(deal: str) -> pd.DataFrame:
+    df = query_df("SELECT * FROM loans WHERE deal = ?", (deal,))
+    if not df.empty:
+        # Convert interest rate from decimal to percentage for display
+        if "original_interest_rate" in df.columns:
+            df["original_interest_rate_pct"] = df["original_interest_rate"] * 100
+    return df
+
+
+@st.cache_data(ttl=300)
+def load_losses_by_segment(deal: str, segment_col: str, segment_label: str) -> pd.DataFrame:
+    """Load cumulative losses grouped by a loan attribute."""
+    return query_df(f"""
+        SELECT
+            l.{segment_col} as segment,
+            SUM(l.original_loan_amount) as original_balance,
+            COUNT(DISTINCT l.asset_number) as loan_count,
+            SUM(COALESCE(lp.charged_off_amount, 0)) as total_chargeoffs,
+            SUM(COALESCE(lp.recoveries, 0)) as total_recoveries
+        FROM loans l
+        JOIN loan_performance lp ON l.deal = lp.deal AND l.asset_number = lp.asset_number
+        WHERE l.deal = ?
+        AND l.{segment_col} IS NOT NULL
+        GROUP BY l.{segment_col}
+        ORDER BY l.{segment_col}
+    """, (deal,))
+
+
 loans_df = load_loans(selected_deal)
 loan_perf_df = load_loan_perf_agg(selected_deal)
 
+# Compute cumulative losses
+if not loan_perf_df.empty:
+    loan_perf_df["cumulative_chargeoffs"] = loan_perf_df["period_chargeoffs"].cumsum()
+    loan_perf_df["cumulative_recoveries"] = loan_perf_df["period_recoveries"].cumsum()
+    loan_perf_df["cumulative_net_losses"] = loan_perf_df["cumulative_chargeoffs"] - loan_perf_df["cumulative_recoveries"]
+    loan_perf_df["cumulative_loss_rate"] = loan_perf_df["cumulative_net_losses"] / ORIGINAL_BALANCE
+    loan_perf_df["total_dq_balance"] = (
+        loan_perf_df["dq_30_balance"] + loan_perf_df["dq_60_balance"] +
+        loan_perf_df["dq_90_balance"] + loan_perf_df["dq_120_plus_balance"]
+    )
+    loan_perf_df["dq_rate"] = loan_perf_df["total_dq_balance"] / loan_perf_df["total_balance"]
+
 
 # --- Tabs ---
-tab_pool, tab_dq, tab_losses, tab_loans = st.tabs([
-    "Pool Summary", "Delinquencies", "Losses", "Loan Explorer"
+tab_pool, tab_dq, tab_losses, tab_loans, tab_fields = st.tabs([
+    "Pool Summary", "Delinquencies", "Losses", "Loan Explorer", "Data Fields"
 ])
 
 
@@ -154,346 +166,190 @@ tab_pool, tab_dq, tab_losses, tab_loans = st.tabs([
 # TAB 1: POOL SUMMARY
 # ============================================================
 with tab_pool:
-    if pool_df.empty and loan_perf_df.empty:
-        st.info("No pool or loan performance data available yet. Run the ingestion script.")
+    if loan_perf_df.empty:
+        st.info("No performance data available yet.")
     else:
-        st.subheader("Pool Balance Over Time")
+        # Key metrics
+        first_period = loan_perf_df.iloc[0]
+        last_period = loan_perf_df.iloc[-1]
+        current_balance = last_period["total_balance"]
+        pool_factor = current_balance / ORIGINAL_BALANCE if ORIGINAL_BALANCE else 0
 
-        # Build the primary balance chart
-        if not pool_df.empty:
-            chart_df = pool_df[["distribution_date", "ending_pool_balance"]].dropna()
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Original Pool Balance", f"${ORIGINAL_BALANCE:,.0f}")
+        col2.metric("Current Pool Balance", f"${current_balance:,.0f}")
+        col3.metric("Pool Factor", f"{pool_factor:.2%}")
+        col4.metric("Active Loans", f"{int(last_period['active_loans']):,}")
 
-            # If comparing, overlay other deals
-            if compare_mode and compare_deals:
-                fig = go.Figure()
-                fig.add_trace(go.Scatter(
-                    x=chart_df["distribution_date"], y=chart_df["ending_pool_balance"],
-                    name=selected_deal, mode="lines", fill="tozeroy",
-                ))
-                for cd in compare_deals:
-                    cd_df = load_pool(cd)[["distribution_date", "ending_pool_balance"]].dropna()
-                    if not cd_df.empty:
-                        fig.add_trace(go.Scatter(
-                            x=cd_df["distribution_date"], y=cd_df["ending_pool_balance"],
-                            name=cd, mode="lines",
-                        ))
-                fig.update_layout(
-                    title="Remaining Pool Balance — Deal Comparison",
-                    yaxis_tickformat="$,.0f", hovermode="x unified",
-                )
-            else:
-                fig = px.area(
-                    chart_df, x="distribution_date", y="ending_pool_balance",
-                    title="Remaining Pool Balance",
-                    labels={"distribution_date": "Distribution Date",
-                            "ending_pool_balance": "Balance ($)"},
-                )
-                fig.update_layout(yaxis_tickformat="$,.0f", hovermode="x unified")
+        st.subheader("Remaining Pool Balance")
+        fig = px.area(
+            loan_perf_df, x="reporting_period_end", y="total_balance",
+            labels={"reporting_period_end": "Reporting Period", "total_balance": "Balance ($)"},
+        )
+        fig.update_layout(yaxis_tickformat="$,.0f", hovermode="x unified")
+        st.plotly_chart(fig, use_container_width=True)
 
-            st.plotly_chart(fig, use_container_width=True)
-
-            # Key metrics
-            if pool_df["beginning_pool_balance"].iloc[0]:
-                original = pool_df["beginning_pool_balance"].iloc[0]
-                current = pool_df["ending_pool_balance"].iloc[-1] if pd.notna(pool_df["ending_pool_balance"].iloc[-1]) else 0
-                pool_factor = current / original if original else 0
-
-                col1, col2, col3, col4 = st.columns(4)
-                col1.metric("Original Pool Balance", f"${original:,.0f}")
-                col2.metric("Current Pool Balance", f"${current:,.0f}")
-                col3.metric("Pool Factor", f"{pool_factor:.2%}")
-                if pool_df["ending_pool_count"].iloc[-1]:
-                    col4.metric("Active Loans", f"{int(pool_df['ending_pool_count'].iloc[-1]):,}")
-
-        elif not loan_perf_df.empty:
-            fig = px.area(
-                loan_perf_df, x="reporting_period_end", y="total_balance",
-                title="Remaining Pool Balance (from loan-level data)",
-                labels={"reporting_period_end": "Period End", "total_balance": "Balance ($)"},
-            )
-            fig.update_layout(yaxis_tickformat="$,.0f", hovermode="x unified")
-            st.plotly_chart(fig, use_container_width=True)
-
-        # Pool statistics over time
-        if not pool_df.empty:
-            stat_cols = ["weighted_avg_apr", "weighted_avg_remaining_term"]
-            available_stats = [c for c in stat_cols if c in pool_df.columns and pool_df[c].notna().any()]
-            if available_stats:
-                st.subheader("Pool Statistics")
-                col1, col2 = st.columns(2)
-                if "weighted_avg_apr" in available_stats:
-                    with col1:
-                        wac_df = pool_df[["distribution_date", "weighted_avg_apr"]].dropna()
-                        if not wac_df.empty:
-                            fig = px.line(wac_df, x="distribution_date", y="weighted_avg_apr",
-                                          title="Weighted Average APR")
-                            fig.update_layout(yaxis_tickformat=".2%", hovermode="x unified")
-                            st.plotly_chart(fig, use_container_width=True)
-                if "weighted_avg_remaining_term" in available_stats:
-                    with col2:
-                        wam_df = pool_df[["distribution_date", "weighted_avg_remaining_term"]].dropna()
-                        if not wam_df.empty:
-                            fig = px.line(wam_df, x="distribution_date", y="weighted_avg_remaining_term",
-                                          title="Weighted Average Remaining Term (months)")
-                            fig.update_layout(hovermode="x unified")
-                            st.plotly_chart(fig, use_container_width=True)
-
-        # Note balances
-        if not pool_df.empty:
-            note_cols = [c for c in pool_df.columns if c.startswith("note_balance_")]
-            note_df = pool_df[["distribution_date"] + note_cols].dropna(how="all", subset=note_cols)
-            if not note_df.empty and note_df[note_cols].notna().any().any():
-                st.subheader("Note Balances by Class")
-                note_melted = note_df.melt(
-                    id_vars=["distribution_date"], value_vars=note_cols,
-                    var_name="Note Class", value_name="Balance"
-                )
-                note_melted["Note Class"] = (
-                    note_melted["Note Class"]
-                    .str.replace("note_balance_", "Class ")
-                    .str.upper()
-                )
-                fig = px.area(
-                    note_melted, x="distribution_date", y="Balance",
-                    color="Note Class", title="Note Balances Over Time",
-                )
-                fig.update_layout(yaxis_tickformat="$,.0f", hovermode="x unified")
-                st.plotly_chart(fig, use_container_width=True)
+        # Loan count over time
+        st.subheader("Active Loan Count")
+        fig2 = px.line(
+            loan_perf_df, x="reporting_period_end", y="active_loans",
+            labels={"reporting_period_end": "Reporting Period", "active_loans": "Active Loans"},
+        )
+        fig2.update_layout(hovermode="x unified")
+        st.plotly_chart(fig2, use_container_width=True)
 
 
 # ============================================================
 # TAB 2: DELINQUENCIES
 # ============================================================
 with tab_dq:
-    st.subheader("Delinquency Analysis")
+    if loan_perf_df.empty:
+        st.info("No performance data available yet.")
+    else:
+        st.subheader("Delinquency Analysis")
 
-    has_pool_dq = (not pool_df.empty and
-                   pool_df.get("delinquent_31_60_balance") is not None and
-                   pool_df["delinquent_31_60_balance"].notna().any())
-    has_loan_dq = not loan_perf_df.empty and "dq_30_59" in loan_perf_df.columns
+        # Stacked area by bucket (balance)
+        dq_cols = {
+            "dq_30_balance": "30 Days",
+            "dq_60_balance": "60 Days",
+            "dq_90_balance": "90 Days",
+            "dq_120_plus_balance": "120+ Days",
+        }
+        dq_melted = loan_perf_df[["reporting_period_end"] + list(dq_cols.keys())].melt(
+            id_vars=["reporting_period_end"], var_name="Bucket", value_name="Balance"
+        )
+        dq_melted["Bucket"] = dq_melted["Bucket"].map(dq_cols)
 
-    if has_pool_dq:
-        dq_cols = ["delinquent_31_60_balance", "delinquent_61_90_balance",
-                    "delinquent_91_120_balance", "delinquent_121_plus_balance"]
-        available_dq = [c for c in dq_cols if c in pool_df.columns]
-        dq_df = pool_df[["distribution_date"] + available_dq].dropna(how="all", subset=available_dq)
-
-        if not dq_df.empty:
-            dq_melted = dq_df.melt(
-                id_vars=["distribution_date"], value_vars=available_dq,
-                var_name="Bucket", value_name="Balance"
-            )
-            label_map = {
-                "delinquent_31_60_balance": "31-60 Days",
-                "delinquent_61_90_balance": "61-90 Days",
-                "delinquent_91_120_balance": "91-120 Days",
-                "delinquent_121_plus_balance": "121+ Days",
-            }
-            dq_melted["Bucket"] = dq_melted["Bucket"].map(label_map)
-
-            # Compare mode
-            if compare_mode and compare_deals:
-                fig = go.Figure()
-                # Total delinquent for selected deal
-                if "total_delinquent_balance" in pool_df.columns:
-                    td = pool_df[["distribution_date", "total_delinquent_balance"]].dropna()
-                    fig.add_trace(go.Scatter(
-                        x=td["distribution_date"], y=td["total_delinquent_balance"],
-                        name=selected_deal, mode="lines",
-                    ))
-                for cd in compare_deals:
-                    cd_pool = load_pool(cd)
-                    if "total_delinquent_balance" in cd_pool.columns:
-                        cd_td = cd_pool[["distribution_date", "total_delinquent_balance"]].dropna()
-                        if not cd_td.empty:
-                            fig.add_trace(go.Scatter(
-                                x=cd_td["distribution_date"], y=cd_td["total_delinquent_balance"],
-                                name=cd, mode="lines",
-                            ))
-                fig.update_layout(
-                    title="Total Delinquent Balance — Deal Comparison",
-                    yaxis_tickformat="$,.0f", hovermode="x unified",
-                )
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                fig = px.area(
-                    dq_melted, x="distribution_date", y="Balance", color="Bucket",
-                    title="Delinquent Balance by Bucket",
-                    color_discrete_sequence=["#FFC107", "#FF9800", "#FF5722", "#D32F2F"],
-                )
-                fig.update_layout(yaxis_tickformat="$,.0f", hovermode="x unified")
-                st.plotly_chart(fig, use_container_width=True)
-
-            # Delinquency rate
-            if "ending_pool_balance" in pool_df.columns and "total_delinquent_balance" in pool_df.columns:
-                rate_df = pool_df[["distribution_date", "total_delinquent_balance", "ending_pool_balance"]].dropna()
-                rate_df["delinquency_rate"] = rate_df["total_delinquent_balance"] / rate_df["ending_pool_balance"]
-
-                fig2 = px.line(
-                    rate_df, x="distribution_date", y="delinquency_rate",
-                    title="Total Delinquency Rate (% of Pool Balance)",
-                )
-                fig2.update_layout(yaxis_tickformat=".2%", hovermode="x unified")
-                st.plotly_chart(fig2, use_container_width=True)
-
-            # Delinquency trigger
-            if pool_df.get("delinquency_trigger_level") is not None:
-                trigger_df = pool_df[["distribution_date", "delinquency_trigger_level",
-                                       "delinquency_trigger_actual"]].dropna()
-                if not trigger_df.empty:
-                    st.subheader("Delinquency Trigger")
-                    fig3 = go.Figure()
-                    fig3.add_trace(go.Scatter(
-                        x=trigger_df["distribution_date"], y=trigger_df["delinquency_trigger_level"],
-                        name="Trigger Level", line=dict(dash="dash", color="red"),
-                    ))
-                    fig3.add_trace(go.Scatter(
-                        x=trigger_df["distribution_date"], y=trigger_df["delinquency_trigger_actual"],
-                        name="Actual", line=dict(color="blue"),
-                    ))
-                    fig3.update_layout(
-                        title="60+ Day Delinquency vs Trigger Level",
-                        yaxis_tickformat=".2%", hovermode="x unified",
-                    )
-                    st.plotly_chart(fig3, use_container_width=True)
-
-    elif has_loan_dq:
-        st.markdown("*Delinquency data from loan-level records*")
-        dq_count_df = loan_perf_df[["reporting_period_end", "dq_30_59", "dq_60_89", "dq_90_119", "dq_120_plus"]]
-        dq_melted = dq_count_df.melt(id_vars=["reporting_period_end"], var_name="Bucket", value_name="Count")
-        label_map = {"dq_30_59": "30-59 Days", "dq_60_89": "60-89 Days",
-                     "dq_90_119": "90-119 Days", "dq_120_plus": "120+ Days"}
-        dq_melted["Bucket"] = dq_melted["Bucket"].map(label_map)
         fig = px.area(
-            dq_melted, x="reporting_period_end", y="Count", color="Bucket",
-            title="Delinquent Loan Count by Bucket",
+            dq_melted, x="reporting_period_end", y="Balance", color="Bucket",
+            title="Delinquent Balance by Bucket",
+            labels={"reporting_period_end": "Reporting Period"},
             color_discrete_sequence=["#FFC107", "#FF9800", "#FF5722", "#D32F2F"],
         )
-        fig.update_layout(hovermode="x unified")
+        fig.update_layout(yaxis_tickformat="$,.0f", hovermode="x unified")
         st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.info("No delinquency data available yet.")
+
+        # Delinquency rate
+        fig2 = px.line(
+            loan_perf_df, x="reporting_period_end", y="dq_rate",
+            title="Total Delinquency Rate (% of Active Pool Balance)",
+            labels={"reporting_period_end": "Reporting Period", "dq_rate": "Delinquency Rate"},
+        )
+        fig2.update_layout(yaxis_tickformat=".2%", hovermode="x unified")
+        st.plotly_chart(fig2, use_container_width=True)
+
+        # Delinquency count table
+        st.subheader("Delinquent Loan Counts (Latest Period)")
+        latest = loan_perf_df.iloc[-1]
+        dq_summary = pd.DataFrame({
+            "Bucket": ["30 Days", "60 Days", "90 Days", "120+ Days", "Total"],
+            "Count": [int(latest["dq_30_count"]), int(latest["dq_60_count"]),
+                      int(latest["dq_90_count"]), int(latest["dq_120_plus_count"]),
+                      int(latest["dq_30_count"] + latest["dq_60_count"] + latest["dq_90_count"] + latest["dq_120_plus_count"])],
+            "Balance": [latest["dq_30_balance"], latest["dq_60_balance"],
+                        latest["dq_90_balance"], latest["dq_120_plus_balance"],
+                        latest["total_dq_balance"]],
+        })
+        dq_summary["Balance"] = dq_summary["Balance"].apply(lambda x: f"${x:,.2f}")
+        st.dataframe(dq_summary, use_container_width=True, hide_index=True)
 
 
 # ============================================================
 # TAB 3: LOSSES
 # ============================================================
 with tab_losses:
-    st.subheader("Loss Analysis")
+    if loan_perf_df.empty:
+        st.info("No performance data available yet.")
+    else:
+        st.subheader("Loss Analysis")
 
-    has_pool_losses = not pool_df.empty and pool_df.get("cumulative_net_losses") is not None and pool_df["cumulative_net_losses"].notna().any()
+        # Key loss metrics
+        latest = loan_perf_df.iloc[-1]
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Cumulative Net Losses", f"${latest['cumulative_net_losses']:,.0f}")
+        col2.metric("Cumulative Loss Rate", f"{latest['cumulative_loss_rate']:.2%}")
+        col3.metric("Through Period", latest["reporting_period_end"])
 
-    if has_pool_losses:
-        # Cumulative net losses
-        cum_df = pool_df[["distribution_date", "cumulative_net_losses"]].dropna()
-
-        if compare_mode and compare_deals:
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(
-                x=cum_df["distribution_date"], y=cum_df["cumulative_net_losses"],
-                name=selected_deal, mode="lines", fill="tozeroy",
-            ))
-            for cd in compare_deals:
-                cd_pool = load_pool(cd)
-                cd_cum = cd_pool[["distribution_date", "cumulative_net_losses"]].dropna()
-                if not cd_cum.empty:
-                    fig.add_trace(go.Scatter(
-                        x=cd_cum["distribution_date"], y=cd_cum["cumulative_net_losses"],
-                        name=cd, mode="lines",
-                    ))
-            fig.update_layout(
-                title="Cumulative Net Losses — Deal Comparison",
-                yaxis_tickformat="$,.0f", hovermode="x unified",
-            )
-        else:
-            fig = px.area(
-                cum_df, x="distribution_date", y="cumulative_net_losses",
-                title="Cumulative Net Losses",
-            )
-            fig.update_layout(yaxis_tickformat="$,.0f", hovermode="x unified")
-            fig.update_traces(line_color="#D32F2F", fillcolor="rgba(211,47,47,0.3)")
-
+        # Cumulative loss rate chart (as % of original balance)
+        fig = px.area(
+            loan_perf_df, x="reporting_period_end", y="cumulative_loss_rate",
+            title=f"Cumulative Net Loss Rate (% of ${ORIGINAL_BALANCE/1e6:.0f}M Original Balance)",
+            labels={"reporting_period_end": "Reporting Period",
+                    "cumulative_loss_rate": "Cumulative Loss Rate"},
+        )
+        fig.update_layout(yaxis_tickformat=".2%", hovermode="x unified")
+        fig.update_traces(line_color="#D32F2F", fillcolor="rgba(211,47,47,0.2)")
         st.plotly_chart(fig, use_container_width=True)
 
         # Monthly charge-offs vs recoveries
-        loss_cols = ["distribution_date"]
-        for c in ["gross_charged_off_amount", "net_charged_off_amount", "recoveries", "liquidation_proceeds"]:
-            if c in pool_df.columns:
-                loss_cols.append(c)
-        monthly_df = pool_df[loss_cols].dropna(how="all", subset=loss_cols[1:])
-        if len(loss_cols) > 1 and not monthly_df.empty:
-            fig2 = go.Figure()
-            charge_col = "gross_charged_off_amount" if "gross_charged_off_amount" in loss_cols else "net_charged_off_amount"
-            if charge_col in loss_cols:
-                fig2.add_trace(go.Bar(
-                    x=monthly_df["distribution_date"], y=monthly_df[charge_col],
-                    name="Charge-offs", marker_color="#D32F2F",
-                ))
-            if "recoveries" in loss_cols:
-                fig2.add_trace(go.Bar(
-                    x=monthly_df["distribution_date"], y=monthly_df["recoveries"],
-                    name="Recoveries", marker_color="#4CAF50",
-                ))
-            fig2.update_layout(
-                title="Monthly Charge-offs vs Recoveries",
-                barmode="group", yaxis_tickformat="$,.0f", hovermode="x unified",
-            )
-            st.plotly_chart(fig2, use_container_width=True)
-
-        # Cumulative loss rate
-        original_balance = deal_cfg.get("original_pool_balance") or (
-            pool_df["beginning_pool_balance"].iloc[0] if pool_df["beginning_pool_balance"].iloc[0] else None
+        fig2 = go.Figure()
+        fig2.add_trace(go.Bar(
+            x=loan_perf_df["reporting_period_end"], y=loan_perf_df["period_chargeoffs"],
+            name="Charge-offs", marker_color="#D32F2F",
+        ))
+        fig2.add_trace(go.Bar(
+            x=loan_perf_df["reporting_period_end"], y=loan_perf_df["period_recoveries"],
+            name="Recoveries", marker_color="#4CAF50",
+        ))
+        fig2.update_layout(
+            title="Monthly Charge-offs vs Recoveries",
+            barmode="group", yaxis_tickformat="$,.0f", hovermode="x unified",
         )
-        if original_balance and not cum_df.empty:
-            rate_df = cum_df.copy()
-            rate_df["loss_rate"] = rate_df["cumulative_net_losses"] / original_balance
+        st.plotly_chart(fig2, use_container_width=True)
 
-            if compare_mode and compare_deals:
-                fig3 = go.Figure()
-                fig3.add_trace(go.Scatter(
-                    x=rate_df["distribution_date"], y=rate_df["loss_rate"],
-                    name=selected_deal, mode="lines",
-                ))
-                for cd in compare_deals:
-                    cd_pool = load_pool(cd)
-                    cd_cfg = DEALS.get(cd, {})
-                    cd_orig = cd_cfg.get("original_pool_balance") or (
-                        cd_pool["beginning_pool_balance"].iloc[0] if not cd_pool.empty else None
-                    )
-                    if cd_orig:
-                        cd_cum = cd_pool[["distribution_date", "cumulative_net_losses"]].dropna()
-                        cd_cum["loss_rate"] = cd_cum["cumulative_net_losses"] / cd_orig
-                        fig3.add_trace(go.Scatter(
-                            x=cd_cum["distribution_date"], y=cd_cum["loss_rate"],
-                            name=cd, mode="lines",
-                        ))
-                fig3.update_layout(
-                    title="Cumulative Loss Rate — Deal Comparison",
-                    yaxis_tickformat=".2%", hovermode="x unified",
-                )
-            else:
-                fig3 = px.line(
-                    rate_df, x="distribution_date", y="loss_rate",
-                    title=f"Cumulative Loss Rate (% of ${original_balance:,.0f} original balance)",
-                )
-                fig3.update_layout(yaxis_tickformat=".2%", hovermode="x unified")
-                fig3.update_traces(line_color="#D32F2F")
+        # --- Losses by Credit Score ---
+        st.subheader("Cumulative Losses by Credit Score")
+        loss_by_score = load_losses_by_segment(selected_deal, "obligor_credit_score", "Credit Score")
+        if not loss_by_score.empty:
+            # Bucket credit scores
+            loss_by_score["score"] = pd.to_numeric(loss_by_score["segment"], errors="coerce")
+            loss_by_score = loss_by_score.dropna(subset=["score"])
+            bins = [0, 580, 620, 660, 700, 740, 780, 820, 900]
+            labels = ["<580", "580-619", "620-659", "660-699", "700-739", "740-779", "780-819", "820+"]
+            loss_by_score["Score Bucket"] = pd.cut(loss_by_score["score"], bins=bins, labels=labels, right=False)
+            bucketed = loss_by_score.groupby("Score Bucket", observed=True).agg({
+                "loan_count": "sum",
+                "original_balance": "sum",
+                "total_chargeoffs": "sum",
+                "total_recoveries": "sum",
+            }).reset_index()
+            bucketed["net_losses"] = bucketed["total_chargeoffs"] - bucketed["total_recoveries"]
+            bucketed["loss_rate"] = bucketed["net_losses"] / bucketed["original_balance"]
 
-            st.plotly_chart(fig3, use_container_width=True)
+            display_score = bucketed[["Score Bucket", "loan_count", "original_balance", "net_losses", "loss_rate"]].copy()
+            display_score.columns = ["Credit Score", "Loans", "Original Balance", "Net Losses", "Loss Rate"]
+            display_score["Original Balance"] = display_score["Original Balance"].apply(lambda x: f"${x:,.0f}")
+            display_score["Net Losses"] = display_score["Net Losses"].apply(lambda x: f"${x:,.0f}")
+            display_score["Loss Rate"] = display_score["Loss Rate"].apply(lambda x: f"{x:.2%}")
+            display_score["Loans"] = display_score["Loans"].apply(lambda x: f"{x:,}")
+            st.dataframe(display_score, use_container_width=True, hide_index=True)
 
-    elif not loan_perf_df.empty:
-        st.markdown("*Loss data from loan-level records*")
-        loss_df = loan_perf_df[["reporting_period_end", "period_chargeoffs", "period_recoveries"]].copy()
-        loss_df["cumulative_net_losses"] = (loss_df["period_chargeoffs"] - loss_df["period_recoveries"]).cumsum()
-        fig = px.area(
-            loss_df, x="reporting_period_end", y="cumulative_net_losses",
-            title="Cumulative Net Losses (from loan-level data)",
-        )
-        fig.update_layout(yaxis_tickformat="$,.0f", hovermode="x unified")
-        fig.update_traces(line_color="#D32F2F", fillcolor="rgba(211,47,47,0.3)")
-        st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.info("No loss data available yet.")
+        # --- Losses by Interest Rate ---
+        st.subheader("Cumulative Losses by Original Interest Rate")
+        loss_by_rate = load_losses_by_segment(selected_deal, "original_interest_rate", "Interest Rate")
+        if not loss_by_rate.empty:
+            loss_by_rate["rate"] = pd.to_numeric(loss_by_rate["segment"], errors="coerce")
+            loss_by_rate = loss_by_rate.dropna(subset=["rate"])
+            # Rates are stored as decimals (0.05 = 5%)
+            rate_bins = [0, 0.04, 0.06, 0.08, 0.10, 0.12, 0.15, 0.20, 1.0]
+            rate_labels = ["<4%", "4-5.99%", "6-7.99%", "8-9.99%", "10-11.99%", "12-14.99%", "15-19.99%", "20%+"]
+            loss_by_rate["Rate Bucket"] = pd.cut(loss_by_rate["rate"], bins=rate_bins, labels=rate_labels, right=False)
+            bucketed_rate = loss_by_rate.groupby("Rate Bucket", observed=True).agg({
+                "loan_count": "sum",
+                "original_balance": "sum",
+                "total_chargeoffs": "sum",
+                "total_recoveries": "sum",
+            }).reset_index()
+            bucketed_rate["net_losses"] = bucketed_rate["total_chargeoffs"] - bucketed_rate["total_recoveries"]
+            bucketed_rate["loss_rate"] = bucketed_rate["net_losses"] / bucketed_rate["original_balance"]
+
+            display_rate = bucketed_rate[["Rate Bucket", "loan_count", "original_balance", "net_losses", "loss_rate"]].copy()
+            display_rate.columns = ["Interest Rate", "Loans", "Original Balance", "Net Losses", "Loss Rate"]
+            display_rate["Original Balance"] = display_rate["Original Balance"].apply(lambda x: f"${x:,.0f}")
+            display_rate["Net Losses"] = display_rate["Net Losses"].apply(lambda x: f"${x:,.0f}")
+            display_rate["Loss Rate"] = display_rate["Loss Rate"].apply(lambda x: f"{x:.2%}")
+            display_rate["Loans"] = display_rate["Loans"].apply(lambda x: f"{x:,}")
+            st.dataframe(display_rate, use_container_width=True, hide_index=True)
 
 
 # ============================================================
@@ -503,7 +359,7 @@ with tab_loans:
     st.subheader("Loan Portfolio Explorer")
 
     if loans_df.empty:
-        st.info("No loan-level data available yet. Run ingestion with ABS-EE XML parsing.")
+        st.info("No loan-level data available yet.")
     else:
         col1, col2 = st.columns(2)
 
@@ -555,27 +411,98 @@ with tab_loans:
                 fig.update_layout(yaxis=dict(autorange="reversed"))
                 st.plotly_chart(fig, use_container_width=True)
 
-        # Rate vs Score scatter
-        rate_score = loans_df[["original_interest_rate", "obligor_credit_score"]].dropna()
-        if len(rate_score) > 0:
-            st.subheader("Interest Rate vs Credit Score")
-            sample = rate_score.sample(min(5000, len(rate_score)), random_state=42)
-            fig = px.scatter(
-                sample, x="obligor_credit_score", y="original_interest_rate",
-                title="Original Interest Rate vs Credit Score",
-                labels={"obligor_credit_score": "Credit Score",
-                        "original_interest_rate": "Interest Rate (%)"},
-                opacity=0.3,
-            )
-            st.plotly_chart(fig, use_container_width=True)
+        # Rate vs Score scatter — RATES AS PERCENTAGES
+        if "original_interest_rate_pct" in loans_df.columns:
+            rate_score = loans_df[["original_interest_rate_pct", "obligor_credit_score"]].dropna()
+            if len(rate_score) > 0:
+                st.subheader("Interest Rate vs Credit Score")
+                sample = rate_score.sample(min(5000, len(rate_score)), random_state=42)
+                fig = px.scatter(
+                    sample, x="obligor_credit_score", y="original_interest_rate_pct",
+                    title="Original Interest Rate vs Credit Score",
+                    labels={"obligor_credit_score": "Credit Score",
+                            "original_interest_rate_pct": "Interest Rate (%)"},
+                    opacity=0.3,
+                )
+                fig.update_layout(yaxis_ticksuffix="%")
+                st.plotly_chart(fig, use_container_width=True)
 
-        # Summary statistics
+        # Summary statistics with rates as percentages
         st.subheader("Portfolio Summary Statistics")
-        stat_cols = ["original_loan_amount", "original_interest_rate",
-                     "original_loan_term", "obligor_credit_score", "original_ltv"]
-        available = [c for c in stat_cols if c in loans_df.columns]
-        if available:
-            st.dataframe(
-                loans_df[available].describe().style.format("{:.2f}"),
-                use_container_width=True,
-            )
+        stat_data = {}
+        if "original_loan_amount" in loans_df.columns:
+            stat_data["Loan Amount ($)"] = loans_df["original_loan_amount"].describe()
+        if "original_interest_rate_pct" in loans_df.columns:
+            stat_data["Interest Rate (%)"] = loans_df["original_interest_rate_pct"].describe()
+        if "original_loan_term" in loans_df.columns:
+            stat_data["Loan Term (months)"] = loans_df["original_loan_term"].describe()
+        if "obligor_credit_score" in loans_df.columns:
+            stat_data["Credit Score"] = loans_df["obligor_credit_score"].describe()
+        if "original_ltv" in loans_df.columns:
+            stat_data["LTV"] = (loans_df["original_ltv"] * 100).describe()
+        if stat_data:
+            stats_df = pd.DataFrame(stat_data)
+            st.dataframe(stats_df.style.format("{:.2f}"), use_container_width=True)
+
+
+# ============================================================
+# TAB 5: DATA FIELDS
+# ============================================================
+with tab_fields:
+    st.subheader("Available Data Fields")
+    st.markdown("These are the fields available in the loan-level data from SEC EDGAR ABS-EE filings.")
+
+    st.markdown("### Loan Static Data (one per loan)")
+    loan_fields = {
+        "asset_number": "Unique loan identifier",
+        "originator_name": "Entity that originated the loan (Carvana, LLC)",
+        "origination_date": "Month/year the loan was originated",
+        "original_loan_amount": "Loan amount at origination ($)",
+        "original_loan_term": "Loan term in months at origination",
+        "original_interest_rate": "Interest rate at origination (decimal, e.g. 0.0599 = 5.99%)",
+        "loan_maturity_date": "Scheduled final payment month/year",
+        "original_ltv": "Loan-to-value ratio (loan amount / vehicle value)",
+        "vehicle_manufacturer": "Vehicle make (Toyota, Honda, Ford, etc.)",
+        "vehicle_model": "Vehicle model (Camry, Civic, F-150, etc.)",
+        "vehicle_new_used": "1 = New, 2 = Used",
+        "vehicle_model_year": "Vehicle model year",
+        "vehicle_type": "Vehicle type code (1 = passenger car, etc.)",
+        "vehicle_value": "Vehicle value at origination ($)",
+        "obligor_credit_score": "Borrower credit score at origination",
+        "obligor_credit_score_type": "Credit score model used",
+        "obligor_geographic_location": "Borrower state (2-letter code)",
+        "co_obligor_indicator": "Whether there is a co-borrower (true/false)",
+        "payment_to_income_ratio": "Monthly payment as % of income (decimal)",
+        "income_verification_level": "How income was verified (1-4)",
+        "payment_type": "Payment type code",
+        "subvention_indicator": "Whether rate was subsidized",
+    }
+    st.dataframe(
+        pd.DataFrame(loan_fields.items(), columns=["Field", "Description"]),
+        use_container_width=True, hide_index=True,
+    )
+
+    st.markdown("### Monthly Performance Data (one per loan per month)")
+    perf_fields = {
+        "reporting_period_end": "End date of the reporting period",
+        "beginning_balance": "Loan balance at start of period ($)",
+        "ending_balance": "Loan balance at end of period ($)",
+        "scheduled_payment": "Scheduled payment amount ($)",
+        "actual_amount_paid": "Actual total amount paid ($)",
+        "actual_interest_collected": "Interest portion of payment ($)",
+        "actual_principal_collected": "Principal portion of payment ($)",
+        "current_interest_rate": "Current interest rate (decimal)",
+        "current_delinquency_status": "Months delinquent (0=current, 1=30d, 2=60d, 3=90d, 4+=120d+)",
+        "remaining_term": "Remaining months to maturity",
+        "paid_through_date": "Date through which interest is paid",
+        "zero_balance_code": "Why balance went to zero (1=prepaid, 2=matured, 3=charged off, etc.)",
+        "zero_balance_date": "Month/year balance went to zero",
+        "charged_off_amount": "Amount charged off this period ($)",
+        "recoveries": "Amount recovered this period ($)",
+        "modification_indicator": "Whether loan was modified (true/false)",
+        "servicing_fee": "Servicing fee amount or percentage",
+    }
+    st.dataframe(
+        pd.DataFrame(perf_fields.items(), columns=["Field", "Description"]),
+        use_container_width=True, hide_index=True,
+    )
