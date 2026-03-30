@@ -59,20 +59,19 @@ def parse_auto_loan_xml(xml_content: str) -> dict:
         logger.error(f"Failed to parse XML: {e}")
         return {"loans": [], "performance": []}
 
-    # Find all asset elements - try different possible root structures
-    # The XML structure may vary; common patterns:
-    #   <assets><asset>...</asset></assets>
-    #   <assetData><asset>...</asset></assetData>
-    asset_elements = root.findall(".//al:asset", NS)
+    # The XSD defines root element <assetData> containing <assets> elements.
+    # Each <assets> is one loan record with all its fields as direct children.
+    # Schema: eis_ABS_AutoLoanAssetData.xsd
+    asset_elements = root.findall(".//al:assets", NS)
     if not asset_elements:
-        asset_elements = root.findall(".//al:assets/al:asset", NS)
+        # Fallback: try <asset> (singular) or direct children
+        asset_elements = root.findall(".//al:asset", NS)
     if not asset_elements:
-        # Try without namespace as fallback
-        asset_elements = root.findall(".//{%s}asset" % AUTO_LOAN_NS)
+        asset_elements = root.findall(".//{%s}assets" % AUTO_LOAN_NS)
     if not asset_elements:
-        # Try finding any element that contains assetNumber
+        # Last resort: find any element containing assetNumber
         for elem in root.iter():
-            if elem.find(f"al:assetNumber", NS) is not None:
+            if elem.find("al:assetNumber", NS) is not None:
                 asset_elements.append(elem)
 
     logger.info(f"Found {len(asset_elements)} asset records in XML")
@@ -83,6 +82,7 @@ def parse_auto_loan_xml(xml_content: str) -> dict:
             continue
 
         # Extract static origination data
+        # Element names match eis_ABS_AutoLoanAssetData.xsd exactly
         loan = {
             "asset_number": asset_number,
             "originator_name": _get_text(asset, "originatorName"),
@@ -91,45 +91,52 @@ def parse_auto_loan_xml(xml_content: str) -> dict:
             "original_loan_term": _get_int(asset, "originalLoanTerm"),
             "original_interest_rate": _get_float(asset, "originalInterestRatePercentage"),
             "loan_maturity_date": _get_text(asset, "loanMaturityDate"),
-            "original_ltv": _get_float(asset, "originalLoanToValueRatio"),
+            "original_ltv": None,  # Not in XSD — derived from loan amount / vehicle value
             "vehicle_manufacturer": _get_text(asset, "vehicleManufacturerName"),
             "vehicle_model": _get_text(asset, "vehicleModelName"),
             "vehicle_new_used": _get_text(asset, "vehicleNewUsedCode"),
-            "vehicle_model_year": _get_int(asset, "vehicleModelYearNumber"),
+            "vehicle_model_year": _get_int(asset, "vehicleModelYear"),
             "vehicle_type": _get_text(asset, "vehicleTypeCode"),
             "vehicle_value": _get_float(asset, "vehicleValueAmount"),
-            "obligor_credit_score": _get_int(asset, "obligorCreditScoreNumber"),
+            "obligor_credit_score": _get_int(asset, "obligorCreditScore"),
             "obligor_credit_score_type": _get_text(asset, "obligorCreditScoreType"),
             "obligor_geographic_location": _get_text(asset, "obligorGeographicLocation"),
             "co_obligor_indicator": _get_text(asset, "coObligorIndicator"),
             "payment_to_income_ratio": _get_float(asset, "paymentToIncomePercentage"),
             "income_verification_level": _get_text(asset, "obligorIncomeVerificationLevelCode"),
             "payment_type": _get_text(asset, "paymentTypeCode"),
-            "subvention_indicator": _get_text(asset, "subventedIndicator"),
+            "subvention_indicator": _get_text(asset, "subvented"),
         }
+        # Compute LTV if we have both values
+        if loan["original_loan_amount"] and loan["vehicle_value"] and loan["vehicle_value"] > 0:
+            loan["original_ltv"] = loan["original_loan_amount"] / loan["vehicle_value"]
         loans.append(loan)
 
         # Extract performance data for this reporting period
+        # XSD uses reportingPeriodEndingDate (not EndDate)
         perf = {
             "asset_number": asset_number,
-            "reporting_period_end": _get_text(asset, "reportingPeriodEndDate"),
+            "reporting_period_end": _get_text(asset, "reportingPeriodEndingDate"),
             "beginning_balance": _get_float(asset, "reportingPeriodBeginningLoanBalanceAmount"),
-            "ending_balance": _get_float(asset, "reportingPeriodEndingActualBalanceAmount"),
+            "ending_balance": _get_float(asset, "reportingPeriodActualEndBalanceAmount"),
             "scheduled_payment": _get_float(asset, "reportingPeriodScheduledPaymentAmount"),
             "actual_amount_paid": _get_float(asset, "totalActualAmountPaid"),
             "actual_interest_collected": _get_float(asset, "actualInterestCollectedAmount"),
             "actual_principal_collected": _get_float(asset, "actualPrincipalCollectedAmount"),
             "current_interest_rate": _get_float(asset, "reportingPeriodInterestRatePercentage"),
             "current_delinquency_status": _get_text(asset, "currentDelinquencyStatus"),
-            "days_delinquent": _get_int(asset, "numberDaysDelinquent"),
+            "days_delinquent": None,  # Not in XSD; delinquency status is an integer (months)
             "remaining_term": _get_int(asset, "remainingTermToMaturityNumber"),
             "paid_through_date": _get_text(asset, "interestPaidThroughDate"),
             "zero_balance_code": _get_text(asset, "zeroBalanceCode"),
             "zero_balance_date": _get_text(asset, "zeroBalanceEffectiveDate"),
             "charged_off_amount": _get_float(asset, "chargedoffPrincipalAmount"),
             "recoveries": _get_float(asset, "recoveredAmount"),
-            "modification_indicator": _get_text(asset, "modificationIndicator"),
-            "servicing_fee": _get_float(asset, "servicingFeeAmount"),
+            "modification_indicator": _get_text(asset, "reportingPeriodModificationIndicator"),
+            "servicing_fee": (
+                _get_float(asset, "servicingFlatFeeAmount") or
+                _get_float(asset, "servicingFeePercentage")
+            ),
         }
         if perf["reporting_period_end"]:
             performance.append(perf)
