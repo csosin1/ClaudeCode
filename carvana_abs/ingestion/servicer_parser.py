@@ -75,12 +75,22 @@ def _find_row_values(tables, label_pattern: str) -> list[str]:
 
 
 def parse_servicer_certificate(html_content: str) -> dict:
-    """Parse a Carvana servicer certificate HTML and extract pool performance data."""
+    """Parse a Carvana servicer certificate HTML and extract pool performance data.
+
+    Note: Carvana switched from HTML tables to embedded JPG images around 2023.
+    This parser only works with the HTML table format (pre-2023 filings).
+    JPG-based filings will return an empty dict.
+    """
     soup = BeautifulSoup(html_content, "html.parser")
     tables = soup.find_all("table")
 
     if not tables:
-        logger.warning("No tables found in servicer certificate HTML")
+        # Check if this is a JPG-based filing (Carvana switched ~2023)
+        imgs = soup.find_all("img")
+        if imgs:
+            logger.info("Servicer certificate is image-based (JPG) — skipping (requires OCR)")
+        else:
+            logger.warning("No tables or images found in servicer certificate HTML")
         return {}
 
     data = {}

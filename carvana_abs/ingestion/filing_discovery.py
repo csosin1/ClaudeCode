@@ -18,6 +18,20 @@ def _build_doc_url(cik: str, accession_number: str, filename: str) -> str:
     return f"{ARCHIVES_BASE}/{cik_clean}/{acc_no_dashes}/{filename}"
 
 
+def _get_index_json(cik: str, accession_number: str) -> Optional[list]:
+    """Fetch the filing index.json and return the list of files.
+
+    SEC EDGAR index format: /Archives/edgar/data/{cik}/{acc_nodashes}/index.json
+    """
+    acc_no_dashes = accession_number.replace("-", "")
+    cik_clean = cik.lstrip("0")
+    url = f"{ARCHIVES_BASE}/{cik_clean}/{acc_no_dashes}/index.json"
+    data = fetch_url(url, max_retries=1, as_json=True)
+    if data:
+        return data.get("directory", {}).get("item", [])
+    return None
+
+
 def _extract_filings_from_submissions(submissions: dict) -> list[dict]:
     """Extract all 10-D and ABS-EE filings from the submissions JSON."""
     filings = []
@@ -65,77 +79,35 @@ def _extract_filings_from_submissions(submissions: dict) -> list[dict]:
     return filings
 
 
-def _discover_exhibit_urls(accession_number: str, cik: str) -> dict:
-    """Fetch the filing index and extract exhibit URLs.
-
-    SEC EDGAR index format: /Archives/edgar/data/{cik}/{acc_no_nodashes}/index.json
-    The JSON contains a 'directory' with 'item' array listing all files.
-    """
-    acc_no_dashes = accession_number.replace("-", "")
-    cik_clean = cik.lstrip("0")
-
-    # Try the correct EDGAR index URL format
-    index_url = f"{ARCHIVES_BASE}/{cik_clean}/{acc_no_dashes}/index.json"
-    index_data = fetch_url(index_url, as_json=True)
-
-    if not index_data:
-        # Fallback to HTML index page
-        return _discover_exhibit_urls_html(accession_number, cik)
-
+def _find_exhibits_in_index(items: list, cik: str, accession_number: str) -> dict:
+    """Given a list of files from index.json, identify exhibit URLs."""
     result = {"absee_url": None, "servicer_cert_url": None}
-
-    directory = index_data.get("directory", {})
-    items = directory.get("item", [])
 
     for item in items:
-        name = item.get("name", "").lower()
-        # EX-102 is the XML asset data file (auto loan data)
-        if "ex-102" in name or "ex102" in name or (name.endswith(".xml") and ("absee" in name or "ex102" in name)):
-            result["absee_url"] = _build_doc_url(cik, accession_number, item["name"])
-        # EX-99.1 is the servicer certificate
-        elif ("ex-99" in name or "ex99" in name) and name.endswith(".htm"):
-            result["servicer_cert_url"] = _build_doc_url(cik, accession_number, item["name"])
-        # Also match "servicer" in the filename
-        elif "servicer" in name and name.endswith(".htm"):
-            result["servicer_cert_url"] = _build_doc_url(cik, accession_number, item["name"])
+        name = item.get("name", "")
+        name_lower = name.lower()
 
-    return result
+        # XML files are the EX-102 asset data
+        if name_lower.endswith(".xml") and ("ex102" in name_lower or "ex-102" in name_lower):
+            result["absee_url"] = _build_doc_url(cik, accession_number, name)
 
+        # Servicer report HTM files
+        elif "servicer" in name_lower and name_lower.endswith(".htm"):
+            result["servicer_cert_url"] = _build_doc_url(cik, accession_number, name)
 
-def _discover_exhibit_urls_html(accession_number: str, cik: str) -> dict:
-    """Fallback: discover exhibit URLs by parsing the filing index HTML page."""
-    from carvana_abs.ingestion.edgar_client import get_filing_page
+        # EX-99.1 pattern
+        elif ("ex-99" in name_lower or "ex99" in name_lower) and name_lower.endswith(".htm"):
+            result["servicer_cert_url"] = _build_doc_url(cik, accession_number, name)
 
-    result = {"absee_url": None, "servicer_cert_url": None}
-    html = get_filing_page(accession_number, cik)
-    if not html:
-        return result
-
-    xml_pattern = re.compile(r'href="([^"]*\.xml)"', re.IGNORECASE)
-    for match in xml_pattern.finditer(html):
-        url = match.group(1)
-        if "absee" in url.lower() or "ex-102" in url.lower() or "ex102" in url.lower():
-            if not url.startswith("http"):
-                url = f"https://www.sec.gov{url}"
-            result["absee_url"] = url
-            break
-
-    ex99_pattern = re.compile(r'href="([^"]*(?:ex-?99|servicer)[^"]*\.htm[l]?)"', re.IGNORECASE)
-    for match in ex99_pattern.finditer(html):
-        url = match.group(1)
-        if not url.startswith("http"):
-            url = f"https://www.sec.gov{url}"
-        result["servicer_cert_url"] = url
-        break
+        # Match dXXXXXdex991.htm pattern (Donnelley filings)
+        elif name_lower.endswith("ex991.htm") or "dex991" in name_lower:
+            result["servicer_cert_url"] = _build_doc_url(cik, accession_number, name)
 
     return result
 
 
 def discover_all_filings(deal: str = DEFAULT_DEAL, db_path: Optional[str] = None) -> int:
-    """Discover all 10-D and ABS-EE filings for a deal and store metadata.
-
-    Returns the number of new filings discovered.
-    """
+    """Discover all 10-D and ABS-EE filings for a deal and store metadata."""
     from carvana_abs.config import DB_PATH, get_deal_config
 
     deal_cfg = get_deal_config(deal)
@@ -161,8 +133,12 @@ def discover_all_filings(deal: str = DEFAULT_DEAL, db_path: Optional[str] = None
             continue
 
         exhibit_urls = {"absee_url": None, "servicer_cert_url": None}
+
+        # For 10-D filings, look up the index to find servicer cert
         if filing["filing_type"] in ("10-D", "10-D/A"):
-            exhibit_urls = _discover_exhibit_urls(acc, cik)
+            items = _get_index_json(cik, acc)
+            if items:
+                exhibit_urls = _find_exhibits_in_index(items, cik, acc)
 
         filing_url = _build_doc_url(
             cik, acc,
@@ -191,7 +167,12 @@ def discover_all_filings(deal: str = DEFAULT_DEAL, db_path: Optional[str] = None
 
 
 def link_absee_to_10d(deal: str = DEFAULT_DEAL, db_path: Optional[str] = None) -> None:
-    """Link ABS-EE filings to their corresponding 10-D filings."""
+    """Link ABS-EE filings (with EX-102 XML) to their corresponding 10-D filings.
+
+    ABS-EE filings contain the XML loan data. They're filed by a different entity
+    (filing agent) but correspond to the same reporting period as a 10-D.
+    We look up the ABS-EE filing's index.json using the trust's CIK to find the XML.
+    """
     from carvana_abs.config import DB_PATH, get_deal_config
 
     deal_cfg = get_deal_config(deal)
@@ -200,6 +181,7 @@ def link_absee_to_10d(deal: str = DEFAULT_DEAL, db_path: Optional[str] = None) -
     conn = get_connection(db_path or DB_PATH)
     cursor = conn.cursor()
 
+    # Find ABS-EE filings that haven't been linked yet
     cursor.execute("""
         SELECT accession_number, filing_date
         FROM filings WHERE deal = ? AND filing_type IN ('ABS-EE', 'ABS-EE/A')
@@ -207,16 +189,28 @@ def link_absee_to_10d(deal: str = DEFAULT_DEAL, db_path: Optional[str] = None) -
     absee_filings = cursor.fetchall()
 
     for absee in absee_filings:
-        exhibit_urls = _discover_exhibit_urls(absee["accession_number"], cik)
-        xml_url = exhibit_urls.get("absee_url")
+        acc = absee["accession_number"]
+
+        # Look up the ABS-EE filing's index to find the XML file
+        items = _get_index_json(cik, acc)
+        xml_url = None
+        if items:
+            for item in items:
+                name = item.get("name", "").lower()
+                if name.endswith(".xml") and ("ex102" in name or "ex-102" in name):
+                    xml_url = _build_doc_url(cik, acc, item["name"])
+                    break
+
         if not xml_url:
+            logger.debug(f"No XML found in ABS-EE {acc}")
             continue
 
+        # Find matching 10-D by filing date
         cursor.execute("""
             SELECT accession_number FROM filings
             WHERE deal = ? AND filing_type IN ('10-D', '10-D/A')
             AND filing_date = ?
-            AND absee_url IS NULL
+            AND (absee_url IS NULL OR absee_url = '')
             ORDER BY filing_date
             LIMIT 1
         """, (deal, absee["filing_date"]))

@@ -116,39 +116,68 @@ for label, url in servicer_urls:
         if val is not None:
             print(f"    {key}: {val}")
 
-# ---- Step 3: Test XML parsing ----
+# ---- Step 3: Test XML parsing via ABS-EE filing ----
 print("\n" + "="*60)
-print("STEP 3: Test XML loan data parsing (just first file)")
+print("STEP 3: Test XML loan data parsing")
 print("="*60)
 
-xml_url = f"{ARCHIVES_BASE}/{cik}/{acc_nodashes}/crvna20p1ex102.xml"
-print(f"URL: {xml_url}")
-xml_content = download_document(xml_url)
-if xml_content:
-    print(f"Downloaded {len(xml_content)} chars")
-    # Save first 5000 chars for inspection
-    with open("debug_output/sample_xml.txt", "w", encoding="utf-8") as f:
-        f.write(xml_content[:5000])
+# The XML is in the ABS-EE filing (accession 0001801738-25-000051),
+# which is paired with 10-D filing 0001801738-25-000053
+absee_acc = "0001801738-25-000051"
+absee_nodashes = absee_acc.replace("-", "")
 
-    result = parse_auto_loan_xml(xml_content)
-    print(f"Loans parsed: {len(result['loans'])}")
-    print(f"Performance records: {len(result['performance'])}")
+# First, look up the ABS-EE index to find the XML filename
+absee_index_url = f"{ARCHIVES_BASE}/{cik}/{absee_nodashes}/index.json"
+print(f"Fetching ABS-EE index: {absee_index_url}")
+absee_index = fetch_url(absee_index_url, max_retries=1, as_json=True)
+xml_url = None
+if absee_index:
+    items = absee_index.get("directory", {}).get("item", [])
+    print(f"Files in ABS-EE filing ({len(items)}):")
+    for item in items:
+        name = item.get("name", "")
+        print(f"  {name}")
+        if name.lower().endswith(".xml") and ("ex102" in name.lower()):
+            xml_url = f"{ARCHIVES_BASE}/{cik}/{absee_nodashes}/{name}"
 
-    if result["loans"]:
-        loan = result["loans"][0]
-        print(f"\nFirst loan sample:")
-        for key, val in loan.items():
-            if val is not None:
-                print(f"  {key}: {val}")
+if xml_url:
+    print(f"\nDownloading XML: {xml_url}")
+    xml_content = download_document(xml_url)
+    if xml_content:
+        print(f"Downloaded {len(xml_content)} chars")
+        with open("debug_output/sample_xml.txt", "w", encoding="utf-8") as f:
+            f.write(xml_content[:5000])
 
-    if result["performance"]:
-        perf = result["performance"][0]
-        print(f"\nFirst performance sample:")
-        for key, val in perf.items():
-            if val is not None:
-                print(f"  {key}: {val}")
+        result = parse_auto_loan_xml(xml_content)
+        print(f"Loans parsed: {len(result['loans'])}")
+        print(f"Performance records: {len(result['performance'])}")
+
+        if result["loans"]:
+            loan = result["loans"][0]
+            print(f"\nFirst loan sample:")
+            for key, val in loan.items():
+                if val is not None:
+                    print(f"  {key}: {val}")
+
+        if result["performance"]:
+            perf = result["performance"][0]
+            print(f"\nFirst performance sample:")
+            for key, val in perf.items():
+                if val is not None:
+                    print(f"  {key}: {val}")
+    else:
+        print("FAILED to download XML")
 else:
-    print("FAILED to download XML")
+    print("Could not find XML URL in ABS-EE index")
+
+# ---- Step 4: Test full re-discovery with new index.json logic ----
+print("\n" + "="*60)
+print("STEP 4: Quick re-ingestion test (resets DB, discovers fresh)")
+print("="*60)
+print("To re-run full ingestion with the fixes, delete the old database first:")
+print("  Remove-Item db\\carvana_abs.db")
+print("  python run_ingestion.py")
+print("This will be MUCH faster now (no 404 retries).")
 
 print("\n" + "="*60)
 print("DONE. Paste this output back to Claude.")
