@@ -39,21 +39,36 @@ def _clean_number(text: str) -> Optional[float]:
 def _extract_numbered_fields(text: str) -> dict:
     """Extract all numbered fields from servicer report text.
 
-    The format is: (N) Label text (N) Value [optional second value]
-    Example: (1) Beginning Pool Balance (1) 5,401 20,294,118.53
-    Returns: {1: "5,401 20,294,118.53", 2: "...", ...}
+    Handles TWO formats:
+    1. Workiva (2023+): (N) Label text (N) Value  — number appears twice
+       Example: (1) Beginning Pool Balance (1) 5,401 20,294,118.53
+    2. Donnelley (pre-2023): Label text (N) Value  — number appears once after label
+       Example: Beginning Pool Balance (1) 19,941 387,718,618.94
+
+    Returns: {1: {"label": "...", "raw": "value string"}, ...}
     """
     fields = {}
-    # Match pattern: (N) [optional label] (N) value-until-next-field-or-end
-    # The label between the two (N)s can be empty (e.g., delinquency rows)
-    # The value is everything after the second (N) until the next (M) pattern
-    pattern = re.compile(r'\((\d+)\)\s*(.*?)\s*\(\1\)\s+(.*?)(?=\(\d+\)|\Z)', re.DOTALL)
 
-    for match in pattern.finditer(text):
+    # Strategy 1: Workiva double-number format: (N) label (N) value
+    pattern1 = re.compile(r'\((\d+)\)\s*(.*?)\s*\(\1\)\s+(.*?)(?=\(\d+\)|\Z)', re.DOTALL)
+    for match in pattern1.finditer(text):
         field_num = int(match.group(1))
         label = match.group(2).strip()
         value_str = match.group(3).strip()
         fields[field_num] = {"label": label, "raw": value_str}
+
+    # If we found fields with Strategy 1, we're done
+    if fields:
+        return fields
+
+    # Strategy 2: Donnelley single-number format: label (N) value
+    # Match: any text, then (N), then value until next (M) or end
+    pattern2 = re.compile(r'(?:^|(?<=\s))\((\d+)\)\s+(.*?)(?=\(\d+\)|\Z)', re.DOTALL)
+    for match in pattern2.finditer(text):
+        field_num = int(match.group(1))
+        value_str = match.group(2).strip()
+        if field_num not in fields:
+            fields[field_num] = {"label": "", "raw": value_str}
 
     return fields
 
@@ -75,8 +90,9 @@ def _parse_numbered_value(raw: str, expect_count_and_amount: bool = False) -> di
             result["pct"] = _clean_number(pct_match.group(1))
         return result
 
-    # Extract all standalone number-like tokens (not part of ranges like "31-60")
-    # Split on whitespace first, then identify numbers
+    # Extract number tokens from the BEGINNING of the value string.
+    # Stop when we hit a word (letter character) that's not part of a number.
+    # This avoids grabbing stray numbers from trailing label text like "60 days delinquent".
     tokens = raw.split()
     numbers = []
     for token in tokens:
@@ -84,15 +100,20 @@ def _parse_numbered_value(raw: str, expect_count_and_amount: bool = False) -> di
         # Skip range patterns like "31-60", "61-90"
         if re.match(r'^\d+-\d+$', cleaned):
             continue
-        # Skip non-numeric labels
+        # If it looks like a number, add it
         if re.match(r'^-?[\d,]+\.?\d*$', token.replace(",", "")):
             numbers.append(token)
+        elif re.match(r'^[a-zA-Z]', token):
+            # Hit a word — stop collecting numbers
+            break
 
     if expect_count_and_amount and len(numbers) >= 2:
-        result["count"] = _clean_number(numbers[-2])
-        result["value"] = _clean_number(numbers[-1])
+        # Take the FIRST two numbers: count then amount
+        # (avoids grabbing trailing numbers from label text)
+        result["count"] = _clean_number(numbers[0])
+        result["value"] = _clean_number(numbers[1])
     elif numbers:
-        result["value"] = _clean_number(numbers[-1])
+        result["value"] = _clean_number(numbers[0])
 
     return result
 
@@ -106,17 +127,24 @@ def parse_servicer_certificate(html_content: str) -> dict:
     all_font_text = " ".join(f.get_text(separator=" ", strip=True) for f in font_tags)
 
     if len(all_font_text) > 500:  # Substantial text found
-        return _parse_from_numbered_text(all_font_text)
+        result = _parse_from_numbered_text(all_font_text)
+        if result.get("distribution_date"):
+            return result
 
-    # Strategy 2: Try HTML tables (Donnelley format, pre-2023)
-    tables = soup.find_all("table")
-    if tables:
-        return _parse_from_tables(tables)
-
-    # Strategy 3: Try all text content as fallback
+    # Strategy 2: Try all page text with numbered field parser
+    # (Works for Donnelley HTML tables too — the numbered labels are in the text)
     all_text = soup.get_text(separator=" ", strip=True)
     if len(all_text) > 500:
-        return _parse_from_numbered_text(all_text)
+        result = _parse_from_numbered_text(all_text)
+        if result.get("distribution_date"):
+            return result
+
+    # Strategy 3: Try HTML table parsing as last resort
+    tables = soup.find_all("table")
+    if tables:
+        result = _parse_from_tables(tables)
+        if result.get("distribution_date"):
+            return result
 
     logger.warning("No parseable content found in servicer certificate")
     return {}
