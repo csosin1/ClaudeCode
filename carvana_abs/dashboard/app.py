@@ -169,8 +169,84 @@ if not loan_perf_df.empty:
     loan_perf_df["dq_120_plus_rate"] = loan_perf_df["dq_120_plus_balance"] / loan_perf_df["total_balance"]
 
 
-tab_pool, tab_dq, tab_losses, tab_loans, tab_fields = st.tabs([
-    "Pool Summary", "Delinquencies", "Losses", "Loan Explorer", "Data Fields"
+@st.cache_data(ttl=300)
+def load_waterfall(deal: str) -> pd.DataFrame:
+    """Load monthly cash flow components for waterfall analysis."""
+    df = query_df("""
+        SELECT
+            reporting_period_end as raw_date,
+            SUM(CASE WHEN beginning_balance > 0 THEN beginning_balance ELSE 0 END) as total_beginning_balance,
+            SUM(CASE WHEN ending_balance > 0 THEN ending_balance ELSE 0 END) as total_ending_balance,
+            SUM(COALESCE(actual_amount_paid, 0)) as total_payments,
+            SUM(COALESCE(actual_interest_collected, 0)) as interest_collected,
+            SUM(COALESCE(actual_principal_collected, 0)) as principal_collected,
+            SUM(COALESCE(recoveries, 0)) as recoveries,
+            SUM(COALESCE(charged_off_amount, 0)) as chargeoffs,
+            -- Servicing fee: the field stores a rate (e.g. 0.0054 = 0.54% annual).
+            -- Estimate monthly dollar fee = balance * rate / 12
+            SUM(CASE WHEN beginning_balance > 0 AND servicing_fee > 0
+                THEN beginning_balance * servicing_fee / 12.0 ELSE 0 END) as est_servicing_fee
+        FROM loan_performance WHERE deal = ?
+        GROUP BY reporting_period_end
+        ORDER BY reporting_period_end
+    """, (deal,))
+
+    if df.empty:
+        return df
+
+    # Normalize dates
+    def normalize_date(d):
+        if not d:
+            return d
+        d = str(d).strip()
+        for sep in ["-", "/"]:
+            parts = d.split(sep)
+            if len(parts) == 3 and len(parts[0]) <= 2 and len(parts[2]) == 4:
+                return f"{parts[2]}{sep}{parts[0].zfill(2)}{sep}{parts[1].zfill(2)}"
+        return d
+
+    df["period"] = df["raw_date"].apply(normalize_date)
+    df = df.sort_values("period").reset_index(drop=True)
+
+    # Compute waterfall components
+    # Available Funds = Interest + Recoveries
+    df["available_funds"] = df["interest_collected"] + df["recoveries"]
+
+    # After servicing fee
+    df["after_servicing"] = df["available_funds"] - df["est_servicing_fee"]
+
+    # Net losses this period
+    df["net_losses"] = df["chargeoffs"] - df["recoveries"]
+
+    # Pool principal reduction (positive = paydown)
+    df["pool_paydown"] = df["total_beginning_balance"] - df["total_ending_balance"] - df["chargeoffs"]
+
+    # Total debt principal paid ~ principal collected (what goes to noteholders)
+    df["debt_principal_paid"] = df["principal_collected"]
+
+    # Excess spread = interest available - servicing - net losses (approx)
+    # This is what's available to OC build or residual holders
+    df["excess_spread"] = df["after_servicing"] - df["net_losses"]
+
+    # Residual cash = total collections - debt service - servicing - losses
+    # Approximation: what's left after paying down notes and covering losses
+    df["residual_cash"] = (df["interest_collected"] + df["principal_collected"] + df["recoveries"]
+                           - df["est_servicing_fee"] - df["debt_principal_paid"] - df["net_losses"])
+
+    # Cumulative
+    df["cum_interest_collected"] = df["interest_collected"].cumsum()
+    df["cum_principal_collected"] = df["principal_collected"].cumsum()
+    df["cum_servicing_fees"] = df["est_servicing_fee"].cumsum()
+    df["cum_chargeoffs"] = df["chargeoffs"].cumsum()
+    df["cum_recoveries"] = df["recoveries"].cumsum()
+    df["cum_net_losses"] = df["net_losses"].cumsum()
+    df["cum_excess_spread"] = df["excess_spread"].cumsum()
+
+    return df
+
+
+tab_pool, tab_dq, tab_losses, tab_waterfall, tab_loans, tab_fields = st.tabs([
+    "Pool Summary", "Delinquencies", "Losses", "Cash Waterfall", "Loan Explorer", "Data Fields"
 ])
 
 # ============================================================
@@ -336,7 +412,102 @@ with tab_losses:
             st.dataframe(display, use_container_width=True, hide_index=True)
 
 # ============================================================
-# TAB 4: LOAN EXPLORER
+# TAB 4: CASH WATERFALL
+# ============================================================
+with tab_waterfall:
+    wf = load_waterfall(selected_deal)
+    if wf.empty:
+        st.info("No performance data available yet.")
+    else:
+        st.subheader("Cash Waterfall Analysis")
+        st.caption("Derived from loan-level data. Servicing fee estimated from per-loan rate.")
+
+        # Monthly collections breakdown
+        st.markdown("### Monthly Collections")
+        fig = go.Figure()
+        fig.add_trace(go.Bar(x=wf["period"], y=wf["interest_collected"],
+                             name="Interest Collected", marker_color="#1976D2"))
+        fig.add_trace(go.Bar(x=wf["period"], y=wf["principal_collected"],
+                             name="Principal Collected", marker_color="#388E3C"))
+        fig.add_trace(go.Bar(x=wf["period"], y=wf["recoveries"],
+                             name="Recoveries", marker_color="#4CAF50"))
+        fig.update_layout(barmode="stack", yaxis_tickformat="$,.0f", hovermode="x unified",
+                          title="Monthly Cash Inflows")
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Monthly outflows
+        st.markdown("### Monthly Cash Outflows")
+        fig2 = go.Figure()
+        fig2.add_trace(go.Bar(x=wf["period"], y=wf["est_servicing_fee"],
+                              name="Servicing Fee (est.)", marker_color="#FF9800"))
+        fig2.add_trace(go.Bar(x=wf["period"], y=wf["chargeoffs"],
+                              name="Charge-offs (Losses)", marker_color="#D32F2F"))
+        fig2.add_trace(go.Bar(x=wf["period"], y=wf["debt_principal_paid"],
+                              name="Debt Principal Paid", marker_color="#7B1FA2"))
+        fig2.update_layout(barmode="stack", yaxis_tickformat="$,.0f", hovermode="x unified",
+                           title="Monthly Cash Outflows")
+        st.plotly_chart(fig2, use_container_width=True)
+
+        # Excess spread over time
+        st.markdown("### Excess Spread (Interest Available After Servicing & Losses)")
+        fig3 = px.area(wf, x="period", y="excess_spread",
+                       labels={"period": "Period", "excess_spread": "Excess Spread ($)"})
+        fig3.update_layout(yaxis_tickformat="$,.0f", hovermode="x unified")
+        fig3.update_traces(line_color="#388E3C", fillcolor="rgba(56,142,60,0.2)")
+        st.plotly_chart(fig3, use_container_width=True)
+
+        # Cumulative waterfall
+        st.markdown("### Cumulative Cash Flows")
+        fig4 = go.Figure()
+        fig4.add_trace(go.Scatter(x=wf["period"], y=wf["cum_interest_collected"],
+                                  name="Cumulative Interest", mode="lines"))
+        fig4.add_trace(go.Scatter(x=wf["period"], y=wf["cum_principal_collected"],
+                                  name="Cumulative Principal", mode="lines"))
+        fig4.add_trace(go.Scatter(x=wf["period"], y=wf["cum_servicing_fees"],
+                                  name="Cumulative Servicing Fees", mode="lines",
+                                  line=dict(dash="dash")))
+        fig4.add_trace(go.Scatter(x=wf["period"], y=wf["cum_net_losses"],
+                                  name="Cumulative Net Losses", mode="lines",
+                                  line=dict(color="#D32F2F")))
+        fig4.add_trace(go.Scatter(x=wf["period"], y=wf["cum_excess_spread"],
+                                  name="Cumulative Excess Spread (to Residual)",
+                                  mode="lines", line=dict(color="#388E3C", width=3)))
+        fig4.update_layout(yaxis_tickformat="$,.0f", hovermode="x unified",
+                           title="Cumulative Cash Flows")
+        st.plotly_chart(fig4, use_container_width=True)
+
+        # Monthly waterfall table (latest period)
+        st.markdown("### Latest Period Waterfall")
+        latest = wf.iloc[-1]
+        waterfall_items = [
+            ("Interest Collected", latest["interest_collected"]),
+            ("Recoveries", latest["recoveries"]),
+            ("**Available Funds**", latest["available_funds"]),
+            ("Less: Servicing Fee (est.)", -latest["est_servicing_fee"]),
+            ("Less: Net Losses", -latest["net_losses"]),
+            ("**Excess Spread**", latest["excess_spread"]),
+            ("", None),
+            ("Principal Collected", latest["principal_collected"]),
+            ("Debt Principal Paid", latest["debt_principal_paid"]),
+            ("", None),
+            ("**Cumulative Excess Spread (to Residual)**", latest["cum_excess_spread"]),
+        ]
+        wf_table = pd.DataFrame(
+            [(item, f"${val:,.2f}" if val is not None else "") for item, val in waterfall_items],
+            columns=["Item", "Amount"]
+        )
+        st.dataframe(wf_table, use_container_width=True, hide_index=True)
+
+        st.markdown("""
+        **Note:** This waterfall is derived from loan-level data. The exact split of interest
+        and principal payments across note tranches (A-1 through N) requires the Servicer
+        Certificate data, which is filed as images for recent periods. The cumulative excess
+        spread approximates cash returned to residual/equity holders.
+        """)
+
+
+# ============================================================
+# TAB 5: LOAN EXPLORER
 # ============================================================
 with tab_loans:
     st.subheader("Loan Portfolio Explorer")
@@ -410,7 +581,7 @@ with tab_loans:
             st.dataframe(pd.DataFrame(stat_data).style.format("{:.2f}"), use_container_width=True)
 
 # ============================================================
-# TAB 5: DATA FIELDS
+# TAB 6: DATA FIELDS
 # ============================================================
 with tab_fields:
     st.subheader("Available Data Fields")
