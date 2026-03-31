@@ -56,6 +56,8 @@ def init_db(db_path: str = DB_PATH) -> None:
             liquidation_proceeds REAL,
             net_charged_off_amount REAL,
             cumulative_net_losses REAL,
+            cumulative_gross_losses REAL,
+            cumulative_liquidation_proceeds REAL,
             -- Delinquency buckets (balance)
             delinquent_31_60_balance REAL,
             delinquent_61_90_balance REAL,

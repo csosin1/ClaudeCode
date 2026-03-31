@@ -1,14 +1,12 @@
 """Parse Servicer Certificate (Exhibit 99.1) HTML for pool-level performance data.
 
-Tuned for Carvana Auto Receivables Trust servicer report format, which uses
-numbered line items like:
-  (1) Beginning Pool Balance (units / $)
-  (5) Total collections allocable to principal
-  (8) Charged-Off Losses
-  (9) Ending Pool Balance
-  (10) Collections allocable to interest
-  (11) Recoveries
-  ...with delinquency buckets (31-60, 61-90, 91-120 days) and trigger levels.
+Carvana servicer reports come in two formats:
+1. HTML tables (pre-mid-2023, filed via Donnelley): parsed with BeautifulSoup table logic
+2. Embedded text in <font> tags alongside JPG images (mid-2023+, filed via Workiva):
+   All data is hidden as white-on-white text with numbered fields like:
+   (1) Beginning Pool Balance (1) 5,401 20,294,118.53
+
+Both formats use numbered field labels: (1), (2), ... (118+).
 """
 
 import logging
@@ -22,17 +20,15 @@ logger = logging.getLogger(__name__)
 
 
 def _clean_number(text: str) -> Optional[float]:
-    """Clean a number string from HTML (remove $, commas, parens for negatives)."""
+    """Clean a number string from HTML."""
     if not text:
         return None
     text = text.strip()
-    if text in ("", "-", "N/A", "n/a", "--", "—"):
+    if text in ("", "-", "N/A", "n/a", "--", "\u2014"):
         return None
-
     is_negative = text.startswith("(") and text.endswith(")")
     text = text.replace("(", "").replace(")", "")
     text = text.replace("$", "").replace(",", "").replace("%", "").strip()
-
     try:
         val = float(text)
         return -val if is_negative else val
@@ -40,82 +36,260 @@ def _clean_number(text: str) -> Optional[float]:
         return None
 
 
-def _clean_int(text: str) -> Optional[int]:
-    """Clean an integer string from HTML."""
-    val = _clean_number(text)
-    return int(val) if val is not None else None
+def _extract_numbered_fields(text: str) -> dict:
+    """Extract all numbered fields from servicer report text.
+
+    The format is: (N) Label text (N) Value [optional second value]
+    Example: (1) Beginning Pool Balance (1) 5,401 20,294,118.53
+    Returns: {1: "5,401 20,294,118.53", 2: "...", ...}
+    """
+    fields = {}
+    # Match pattern: (N) [optional label] (N) value-until-next-field-or-end
+    # The label between the two (N)s can be empty (e.g., delinquency rows)
+    # The value is everything after the second (N) until the next (M) pattern
+    pattern = re.compile(r'\((\d+)\)\s*(.*?)\s*\(\1\)\s+(.*?)(?=\(\d+\)|\Z)', re.DOTALL)
+
+    for match in pattern.finditer(text):
+        field_num = int(match.group(1))
+        label = match.group(2).strip()
+        value_str = match.group(3).strip()
+        fields[field_num] = {"label": label, "raw": value_str}
+
+    return fields
 
 
-def _find_value_in_tables(tables, label_pattern: str, value_offset: int = 1) -> Optional[str]:
-    """Search all tables for a row matching label_pattern and return the value cell."""
-    pattern = re.compile(label_pattern, re.IGNORECASE | re.DOTALL)
-    for table in tables:
-        for row in table.find_all("tr"):
-            cells = row.find_all(["td", "th"])
-            for i, cell in enumerate(cells):
-                cell_text = cell.get_text(separator=" ", strip=True)
-                if pattern.search(cell_text):
-                    target_idx = i + value_offset
-                    if target_idx < len(cells):
-                        return cells[target_idx].get_text(strip=True)
-    return None
+def _parse_numbered_value(raw: str, expect_count_and_amount: bool = False) -> dict:
+    """Parse a raw value string into numbers.
 
+    Some fields have both a count and amount: "5,401 20,294,118.53"
+    Others have just one number: "139,999.54" or "4.48%"
+    """
+    result = {"value": None, "count": None, "pct": None}
+    if not raw:
+        return result
 
-def _find_row_values(tables, label_pattern: str) -> list[str]:
-    """Find all value cells in the same row as a label match."""
-    pattern = re.compile(label_pattern, re.IGNORECASE | re.DOTALL)
-    for table in tables:
-        for row in table.find_all("tr"):
-            cells = row.find_all(["td", "th"])
-            for i, cell in enumerate(cells):
-                cell_text = cell.get_text(separator=" ", strip=True)
-                if pattern.search(cell_text):
-                    return [c.get_text(strip=True) for c in cells[i + 1:]]
-    return []
+    # Check for percentage
+    if "%" in raw:
+        pct_match = re.search(r'(-?[\d,.]+)%', raw)
+        if pct_match:
+            result["pct"] = _clean_number(pct_match.group(1))
+        return result
+
+    # Extract all standalone number-like tokens (not part of ranges like "31-60")
+    # Split on whitespace first, then identify numbers
+    tokens = raw.split()
+    numbers = []
+    for token in tokens:
+        cleaned = token.replace(",", "").replace("$", "")
+        # Skip range patterns like "31-60", "61-90"
+        if re.match(r'^\d+-\d+$', cleaned):
+            continue
+        # Skip non-numeric labels
+        if re.match(r'^-?[\d,]+\.?\d*$', token.replace(",", "")):
+            numbers.append(token)
+
+    if expect_count_and_amount and len(numbers) >= 2:
+        result["count"] = _clean_number(numbers[-2])
+        result["value"] = _clean_number(numbers[-1])
+    elif numbers:
+        result["value"] = _clean_number(numbers[-1])
+
+    return result
 
 
 def parse_servicer_certificate(html_content: str) -> dict:
-    """Parse a Carvana servicer certificate HTML and extract pool performance data.
-
-    Note: Carvana switched from HTML tables to embedded JPG images around 2023.
-    This parser only works with the HTML table format (pre-2023 filings).
-    JPG-based filings will return an empty dict.
-    """
+    """Parse a Carvana servicer certificate HTML and extract pool performance data."""
     soup = BeautifulSoup(html_content, "html.parser")
-    tables = soup.find_all("table")
 
-    if not tables:
-        # Check if this is a JPG-based filing (Carvana switched ~2023)
-        imgs = soup.find_all("img")
-        if imgs:
-            logger.info("Servicer certificate is image-based (JPG) — skipping (requires OCR)")
-        else:
-            logger.warning("No tables or images found in servicer certificate HTML")
+    # Strategy 1: Try extracting from embedded <font> text (Workiva format, 2023+)
+    font_tags = soup.find_all("font")
+    all_font_text = " ".join(f.get_text(separator=" ", strip=True) for f in font_tags)
+
+    if len(all_font_text) > 500:  # Substantial text found
+        return _parse_from_numbered_text(all_font_text)
+
+    # Strategy 2: Try HTML tables (Donnelley format, pre-2023)
+    tables = soup.find_all("table")
+    if tables:
+        return _parse_from_tables(tables)
+
+    # Strategy 3: Try all text content as fallback
+    all_text = soup.get_text(separator=" ", strip=True)
+    if len(all_text) > 500:
+        return _parse_from_numbered_text(all_text)
+
+    logger.warning("No parseable content found in servicer certificate")
+    return {}
+
+
+def _parse_from_numbered_text(text: str) -> dict:
+    """Parse servicer report from numbered field text (Workiva format)."""
+    fields = _extract_numbered_fields(text)
+    if not fields:
+        logger.warning("No numbered fields found in text")
         return {}
 
     data = {}
 
     # --- Distribution Date ---
-    data["distribution_date"] = (
-        _find_value_in_tables(tables, r"distribution\s+date") or
-        _find_value_in_tables(tables, r"payment\s+date")
-    )
+    date_match = re.search(r'Distribution\s+Date:\s*(\d{1,2}/\d{1,2}/\d{4})', text)
+    if date_match:
+        data["distribution_date"] = date_match.group(1)
 
-    # --- Pool Balance Rollforward ---
-    # Carvana format: "(1) Beginning Pool Balance" with units and $ in separate columns
-    # Try to get both units and dollar amount
-    begin_vals = _find_row_values(tables, r"\(1\)\s*beginning\s+pool\s+balance|beginning\s+(aggregate\s+)?pool\s+balance")
+    # --- Pool Balance (fields 1, 9) ---
+    if 1 in fields:
+        v = _parse_numbered_value(fields[1]["raw"], expect_count_and_amount=True)
+        data["beginning_pool_balance"] = v["value"]
+        data["beginning_pool_count"] = int(v["count"]) if v["count"] else None
+    if 9 in fields:
+        v = _parse_numbered_value(fields[9]["raw"], expect_count_and_amount=True)
+        data["ending_pool_balance"] = v["value"]
+        data["ending_pool_count"] = int(v["count"]) if v["count"] else None
+
+    # --- Collections (fields 5, 10, 11, 12) ---
+    if 5 in fields:
+        v = _parse_numbered_value(fields[5]["raw"], expect_count_and_amount=True)
+        data["principal_collections"] = v["value"]
+    if 10 in fields:
+        data["interest_collections"] = _parse_numbered_value(fields[10]["raw"])["value"]
+    if 11 in fields:
+        data["recoveries"] = _parse_numbered_value(fields[11]["raw"])["value"]
+
+    # --- Losses (fields 8, 89-98) ---
+    if 8 in fields:
+        v = _parse_numbered_value(fields[8]["raw"], expect_count_and_amount=True)
+        data["gross_charged_off_amount"] = v["value"]
+    if 90 in fields:
+        data["gross_charged_off_amount"] = data.get("gross_charged_off_amount") or _parse_numbered_value(fields[90]["raw"])["value"]
+    if 91 in fields:
+        data["cumulative_gross_losses"] = _parse_numbered_value(fields[91]["raw"])["value"]
+    if 93 in fields:
+        data["liquidation_proceeds"] = _parse_numbered_value(fields[93]["raw"])["value"]
+    if 95 in fields:
+        data["cumulative_liquidation_proceeds"] = _parse_numbered_value(fields[95]["raw"])["value"]
+    if 97 in fields:
+        data["net_charged_off_amount"] = _parse_numbered_value(fields[97]["raw"])["value"]
+    if 98 in fields:
+        data["cumulative_net_losses"] = _parse_numbered_value(fields[98]["raw"])["value"]
+
+    # --- Delinquency (fields 99-104) ---
+    if 99 in fields:
+        v = _parse_numbered_value(fields[99]["raw"], expect_count_and_amount=True)
+        data["delinquent_31_60_count"] = int(v["count"]) if v["count"] else None
+        data["delinquent_31_60_balance"] = v["value"]
+    if 100 in fields:
+        v = _parse_numbered_value(fields[100]["raw"], expect_count_and_amount=True)
+        data["delinquent_61_90_count"] = int(v["count"]) if v["count"] else None
+        data["delinquent_61_90_balance"] = v["value"]
+    if 101 in fields:
+        v = _parse_numbered_value(fields[101]["raw"], expect_count_and_amount=True)
+        data["delinquent_91_120_count"] = int(v["count"]) if v["count"] else None
+        data["delinquent_91_120_balance"] = v["value"]
+    if 102 in fields:
+        v = _parse_numbered_value(fields[102]["raw"], expect_count_and_amount=True)
+        total_dq_count = int(v["count"]) if v["count"] else None
+        data["total_delinquent_balance"] = v["value"]
+    if 103 in fields:
+        data["delinquency_trigger_actual"] = _parse_numbered_value(fields[103]["raw"])["pct"]
+        if data["delinquency_trigger_actual"]:
+            data["delinquency_trigger_actual"] = data["delinquency_trigger_actual"] / 100.0
+    if 104 in fields:
+        data["delinquency_trigger_level"] = _parse_numbered_value(fields[104]["raw"])["pct"]
+        if data["delinquency_trigger_level"]:
+            data["delinquency_trigger_level"] = data["delinquency_trigger_level"] / 100.0
+
+    # --- Note Balances (after monthly payment: fields 20,26,32,38,44,50,56,61) ---
+    note_field_map = {
+        20: "note_balance_a1", 26: "note_balance_a2", 32: "note_balance_a3",
+        38: "note_balance_a4", 44: "note_balance_b", 50: "note_balance_c",
+        56: "note_balance_d", 61: "note_balance_n",
+    }
+    for field_num, col_name in note_field_map.items():
+        if field_num in fields:
+            data[col_name] = _parse_numbered_value(fields[field_num]["raw"])["value"]
+
+    # Aggregate note balance (field 76 or sum)
+    if 76 in fields:
+        data["aggregate_note_balance"] = _parse_numbered_value(fields[76]["raw"])["value"]
+
+    # --- Overcollateralization & Reserve (fields 63, 65, 78, 81) ---
+    if 63 in fields:
+        data["overcollateralization_amount"] = _parse_numbered_value(fields[63]["raw"])["value"]
+    if 78 in fields:
+        data["reserve_account_balance"] = _parse_numbered_value(fields[78]["raw"])["value"]
+    if 81 in fields:
+        data["reserve_account_balance"] = _parse_numbered_value(fields[81]["raw"])["value"]
+    if 77 in fields:
+        data["specified_reserve_amount"] = _parse_numbered_value(fields[77]["raw"])["value"]
+
+    # --- Pool Statistics (fields 105-112) ---
+    if 105 in fields:
+        # WAC field has original/prev/current — take current (last number)
+        numbers = re.findall(r'[\d.]+%', fields[105]["raw"])
+        if numbers:
+            pct = _clean_number(numbers[-1].replace("%", ""))
+            data["weighted_avg_apr"] = pct / 100.0 if pct else None
+    if 106 in fields:
+        numbers = re.findall(r'[\d.]+', fields[106]["raw"])
+        if numbers:
+            data["weighted_avg_remaining_term"] = _clean_number(numbers[-1])
+    if 107 in fields:
+        numbers = re.findall(r'[\d.]+', fields[107]["raw"])
+        if numbers:
+            data["weighted_avg_original_term"] = _clean_number(numbers[-1])
+    if 108 in fields:
+        numbers = re.findall(r'[\d,.]+', fields[108]["raw"])
+        if numbers:
+            data["avg_principal_balance"] = _clean_number(numbers[-1])
+
+    # --- Extensions (fields 113-114) ---
+    if 113 in fields:
+        data["extensions_count"] = int(_parse_numbered_value(fields[113]["raw"])["value"] or 0)
+    if 114 in fields:
+        data["extensions_balance"] = _parse_numbered_value(fields[114]["raw"])["value"]
+
+    return data
+
+
+def _parse_from_tables(tables) -> dict:
+    """Parse servicer report from HTML tables (Donnelley format, pre-2023)."""
+    data = {}
+
+    def find_val(pattern, offset=1):
+        p = re.compile(pattern, re.IGNORECASE | re.DOTALL)
+        for table in tables:
+            for row in table.find_all("tr"):
+                cells = row.find_all(["td", "th"])
+                for i, cell in enumerate(cells):
+                    if p.search(cell.get_text(separator=" ", strip=True)):
+                        if i + offset < len(cells):
+                            return cells[i + offset].get_text(strip=True)
+        return None
+
+    def find_row_vals(pattern):
+        p = re.compile(pattern, re.IGNORECASE | re.DOTALL)
+        for table in tables:
+            for row in table.find_all("tr"):
+                cells = row.find_all(["td", "th"])
+                for i, cell in enumerate(cells):
+                    if p.search(cell.get_text(separator=" ", strip=True)):
+                        return [c.get_text(strip=True) for c in cells[i + 1:]]
+        return []
+
+    data["distribution_date"] = find_val(r"distribution\s+date") or find_val(r"payment\s+date")
+
+    # Pool balances
+    begin_vals = find_row_vals(r"\(1\)\s*beginning\s+pool|beginning.*pool\s+balance")
     if begin_vals:
-        # Usually: [units, $amount] or just [$amount]
         for v in begin_vals:
             num = _clean_number(v)
             if num is not None:
-                if num > 100_000:  # dollar amount (not a count)
+                if num > 100_000:
                     data["beginning_pool_balance"] = num
                 else:
                     data["beginning_pool_count"] = int(num)
 
-    end_vals = _find_row_values(tables, r"\(9\)\s*ending\s+pool\s+balance|ending\s+(aggregate\s+)?pool\s+balance")
+    end_vals = find_row_vals(r"\(9\)\s*ending\s+pool|ending.*pool\s+balance")
     if end_vals:
         for v in end_vals:
             num = _clean_number(v)
@@ -125,131 +299,32 @@ def parse_servicer_certificate(html_content: str) -> dict:
                 else:
                     data["ending_pool_count"] = int(num)
 
-    # Fallback: try without numbered prefixes
-    if "beginning_pool_balance" not in data:
-        data["beginning_pool_balance"] = _clean_number(
-            _find_value_in_tables(tables, r"beginning.*principal\s+balance|beginning.*pool\s+balance")
-        )
-    if "ending_pool_balance" not in data:
-        data["ending_pool_balance"] = _clean_number(
-            _find_value_in_tables(tables, r"ending.*principal\s+balance|ending.*pool\s+balance")
-        )
+    data["principal_collections"] = _clean_number(find_val(r"collections?\s+allocable\s+to\s+principal|principal\s+collections"))
+    data["interest_collections"] = _clean_number(find_val(r"collections?\s+allocable\s+to\s+interest|interest\s+collections"))
+    data["recoveries"] = _clean_number(find_val(r"recover(y|ies)"))
+    data["gross_charged_off_amount"] = _clean_number(find_val(r"charged.?off.*current|system.*charged.?off"))
+    data["cumulative_net_losses"] = _clean_number(find_val(r"cumulative.*net.*loss|aggregate.*net.*charged"))
 
-    # --- Collections ---
-    data["principal_collections"] = _clean_number(
-        _find_value_in_tables(tables, r"\(5\)\s*total\s+collections\s+allocable\s+to\s+principal|collections?\s+allocable\s+to\s+principal|principal\s+collections")
-    )
-    data["interest_collections"] = _clean_number(
-        _find_value_in_tables(tables, r"\(10\)\s*collections?\s+allocable\s+to\s+interest|collections?\s+allocable\s+to\s+interest|interest\s+collections")
-    )
-    data["recoveries"] = _clean_number(
-        _find_value_in_tables(tables, r"\(11\)\s*collections?\s+from\s+recover|recover(y|ies)")
-    )
-
-    # --- Losses ---
-    data["gross_charged_off_amount"] = _clean_number(
-        _find_value_in_tables(tables, r"\(8\)\s*charged.?off|gross\s+charged.?off|system\s+charged.?off")
-    )
-    data["liquidation_proceeds"] = _clean_number(
-        _find_value_in_tables(tables, r"liquidation\s+proceeds")
-    )
-    data["net_charged_off_amount"] = _clean_number(
-        _find_value_in_tables(tables, r"net\s+charged.?off.*current|net\s+charged.?off.*period|net\s+charged.?off.*loss")
-    )
-    data["cumulative_net_losses"] = _clean_number(
-        _find_value_in_tables(tables, r"cumulative.*net.*loss|cumulative.*charged.?off")
-    )
-
-    # --- Delinquency Buckets ---
-    # Carvana reports delinquencies with both count and balance
-    for bucket, pattern in [
-        ("31_60", r"31\s*[-–]\s*60\s*day"),
-        ("61_90", r"61\s*[-–]\s*90\s*day"),
-        ("91_120", r"91\s*[-–]\s*120\s*day"),
-        ("121_plus", r"12[01]\s*\+|over\s*120|121\s*[-–]|greater\s+than\s+120"),
-    ]:
-        vals = _find_row_values(tables, pattern)
-        count_val = None
-        balance_val = None
+    for bucket, pattern in [("31_60", r"31\s*[-\u2013]\s*60"), ("61_90", r"61\s*[-\u2013]\s*90"),
+                             ("91_120", r"91\s*[-\u2013]\s*120")]:
+        vals = find_row_vals(pattern)
         for v in vals:
             num = _clean_number(v)
             if num is not None:
-                if num > 10_000:  # dollar amount
-                    balance_val = num
-                elif count_val is None:
-                    count_val = int(num)
-        data[f"delinquent_{bucket}_balance"] = balance_val
-        data[f"delinquent_{bucket}_count"] = count_val
+                if num > 10_000:
+                    data[f"delinquent_{bucket}_balance"] = num
+                elif data.get(f"delinquent_{bucket}_count") is None:
+                    data[f"delinquent_{bucket}_count"] = int(num)
 
-    # Total delinquencies
-    total_dq_vals = _find_row_values(tables, r"total\s+delinquen")
-    for v in total_dq_vals:
+    td_vals = find_row_vals(r"total\s+delinquen")
+    for v in td_vals:
         num = _clean_number(v)
         if num is not None and num > 10_000:
             data["total_delinquent_balance"] = num
             break
 
-    # --- Delinquency Trigger ---
-    data["delinquency_trigger_level"] = _clean_number(
-        _find_value_in_tables(tables, r"delinquency\s+trigger\s+level")
-    )
-    data["delinquency_trigger_actual"] = _clean_number(
-        _find_value_in_tables(tables, r"receivables.*greater\s+than\s+60\s+days|actual\s+delinquency|60\+\s*day.*delinquen.*percent")
-    )
-
-    # --- Note Balances ---
-    # Try to find note balance table (usually has "Current Note Balance" column)
-    for note_class, pattern in [
-        ("note_balance_a1", r"(?:class\s+)?a-?1\b"),
-        ("note_balance_a2", r"(?:class\s+)?a-?2\b"),
-        ("note_balance_a3", r"(?:class\s+)?a-?3\b"),
-        ("note_balance_a4", r"(?:class\s+)?a-?4\b"),
-        ("note_balance_b", r"(?:class\s+)?(?<![a-z])b\b(?!\w*alanc)"),
-        ("note_balance_c", r"(?:class\s+)?(?<![a-z])c\b(?!\w*umul)"),
-        ("note_balance_d", r"(?:class\s+)?(?<![a-z])d\b(?!\w*eli)"),
-        ("note_balance_n", r"(?:class\s+)?(?<![a-z])n\b(?!\w*ote)"),
-    ]:
-        # Look in note distribution table for current balance
-        data[note_class] = _clean_number(
-            _find_value_in_tables(tables, pattern)
-        )
-
-    data["aggregate_note_balance"] = _clean_number(
-        _find_value_in_tables(tables, r"aggregate\s+note\s+balance|total.*note.*balance")
-    )
-
-    # --- Pool Statistics ---
-    data["weighted_avg_apr"] = _clean_number(
-        _find_value_in_tables(tables, r"weighted\s+average\s+apr|weighted\s+avg.*apr|wa\s*apr")
-    )
-    data["weighted_avg_remaining_term"] = _clean_number(
-        _find_value_in_tables(tables, r"weighted\s+average\s+remaining\s+term|wa.*remaining\s+term")
-    )
-    data["weighted_avg_original_term"] = _clean_number(
-        _find_value_in_tables(tables, r"weighted\s+average\s+original\s+term|wa.*original\s+term")
-    )
-    data["avg_principal_balance"] = _clean_number(
-        _find_value_in_tables(tables, r"average\s+principal\s+balance|avg.*principal\s+bal")
-    )
-
-    # --- Overcollateralization & Reserve ---
-    data["overcollateralization_amount"] = _clean_number(
-        _find_value_in_tables(tables, r"overcollateral")
-    )
-    data["reserve_account_balance"] = _clean_number(
-        _find_value_in_tables(tables, r"reserve\s+account.*balance")
-    )
-    data["specified_reserve_amount"] = _clean_number(
-        _find_value_in_tables(tables, r"specified\s+reserve")
-    )
-
-    # --- Extensions ---
-    data["extensions_count"] = _clean_int(
-        _find_value_in_tables(tables, r"extension.*number|number.*extension|extensions?.*count")
-    )
-    data["extensions_balance"] = _clean_number(
-        _find_value_in_tables(tables, r"extension.*balance|extension.*principal|principal.*extension")
-    )
+    data["overcollateralization_amount"] = _clean_number(find_val(r"overcollateral"))
+    data["reserve_account_balance"] = _clean_number(find_val(r"reserve\s+account.*balance"))
 
     return data
 
@@ -276,6 +351,7 @@ def store_pool_data(html_content: str, accession_number: str,
              principal_collections, interest_collections, recoveries,
              gross_charged_off_amount, liquidation_proceeds,
              net_charged_off_amount, cumulative_net_losses,
+             cumulative_gross_losses, cumulative_liquidation_proceeds,
              delinquent_31_60_balance, delinquent_61_90_balance,
              delinquent_91_120_balance, delinquent_121_plus_balance,
              total_delinquent_balance,
@@ -292,7 +368,7 @@ def store_pool_data(html_content: str, accession_number: str,
              extensions_count, extensions_balance)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?)
+                    ?, ?, ?, ?, ?)
         """, (
             deal, data["distribution_date"], accession_number,
             data.get("beginning_pool_balance"), data.get("ending_pool_balance"),
@@ -301,6 +377,7 @@ def store_pool_data(html_content: str, accession_number: str,
             data.get("recoveries"),
             data.get("gross_charged_off_amount"), data.get("liquidation_proceeds"),
             data.get("net_charged_off_amount"), data.get("cumulative_net_losses"),
+            data.get("cumulative_gross_losses"), data.get("cumulative_liquidation_proceeds"),
             data.get("delinquent_31_60_balance"), data.get("delinquent_61_90_balance"),
             data.get("delinquent_91_120_balance"), data.get("delinquent_121_plus_balance"),
             data.get("total_delinquent_balance"),
@@ -319,10 +396,8 @@ def store_pool_data(html_content: str, accession_number: str,
             data.get("extensions_count"), data.get("extensions_balance"),
         ))
 
-        cursor.execute("""
-            UPDATE filings SET ingested_pool = 1 WHERE accession_number = ?
-        """, (accession_number,))
-
+        cursor.execute("UPDATE filings SET ingested_pool = 1 WHERE accession_number = ?",
+                        (accession_number,))
         conn.commit()
         logger.info(f"Stored pool performance data for {deal} / {data['distribution_date']}")
         return True
