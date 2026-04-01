@@ -164,12 +164,49 @@ def init_db(db_path: str = DB_PATH) -> None:
             ON loan_performance(deal, reporting_period_end);
         CREATE INDEX IF NOT EXISTS idx_loan_perf_delinquency
             ON loan_performance(deal, reporting_period_end, current_delinquency_status);
+        CREATE INDEX IF NOT EXISTS idx_loan_perf_asset
+            ON loan_performance(deal, asset_number);
         CREATE INDEX IF NOT EXISTS idx_loans_deal
             ON loans(deal);
         CREATE INDEX IF NOT EXISTS idx_loans_state
             ON loans(deal, obligor_geographic_location);
         CREATE INDEX IF NOT EXISTS idx_loans_score
             ON loans(deal, obligor_credit_score);
+
+        -- Pre-computed monthly summary (populated during ingestion)
+        CREATE TABLE IF NOT EXISTS monthly_summary (
+            deal TEXT NOT NULL,
+            reporting_period_end TEXT NOT NULL,
+            active_loans INTEGER,
+            total_balance REAL,
+            total_dq_balance REAL,
+            dq_30_balance REAL,
+            dq_60_balance REAL,
+            dq_90_balance REAL,
+            dq_120_plus_balance REAL,
+            total_dq_count INTEGER,
+            dq_30_count INTEGER,
+            dq_60_count INTEGER,
+            dq_90_count INTEGER,
+            dq_120_plus_count INTEGER,
+            period_chargeoffs REAL,
+            period_recoveries REAL,
+            interest_collected REAL,
+            principal_collected REAL,
+            est_servicing_fee REAL,
+            PRIMARY KEY (deal, reporting_period_end)
+        );
+
+        -- Pre-computed per-loan loss totals (populated during ingestion)
+        CREATE TABLE IF NOT EXISTS loan_loss_summary (
+            deal TEXT NOT NULL,
+            asset_number TEXT NOT NULL,
+            total_chargeoff REAL,
+            total_recovery REAL,
+            chargeoff_period TEXT,
+            first_recovery_period TEXT,
+            PRIMARY KEY (deal, asset_number)
+        );
     """)
 
     conn.commit()

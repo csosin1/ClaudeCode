@@ -130,7 +130,23 @@ with st.sidebar:
         st.metric("Unique Loans", f"{int(lc.iloc[0]['n']):,}")
     if not pp.empty:
         st.metric("Pool Data Points", int(pp.iloc[0]["n"]))
+    ms = query_df("SELECT COUNT(*) as n FROM monthly_summary WHERE deal = ?", (selected_deal,))
+    if not ms.empty and ms.iloc[0]["n"] > 0:
+        st.metric("Perf Periods", int(ms.iloc[0]["n"]))
     st.markdown("---")
+
+    # Data coverage across all deals
+    with st.expander("All Deals Data Coverage"):
+        cov = query_df("""
+            SELECT deal,
+                   (SELECT COUNT(*) FROM loans WHERE loans.deal = f.deal) as loans,
+                   (SELECT COUNT(*) FROM pool_performance WHERE pool_performance.deal = f.deal) as pool,
+                   (SELECT COUNT(*) FROM monthly_summary WHERE monthly_summary.deal = f.deal) as periods
+            FROM (SELECT DISTINCT deal FROM filings) f
+            ORDER BY deal
+        """)
+        if not cov.empty:
+            st.dataframe(cov, use_container_width=True, hide_index=True)
     st.caption("Data sourced from SEC EDGAR")
 
 # Get original pool balance — from config, or auto-detect from first pool_performance record
@@ -162,37 +178,13 @@ def load_pool(deal):
 
 @st.cache_data(ttl=300)
 def load_loan_perf_agg(deal):
+    """Load from pre-computed monthly_summary table (instant, ~50 rows)."""
     df = query_df("""
-        SELECT reporting_period_end as raw_date,
-            COUNT(CASE WHEN ending_balance > 0 THEN 1 END) as active_loans,
-            SUM(CASE WHEN ending_balance > 0 THEN ending_balance ELSE 0 END) as total_balance,
-            SUM(CASE WHEN CAST(current_delinquency_status AS INTEGER) >= 1 AND ending_balance > 0
-                THEN ending_balance ELSE 0 END) as total_dq_balance,
-            SUM(CASE WHEN CAST(current_delinquency_status AS INTEGER) = 1 AND ending_balance > 0
-                THEN ending_balance ELSE 0 END) as dq_30_balance,
-            SUM(CASE WHEN CAST(current_delinquency_status AS INTEGER) = 2 AND ending_balance > 0
-                THEN ending_balance ELSE 0 END) as dq_60_balance,
-            SUM(CASE WHEN CAST(current_delinquency_status AS INTEGER) = 3 AND ending_balance > 0
-                THEN ending_balance ELSE 0 END) as dq_90_balance,
-            SUM(CASE WHEN CAST(current_delinquency_status AS INTEGER) >= 4 AND ending_balance > 0
-                THEN ending_balance ELSE 0 END) as dq_120_plus_balance,
-            COUNT(CASE WHEN CAST(current_delinquency_status AS INTEGER) >= 1 AND ending_balance > 0 THEN 1 END) as total_dq_count,
-            COUNT(CASE WHEN CAST(current_delinquency_status AS INTEGER) = 1 AND ending_balance > 0 THEN 1 END) as dq_30_count,
-            COUNT(CASE WHEN CAST(current_delinquency_status AS INTEGER) = 2 AND ending_balance > 0 THEN 1 END) as dq_60_count,
-            COUNT(CASE WHEN CAST(current_delinquency_status AS INTEGER) = 3 AND ending_balance > 0 THEN 1 END) as dq_90_count,
-            COUNT(CASE WHEN CAST(current_delinquency_status AS INTEGER) >= 4 AND ending_balance > 0 THEN 1 END) as dq_120_plus_count,
-            SUM(COALESCE(charged_off_amount, 0)) as period_chargeoffs,
-            SUM(COALESCE(recoveries, 0)) as period_recoveries,
-            SUM(COALESCE(actual_interest_collected, 0)) as interest_collected,
-            SUM(COALESCE(actual_principal_collected, 0)) as principal_collected,
-            SUM(CASE WHEN beginning_balance > 0 AND servicing_fee > 0
-                THEN beginning_balance * servicing_fee / 12.0 ELSE 0 END) as est_servicing_fee
-        FROM loan_performance WHERE deal = ?
-        GROUP BY reporting_period_end ORDER BY reporting_period_end
+        SELECT * FROM monthly_summary WHERE deal = ? ORDER BY reporting_period_end
     """, (deal,))
     if df.empty:
         return df
-    df["period"] = df["raw_date"].apply(normalize_date)
+    df["period"] = df["reporting_period_end"].apply(normalize_date)
     df = df.sort_values("period").reset_index(drop=True)
     return df
 
@@ -207,53 +199,36 @@ def load_loans(deal):
 
 @st.cache_data(ttl=300)
 def load_losses_by_segment(deal, col):
+    """Load losses by segment using pre-computed loan_loss_summary (instant)."""
     return query_df(f"""
         SELECT l.{col} as segment, COUNT(*) as loan_count,
                SUM(l.original_loan_amount) as original_balance,
-               SUM(COALESCE(p.co, 0)) as total_chargeoffs,
-               SUM(COALESCE(p.rec, 0)) as total_recoveries
-        FROM loans l LEFT JOIN (
-            SELECT deal, asset_number, SUM(COALESCE(charged_off_amount,0)) as co,
-                   SUM(COALESCE(recoveries,0)) as rec
-            FROM loan_performance WHERE deal = ? GROUP BY deal, asset_number
-        ) p ON l.deal = p.deal AND l.asset_number = p.asset_number
+               SUM(COALESCE(s.total_chargeoff, 0)) as total_chargeoffs,
+               SUM(COALESCE(s.total_recovery, 0)) as total_recoveries
+        FROM loans l
+        LEFT JOIN loan_loss_summary s ON l.deal = s.deal AND l.asset_number = s.asset_number
         WHERE l.deal = ? AND l.{col} IS NOT NULL
         GROUP BY l.{col} ORDER BY l.{col}
-    """, (deal, deal))
+    """, (deal,))
 
 
 @st.cache_data(ttl=300)
 def load_recovery_data(deal):
-    """Per-loan recovery analysis: chargeoff timing, recovery timing, amounts."""
+    """Per-loan recovery analysis from pre-computed loan_loss_summary (instant)."""
     df = query_df("""
         SELECT
-            co.asset_number,
-            co.chargeoff_period,
-            co.total_chargeoff,
-            rec.first_recovery_period,
-            rec.total_recoveries,
+            s.asset_number,
+            s.chargeoff_period,
+            s.total_chargeoff,
+            s.first_recovery_period,
+            s.total_recovery as total_recoveries,
             l.obligor_credit_score,
             l.original_interest_rate,
             l.original_loan_amount
-        FROM (
-            SELECT deal, asset_number,
-                   MIN(reporting_period_end) as chargeoff_period,
-                   SUM(charged_off_amount) as total_chargeoff
-            FROM loan_performance
-            WHERE deal = ? AND charged_off_amount > 0
-            GROUP BY deal, asset_number
-        ) co
-        LEFT JOIN (
-            SELECT deal, asset_number,
-                   MIN(reporting_period_end) as first_recovery_period,
-                   SUM(recoveries) as total_recoveries
-            FROM loan_performance
-            WHERE deal = ? AND recoveries > 0
-            GROUP BY deal, asset_number
-        ) rec ON co.deal = rec.deal AND co.asset_number = rec.asset_number
-        LEFT JOIN loans l ON co.deal = l.deal AND co.asset_number = l.asset_number
-        WHERE co.deal = ?
-    """, (deal, deal, deal))
+        FROM loan_loss_summary s
+        LEFT JOIN loans l ON s.deal = l.deal AND s.asset_number = l.asset_number
+        WHERE s.deal = ? AND s.total_chargeoff > 0
+    """, (deal,))
 
     if df.empty:
         return df

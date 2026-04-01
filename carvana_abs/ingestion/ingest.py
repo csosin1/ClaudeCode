@@ -99,7 +99,79 @@ def run_deal_ingestion(deal: str, db_path: Optional[str] = None) -> dict:
             logger.error(f"Error processing loan data {acc}: {e}")
 
     conn.close()
+
+    # Step 5: Pre-compute summary tables for fast dashboard queries
+    logger.info(f"[{deal}] Pre-computing summary tables...")
+    _precompute_summaries(deal, db)
+
     return summary
+
+
+def _precompute_summaries(deal: str, db_path: str) -> None:
+    """Pre-compute monthly_summary and loan_loss_summary for a deal.
+
+    This runs expensive aggregation queries ONCE during ingestion so the
+    dashboard can read from small pre-computed tables instead of scanning
+    millions of rows on every page load.
+    """
+    conn = get_connection(db_path)
+    cursor = conn.cursor()
+
+    # Monthly summary: aggregate loan_performance by period
+    cursor.execute("DELETE FROM monthly_summary WHERE deal = ?", (deal,))
+    cursor.execute("""
+        INSERT INTO monthly_summary
+        SELECT
+            deal,
+            reporting_period_end,
+            COUNT(CASE WHEN ending_balance > 0 THEN 1 END),
+            SUM(CASE WHEN ending_balance > 0 THEN ending_balance ELSE 0 END),
+            SUM(CASE WHEN CAST(current_delinquency_status AS INTEGER) >= 1 AND ending_balance > 0
+                THEN ending_balance ELSE 0 END),
+            SUM(CASE WHEN CAST(current_delinquency_status AS INTEGER) = 1 AND ending_balance > 0
+                THEN ending_balance ELSE 0 END),
+            SUM(CASE WHEN CAST(current_delinquency_status AS INTEGER) = 2 AND ending_balance > 0
+                THEN ending_balance ELSE 0 END),
+            SUM(CASE WHEN CAST(current_delinquency_status AS INTEGER) = 3 AND ending_balance > 0
+                THEN ending_balance ELSE 0 END),
+            SUM(CASE WHEN CAST(current_delinquency_status AS INTEGER) >= 4 AND ending_balance > 0
+                THEN ending_balance ELSE 0 END),
+            COUNT(CASE WHEN CAST(current_delinquency_status AS INTEGER) >= 1 AND ending_balance > 0 THEN 1 END),
+            COUNT(CASE WHEN CAST(current_delinquency_status AS INTEGER) = 1 AND ending_balance > 0 THEN 1 END),
+            COUNT(CASE WHEN CAST(current_delinquency_status AS INTEGER) = 2 AND ending_balance > 0 THEN 1 END),
+            COUNT(CASE WHEN CAST(current_delinquency_status AS INTEGER) = 3 AND ending_balance > 0 THEN 1 END),
+            COUNT(CASE WHEN CAST(current_delinquency_status AS INTEGER) >= 4 AND ending_balance > 0 THEN 1 END),
+            SUM(COALESCE(charged_off_amount, 0)),
+            SUM(COALESCE(recoveries, 0)),
+            SUM(COALESCE(actual_interest_collected, 0)),
+            SUM(COALESCE(actual_principal_collected, 0)),
+            SUM(CASE WHEN beginning_balance > 0 AND servicing_fee > 0
+                THEN beginning_balance * servicing_fee / 12.0 ELSE 0 END)
+        FROM loan_performance
+        WHERE deal = ?
+        GROUP BY deal, reporting_period_end
+    """, (deal,))
+
+    # Loan loss summary: per-loan chargeoff and recovery totals
+    cursor.execute("DELETE FROM loan_loss_summary WHERE deal = ?", (deal,))
+    cursor.execute("""
+        INSERT INTO loan_loss_summary
+        SELECT
+            deal, asset_number,
+            SUM(COALESCE(charged_off_amount, 0)),
+            SUM(COALESCE(recoveries, 0)),
+            MIN(CASE WHEN charged_off_amount > 0 THEN reporting_period_end END),
+            MIN(CASE WHEN recoveries > 0 THEN reporting_period_end END)
+        FROM loan_performance
+        WHERE deal = ?
+        GROUP BY deal, asset_number
+        HAVING SUM(COALESCE(charged_off_amount, 0)) > 0
+            OR SUM(COALESCE(recoveries, 0)) > 0
+    """, (deal,))
+
+    conn.commit()
+    conn.close()
+    logger.info(f"[{deal}] Summary tables computed.")
 
 
 def run_full_ingestion(deals: Optional[list[str]] = None,
