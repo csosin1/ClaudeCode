@@ -132,16 +132,30 @@ def parse_servicer_certificate(html_content: str) -> dict:
             return result
 
     # Strategy 2: Try all page text with numbered field parser
-    # (Works for Donnelley HTML tables too — the numbered labels are in the text)
     all_text = soup.get_text(separator=" ", strip=True)
     if len(all_text) > 500:
         result = _parse_from_numbered_text(all_text)
         if result.get("distribution_date"):
             return result
 
-    # Strategy 3: Try HTML table parsing as last resort
+    # Strategy 3: For Donnelley HTML tables, extract text row-by-row
+    # to preserve "Label (N) Value" patterns that get lost in full-page text
     tables = soup.find_all("table")
     if tables:
+        row_texts = []
+        for table in tables:
+            for row in table.find_all("tr"):
+                cells = row.find_all(["td", "th"])
+                row_text = " ".join(c.get_text(strip=True) for c in cells)
+                if row_text.strip():
+                    row_texts.append(row_text)
+        table_text = " ".join(row_texts)
+        if len(table_text) > 500:
+            result = _parse_from_numbered_text(table_text)
+            if result.get("distribution_date"):
+                return result
+
+        # Strategy 4: Regex table parsing as last resort
         result = _parse_from_tables(tables)
         if result.get("distribution_date"):
             return result
@@ -353,6 +367,48 @@ def _parse_from_tables(tables) -> dict:
 
     data["overcollateralization_amount"] = _clean_number(find_val(r"overcollateral"))
     data["reserve_account_balance"] = _clean_number(find_val(r"reserve\s+account.*balance"))
+
+    # Note balances (after monthly principal payment)
+    for note_key, pattern in [
+        ("note_balance_a1", r"class\s+a-?1.*(?:note\s+)?balance\s+after"),
+        ("note_balance_a2", r"class\s+a-?2.*(?:note\s+)?balance\s+after"),
+        ("note_balance_a3", r"class\s+a-?3.*(?:note\s+)?balance\s+after"),
+        ("note_balance_a4", r"class\s+a-?4.*(?:note\s+)?balance\s+after"),
+        ("note_balance_b", r"class\s+b\b.*(?:note\s+)?balance\s+after"),
+        ("note_balance_c", r"class\s+c\b.*(?:note\s+)?balance\s+after"),
+        ("note_balance_d", r"class\s+d\b.*(?:note\s+)?balance\s+after"),
+        ("note_balance_n", r"class\s+n\b.*(?:note\s+)?balance\s+after"),
+    ]:
+        val = _clean_number(find_val(pattern))
+        if val is not None:
+            data[note_key] = val
+
+    # WAC, WAM
+    data["weighted_avg_apr"] = _clean_number(find_val(r"weighted\s+average\s+apr"))
+    if data.get("weighted_avg_apr") and data["weighted_avg_apr"] > 1:
+        data["weighted_avg_apr"] = data["weighted_avg_apr"] / 100.0  # Convert from % to decimal
+    data["weighted_avg_remaining_term"] = _clean_number(find_val(r"weighted\s+average\s+remaining\s+term"))
+
+    # Cumulative gross losses and liquidation proceeds
+    data["cumulative_gross_losses"] = _clean_number(find_val(r"aggregate.*gross.*charged|cumulative.*gross.*loss"))
+    data["cumulative_liquidation_proceeds"] = _clean_number(find_val(r"aggregate.*liquidation\s+proceeds"))
+    data["net_charged_off_amount"] = _clean_number(find_val(r"net\s+charged.*current|net.*loss.*current"))
+    data["liquidation_proceeds"] = _clean_number(find_val(r"gross\s+liquidation.*current|liquidation.*current"))
+
+    # Extensions
+    data["extensions_count"] = None
+    ext_val = _clean_number(find_val(r"number.*receivables?\s+extended|extensions?\s+.*number"))
+    if ext_val is not None:
+        data["extensions_count"] = int(ext_val)
+    data["extensions_balance"] = _clean_number(find_val(r"principal\s+balance.*receivables?\s+extended|extension.*balance"))
+
+    # Delinquency trigger
+    data["delinquency_trigger_actual"] = _clean_number(find_val(r"receivables?\s+greater\s+than\s+60|60.*days?\s+delinquen.*percent"))
+    if data.get("delinquency_trigger_actual") and data["delinquency_trigger_actual"] > 1:
+        data["delinquency_trigger_actual"] = data["delinquency_trigger_actual"] / 100.0
+    data["delinquency_trigger_level"] = _clean_number(find_val(r"delinquency\s+trigger\s+level"))
+    if data.get("delinquency_trigger_level") and data["delinquency_trigger_level"] > 1:
+        data["delinquency_trigger_level"] = data["delinquency_trigger_level"] / 100.0
 
     return data
 
