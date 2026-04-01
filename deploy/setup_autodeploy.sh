@@ -23,11 +23,11 @@ EOF
 # Create systemd timer (every 5 minutes)
 cat > /etc/systemd/system/auto-deploy.timer << 'EOF'
 [Unit]
-Description=Check GitHub for updates every 5 minutes
+Description=Check GitHub for updates every 30 seconds
 
 [Timer]
 OnBootSec=1min
-OnUnitActiveSec=5min
+OnUnitActiveSec=30s
 Persistent=true
 
 [Install]
@@ -42,7 +42,7 @@ echo "============================================================"
 echo "  Auto-deploy is set up!"
 echo "============================================================"
 echo ""
-echo "  Every 5 minutes, the server checks GitHub for new code."
+echo "  Every 30 seconds, the server checks GitHub for new code."
 echo "  If changes are found, it auto-pulls and restarts the dashboard."
 echo "  You never need to touch this server again."
 echo ""
