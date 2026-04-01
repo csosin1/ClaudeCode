@@ -13,6 +13,17 @@ REMOTE=$(git rev-parse origin/claude/carvana-loan-dashboard-4QMPM)
 if [ "$LOCAL" != "$REMOTE" ]; then
     echo "$(date): New changes detected, deploying..."
     git pull origin claude/carvana-loan-dashboard-4QMPM
+
+    # Run any one-time deploy scripts
+    if [ -f /opt/abs-dashboard/deploy/update_nginx.sh ]; then
+        bash /opt/abs-dashboard/deploy/update_nginx.sh
+    fi
+
+    # Rebuild summary tables if schema changed
+    if [ -f /opt/abs-dashboard/carvana_abs/rebuild_summaries.py ]; then
+        /opt/abs-venv/bin/python /opt/abs-dashboard/carvana_abs/rebuild_summaries.py 2>&1 || true
+    fi
+
     systemctl restart streamlit
     echo "$(date): Deploy complete."
 else

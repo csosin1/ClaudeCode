@@ -82,11 +82,8 @@ server {
     listen 80 default_server;
     listen [::]:80 default_server;
 
-    # Dashboard — password protected
+    # Dashboard — no auth
     location / {
-        auth_basic "ABS Dashboard";
-        auth_basic_user_file /etc/nginx/.htpasswd;
-
         proxy_pass http://127.0.0.1:8501;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
