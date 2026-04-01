@@ -294,55 +294,36 @@ tab_pool, tab_dq, tab_losses, tab_wf, tab_bs, tab_rec, tab_loans, tab_fields = s
 # TAB 1: POOL SUMMARY
 # ═══════════════════════════════════════════════════════════
 with tab_pool:
-    # Use pool_performance (servicer cert) as primary source — no sawtooth
-    has_pool = not pool_df.empty and "ending_pool_balance" in pool_df.columns and pool_df["ending_pool_balance"].notna().any()
+    # Use monthly_summary (loan-level) for balance/count (all periods) — no sawtooth
+    has_pool = not pool_df.empty
 
-    if not has_pool and lp.empty:
+    if lp.empty:
         st.info("No data yet.")
     else:
-        if has_pool:
-            latest_pool = pool_df.iloc[-1]
-            cur_bal = latest_pool["ending_pool_balance"]
-            cur_count = int(latest_pool["ending_pool_count"]) if pd.notna(latest_pool.get("ending_pool_count")) else None
-        else:
-            latest_pool = lp.iloc[-1]
-            cur_bal = latest_pool["total_balance"]
-            cur_count = int(latest_pool["active_loans"])
+        last = lp.iloc[-1]
+        cur_bal = last["total_balance"]
+        cur_count = int(last["active_loans"])
 
-        # 2x2 grid works better on mobile than 4-across
         r1c1, r1c2 = st.columns(2)
         r1c1.metric("Original Balance", fmt_compact(ORIG_BAL))
         r1c2.metric("Current Balance", fmt_compact(cur_bal))
         r2c1, r2c2 = st.columns(2)
         r2c1.metric("Pool Factor", f"{cur_bal/ORIG_BAL:.2%}")
-        if cur_count:
-            r2c2.metric("Active Loans", f"{cur_count:,}")
+        r2c2.metric("Active Loans", f"{cur_count:,}")
 
-        # Pool balance chart — use servicer cert data (smooth, authoritative)
-        if has_pool:
-            fig = px.area(pool_df, x="period", y="ending_pool_balance", title="Remaining Pool Balance",
-                          labels={"period": "Distribution Date", "ending_pool_balance": "Balance ($)"})
-        else:
-            fig = px.area(lp, x="period", y="total_balance", title="Remaining Pool Balance",
-                          labels={"period": "Period", "total_balance": "Balance ($)"})
+        # Pool balance — from monthly_summary (all periods, no gaps)
+        fig = px.area(lp, x="period", y="total_balance", title="Remaining Pool Balance",
+                      labels={"period": "Period", "total_balance": "Balance ($)"})
         fig.update_layout(yaxis_tickformat="$,.0f", hovermode="x unified")
         st.plotly_chart(fig, use_container_width=True)
 
-        # Loan count chart
-        if has_pool and "ending_pool_count" in pool_df.columns:
-            fig2 = px.line(pool_df.dropna(subset=["ending_pool_count"]), x="period", y="ending_pool_count",
-                           title="Active Loan Count",
-                           labels={"period": "Distribution Date", "ending_pool_count": "Loans"})
-        elif not lp.empty:
-            fig2 = px.line(lp, x="period", y="active_loans", title="Active Loan Count",
-                           labels={"period": "Period", "active_loans": "Loans"})
-        else:
-            fig2 = None
-        if fig2:
-            fig2.update_layout(hovermode="x unified")
-            st.plotly_chart(fig2, use_container_width=True)
+        # Loan count — from monthly_summary (all periods)
+        fig2 = px.line(lp, x="period", y="active_loans", title="Active Loan Count",
+                       labels={"period": "Period", "active_loans": "Loans"})
+        fig2.update_layout(hovermode="x unified")
+        st.plotly_chart(fig2, use_container_width=True)
 
-        # WAC and WAM from pool_performance
+        # WAC and WAM from pool_performance (where available)
         if has_pool:
             wac_data = pool_df[["period", "weighted_avg_apr"]].dropna()
             wam_data = pool_df[["period", "weighted_avg_remaining_term"]].dropna()
@@ -362,7 +343,7 @@ with tab_pool:
                         st.plotly_chart(fig_wam, use_container_width=True)
 
         # Note balances from pool_performance
-        if has_pool:
+        if not pool_df.empty:
             note_cols = ["note_balance_a1", "note_balance_a2", "note_balance_a3",
                          "note_balance_a4", "note_balance_b", "note_balance_c",
                          "note_balance_d", "note_balance_n"]
@@ -376,7 +357,7 @@ with tab_pool:
                 st.plotly_chart(fig3, use_container_width=True)
 
         # OC and Reserve from pool_performance
-        if has_pool:
+        if not pool_df.empty:
             oc_data = pool_df[["period", "overcollateralization_amount", "reserve_account_balance"]].dropna(how="all",
                 subset=["overcollateralization_amount", "reserve_account_balance"])
             if not oc_data.empty:
@@ -559,17 +540,13 @@ with tab_wf:
             fmt_d[c] = fmt_d[c].apply(lambda x: fmt_compact(x) if pd.notna(x) else "")
         st.dataframe(fmt_d, use_container_width=True, hide_index=True, height=400)
 
-        # Normalized table
-        st.markdown(f"### Normalized (% of {fmt_compact(ORIG_BAL)} Original Balance)")
-        norm = wf_display.copy()
-        for c in norm.columns[1:]:
-            norm[c] = wf_display[c].apply(lambda x: f"{x/ORIG_BAL:.4%}" if pd.notna(x) else "")
-        st.dataframe(norm, use_container_width=True, hide_index=True, height=400)
-
-        # Cumulative excess spread chart
-        st.subheader("Cumulative Excess Spread (Cash to Residual)")
-        fig = px.area(lp, x="period", y="cum_excess", title="Cumulative Excess Spread")
-        fig.update_layout(yaxis_tickformat="$,.0f", hovermode="x unified")
+        # Cumulative excess spread — normalized by original balance
+        st.subheader("Cumulative Excess Spread (% of Original Balance)")
+        lp_es = lp.copy()
+        lp_es["cum_excess_pct"] = lp_es["cum_excess"] / ORIG_BAL
+        fig = px.area(lp_es, x="period", y="cum_excess_pct",
+                      title="Cumulative Excess Spread (Cash to Residual)")
+        fig.update_layout(yaxis_tickformat=".2%", hovermode="x unified")
         fig.update_traces(line_color="#388E3C", fillcolor="rgba(56,142,60,0.2)")
         st.plotly_chart(fig, use_container_width=True)
 
@@ -606,7 +583,10 @@ with tab_bs:
                 liab["total_all_debt"] = liab["total_rated_debt"] + liab["note_balance_n"].fillna(0)
             else:
                 liab["total_all_debt"] = liab["total_rated_debt"]
-            merged = assets.merge(liab, on="period", how="left")
+            # Merge by year-month (distribution_date and reporting_period_end differ)
+            assets["ym"] = assets["period"].str[:7]
+            liab["ym"] = liab["period"].str[:7]
+            merged = assets.merge(liab.drop(columns=["period"]), on="ym", how="left")
         else:
             merged = assets.copy()
 
