@@ -14,6 +14,55 @@ from carvana_abs.config import DB_PATH, DEALS
 
 st.set_page_config(page_title="Carvana ABS Dashboard", page_icon="\U0001F4CA", layout="wide")
 
+# ── Mobile-Friendly CSS ──
+st.markdown("""
+<style>
+/* Reduce padding on mobile */
+@media (max-width: 768px) {
+    .block-container { padding: 0.5rem 0.5rem !important; }
+    /* Make metric cards more compact */
+    [data-testid="stMetric"] {
+        padding: 0.3rem 0.5rem !important;
+    }
+    [data-testid="stMetricValue"] {
+        font-size: 1.1rem !important;
+    }
+    [data-testid="stMetricLabel"] {
+        font-size: 0.75rem !important;
+    }
+    /* Tab labels smaller on mobile */
+    .stTabs [data-baseweb="tab-list"] button {
+        font-size: 0.7rem !important;
+        padding: 0.3rem 0.4rem !important;
+    }
+    /* Radio buttons wrap better */
+    .stRadio > div { flex-wrap: wrap !important; }
+    /* Subheaders smaller */
+    h2 { font-size: 1.2rem !important; }
+    h3 { font-size: 1rem !important; }
+}
+/* Tables: horizontal scroll on all screens, compact text */
+[data-testid="stDataFrame"] {
+    overflow-x: auto !important;
+}
+[data-testid="stDataFrame"] td, [data-testid="stDataFrame"] th {
+    white-space: nowrap !important;
+    font-size: 0.8rem !important;
+}
+/* Charts: reduce plotly margins */
+.js-plotly-plot .plotly .main-svg {
+    overflow: visible !important;
+}
+/* Make sidebar toggle easier to tap on mobile */
+@media (max-width: 768px) {
+    [data-testid="collapsedControl"] {
+        min-width: 2.5rem !important;
+        min-height: 2.5rem !important;
+    }
+}
+</style>
+""", unsafe_allow_html=True)
+
 
 @st.cache_resource
 def get_db():
@@ -29,6 +78,21 @@ def query_df(sql, params=()):
     if conn is None:
         return pd.DataFrame()
     return pd.read_sql_query(sql, conn, params=params)
+
+
+def fmt_compact(val, is_pct=False):
+    """Format numbers compactly for mobile: $18.1M, $405K, 12.3%, etc."""
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return "-"
+    if is_pct:
+        return f"{val:.2%}"
+    if abs(val) >= 1_000_000_000:
+        return f"${val/1e9:.1f}B"
+    if abs(val) >= 1_000_000:
+        return f"${val/1e6:.1f}M"
+    if abs(val) >= 1_000:
+        return f"${val/1e3:.0f}K"
+    return f"${val:,.0f}"
 
 
 def normalize_date(d):
@@ -270,12 +334,14 @@ with tab_pool:
             cur_bal = latest_pool["total_balance"]
             cur_count = int(latest_pool["active_loans"])
 
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Original Pool Balance", f"${ORIG_BAL:,.0f}")
-        c2.metric("Current Pool Balance", f"${cur_bal:,.0f}")
-        c3.metric("Pool Factor", f"{cur_bal/ORIG_BAL:.2%}")
+        # 2x2 grid works better on mobile than 4-across
+        r1c1, r1c2 = st.columns(2)
+        r1c1.metric("Original Balance", fmt_compact(ORIG_BAL))
+        r1c2.metric("Current Balance", fmt_compact(cur_bal))
+        r2c1, r2c2 = st.columns(2)
+        r2c1.metric("Pool Factor", f"{cur_bal/ORIG_BAL:.2%}")
         if cur_count:
-            c4.metric("Active Loans", f"{cur_count:,}")
+            r2c2.metric("Active Loans", f"{cur_count:,}")
 
         # Pool balance chart — use servicer cert data (smooth, authoritative)
         if has_pool:
@@ -415,10 +481,12 @@ with tab_losses:
         st.info("No data yet.")
     else:
         last = lp.iloc[-1]
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Cumulative Net Losses", f"${last['cum_net_losses']:,.0f}")
-        c2.metric("Cumulative Loss Rate", f"{last['cum_loss_rate']:.2%}")
-        c3.metric("Through", last["period"])
+        la1, la2 = st.columns(2)
+        la1.metric("Cum Net Losses", fmt_compact(last['cum_net_losses']))
+        la2.metric("Loss Rate", f"{last['cum_loss_rate']:.2%}")
+        lb1, lb2 = st.columns(2)
+        lb1.metric("Cum Gross Losses", fmt_compact(last['cum_chargeoffs']))
+        lb2.metric("Through", last["period"])
 
         fig = px.area(lp, x="period", y="cum_loss_rate",
                       title=f"Cumulative Net Loss Rate (% of ${ORIG_BAL/1e6:.0f}M)")
@@ -509,15 +577,15 @@ with tab_wf:
         sum_row = pd.DataFrame([["TOTAL"] + sums.tolist()], columns=wf.columns)
         wf_display = pd.concat([wf, sum_row], ignore_index=True)
 
-        # Dollar table
+        # Dollar table — compact format for mobile readability
         st.markdown("### Dollar Amounts")
-        fmt = wf_display.copy()
-        for c in fmt.columns[1:]:
-            fmt[c] = fmt[c].apply(lambda x: f"${x:,.0f}" if pd.notna(x) else "")
-        st.dataframe(fmt, use_container_width=True, hide_index=True, height=400)
+        fmt_d = wf_display.copy()
+        for c in fmt_d.columns[1:]:
+            fmt_d[c] = fmt_d[c].apply(lambda x: fmt_compact(x) if pd.notna(x) else "")
+        st.dataframe(fmt_d, use_container_width=True, hide_index=True, height=400)
 
         # Normalized table
-        st.markdown(f"### Normalized (% of ${ORIG_BAL/1e6:.0f}M Original Balance)")
+        st.markdown(f"### Normalized (% of {fmt_compact(ORIG_BAL)} Original Balance)")
         norm = wf_display.copy()
         for c in norm.columns[1:]:
             norm[c] = wf_display[c].apply(lambda x: f"{x/ORIG_BAL:.4%}" if pd.notna(x) else "")
@@ -576,7 +644,7 @@ with tab_bs:
                                   "120+ DQ", "Total Pool", "Cum Gross Losses", "Cum Recoveries", "Cum Net Losses"]
         a_fmt = asset_display.copy()
         for c in a_fmt.columns[1:]:
-            a_fmt[c] = a_fmt[c].apply(lambda x: f"${x:,.0f}" if pd.notna(x) else "-")
+            a_fmt[c] = a_fmt[c].apply(lambda x: fmt_compact(x) if pd.notna(x) and x != 0 else "-")
         st.dataframe(a_fmt, use_container_width=True, hide_index=True, height=400)
 
         # Normalized assets
@@ -614,7 +682,7 @@ with tab_bs:
             liab_df.columns = liab_names
             l_fmt = liab_df.copy()
             for c in l_fmt.columns[1:]:
-                l_fmt[c] = l_fmt[c].apply(lambda x: f"${x:,.0f}" if pd.notna(x) else "-")
+                l_fmt[c] = l_fmt[c].apply(lambda x: fmt_compact(x) if pd.notna(x) and x != 0 else "-")
             st.dataframe(l_fmt, use_container_width=True, hide_index=True, height=400)
 
             # Normalized liabilities
@@ -643,15 +711,15 @@ with tab_rec:
         total_co_amt = rec_df["total_chargeoff"].sum()
         total_rec_amt = rec_df.loc[rec_df["has_recovery"], "total_recoveries"].sum()
 
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Charged-Off Loans", f"{total_co:,}")
-        c2.metric("With Any Recovery", f"{int(with_rec):,} ({with_rec/total_co:.0%})")
-        c3.metric("Avg Recovery Rate", f"{avg_rate:.1%}" if pd.notna(avg_rate) else "N/A")
-        c4.metric("Median Months to Recovery", f"{median_months:.0f}" if pd.notna(median_months) else "N/A")
-
-        c5, c6 = st.columns(2)
-        c5.metric("Total Chargeoff Amount", f"${total_co_amt:,.0f}")
-        c6.metric("Total Recovered", f"${total_rec_amt:,.0f} ({total_rec_amt/total_co_amt:.1%})")
+        r1a, r1b = st.columns(2)
+        r1a.metric("Charged-Off Loans", f"{total_co:,}")
+        r1b.metric("With Recovery", f"{int(with_rec):,} ({with_rec/total_co:.0%})")
+        r2a, r2b = st.columns(2)
+        r2a.metric("Avg Recovery Rate", f"{avg_rate:.1%}" if pd.notna(avg_rate) else "N/A")
+        r2b.metric("Median Months", f"{median_months:.0f}" if pd.notna(median_months) else "N/A")
+        r3a, r3b = st.columns(2)
+        r3a.metric("Total Chargeoffs", fmt_compact(total_co_amt))
+        r3b.metric("Total Recovered", f"{fmt_compact(total_rec_amt)} ({total_rec_amt/total_co_amt:.1%})")
 
         # Months to first recovery histogram
         rec_with = rec_df[rec_df["has_recovery"] & rec_df["months_to_recovery"].notna()].copy()
@@ -704,8 +772,8 @@ with tab_rec:
 
             d = by_score.copy()
             d.columns = ["Score", "Chargeoffs", "With Recovery", "Total Chargeoff", "Total Recovered", "Recovery Rate", "% With Recovery"]
-            d["Total Chargeoff"] = d["Total Chargeoff"].apply(lambda x: f"${x:,.0f}")
-            d["Total Recovered"] = d["Total Recovered"].apply(lambda x: f"${x:,.0f}")
+            d["Total Chargeoff"] = d["Total Chargeoff"].apply(lambda x: fmt_compact(x))
+            d["Total Recovered"] = d["Total Recovered"].apply(lambda x: fmt_compact(x))
             d["Recovery Rate"] = d["Recovery Rate"].apply(lambda x: f"{x:.1%}")
             d["% With Recovery"] = d["% With Recovery"].apply(lambda x: f"{x:.0%}")
             d["Chargeoffs"] = d["Chargeoffs"].apply(lambda x: f"{x:,}")
