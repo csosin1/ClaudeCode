@@ -119,27 +119,34 @@ def _parse_numbered_value(raw: str, expect_count_and_amount: bool = False) -> di
 
 
 def parse_servicer_certificate(html_content: str) -> dict:
-    """Parse a Carvana servicer certificate HTML and extract pool performance data."""
-    soup = BeautifulSoup(html_content, "html.parser")
+    """Parse a Carvana servicer certificate HTML and extract pool performance data.
 
-    # Strategy 1: Try extracting from embedded <font> text (Workiva format, 2023+)
+    Tries multiple parsing strategies and MERGES results — later strategies
+    fill in fields that earlier ones missed.
+    """
+    soup = BeautifulSoup(html_content, "html.parser")
+    best_result = {}
+
+    # Strategy 1: Embedded <font> text (Workiva format, 2023+)
     font_tags = soup.find_all("font")
     all_font_text = " ".join(f.get_text(separator=" ", strip=True) for f in font_tags)
-
-    if len(all_font_text) > 500:  # Substantial text found
+    if len(all_font_text) > 500:
         result = _parse_from_numbered_text(all_font_text)
         if result.get("distribution_date"):
-            return result
+            best_result = result
 
-    # Strategy 2: Try all page text with numbered field parser
-    all_text = soup.get_text(separator=" ", strip=True)
-    if len(all_text) > 500:
-        result = _parse_from_numbered_text(all_text)
-        if result.get("distribution_date"):
-            return result
+    # Strategy 2: All page text with numbered field parser
+    if not best_result.get("distribution_date"):
+        all_text = soup.get_text(separator=" ", strip=True)
+        if len(all_text) > 500:
+            result = _parse_from_numbered_text(all_text)
+            if result.get("distribution_date"):
+                # Merge: fill in missing fields
+                for k, v in result.items():
+                    if v is not None and best_result.get(k) is None:
+                        best_result[k] = v
 
-    # Strategy 3: For Donnelley HTML tables, extract text row-by-row
-    # to preserve "Label (N) Value" patterns that get lost in full-page text
+    # Strategy 3: Row-by-row table text extraction
     tables = soup.find_all("table")
     if tables:
         row_texts = []
@@ -152,16 +159,24 @@ def parse_servicer_certificate(html_content: str) -> dict:
         table_text = " ".join(row_texts)
         if len(table_text) > 500:
             result = _parse_from_numbered_text(table_text)
-            if result.get("distribution_date"):
-                return result
+            for k, v in result.items():
+                if v is not None and best_result.get(k) is None:
+                    best_result[k] = v
+            if not best_result.get("distribution_date") and result.get("distribution_date"):
+                best_result["distribution_date"] = result["distribution_date"]
 
-        # Strategy 4: Regex table parsing as last resort
+        # Strategy 4: Regex table parsing — fills in remaining gaps
         result = _parse_from_tables(tables)
-        if result.get("distribution_date"):
-            return result
+        for k, v in result.items():
+            if v is not None and best_result.get(k) is None:
+                best_result[k] = v
+        if not best_result.get("distribution_date") and result.get("distribution_date"):
+            best_result["distribution_date"] = result["distribution_date"]
 
-    logger.warning("No parseable content found in servicer certificate")
-    return {}
+    if not best_result.get("distribution_date"):
+        logger.warning("No parseable content found in servicer certificate")
+
+    return best_result
 
 
 def _parse_from_numbered_text(text: str) -> dict:
