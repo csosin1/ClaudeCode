@@ -454,44 +454,87 @@ with tab_bs:
 
         # Assets from loan_performance
         assets = lp[["period", "total_balance", "dq_30_balance", "dq_60_balance",
-                      "dq_90_balance", "dq_120_plus_balance", "active_loans"]].copy()
-        assets["performing"] = assets["total_balance"] - assets["dq_30_balance"] - assets["dq_60_balance"] - assets["dq_90_balance"] - assets["dq_120_plus_balance"]
+                      "dq_90_balance", "dq_120_plus_balance", "active_loans",
+                      "cum_chargeoffs", "cum_recoveries", "cum_net_losses"]].copy()
+        assets["performing"] = (assets["total_balance"] - assets["dq_30_balance"]
+                                - assets["dq_60_balance"] - assets["dq_90_balance"]
+                                - assets["dq_120_plus_balance"])
 
-        # Liabilities from pool_performance
+        # Liabilities from pool_performance (note balances, OC, reserves)
         if not pool_df.empty:
-            liab = pool_df[["period", "note_balance_a1", "note_balance_a2", "note_balance_a3",
-                             "note_balance_a4", "note_balance_b", "note_balance_c",
-                             "note_balance_d", "note_balance_n",
-                             "overcollateralization_amount", "reserve_account_balance"]].copy()
-            note_cols = ["note_balance_a1", "note_balance_a2", "note_balance_a3", "note_balance_a4",
-                         "note_balance_b", "note_balance_c", "note_balance_d"]
-            liab["total_debt"] = liab[note_cols].sum(axis=1)
+            liab_cols = ["period", "note_balance_a1", "note_balance_a2", "note_balance_a3",
+                         "note_balance_a4", "note_balance_b", "note_balance_c",
+                         "note_balance_d", "note_balance_n",
+                         "overcollateralization_amount", "reserve_account_balance"]
+            liab = pool_df[[c for c in liab_cols if c in pool_df.columns]].copy()
+            rated_notes = ["note_balance_a1", "note_balance_a2", "note_balance_a3",
+                           "note_balance_a4", "note_balance_b", "note_balance_c", "note_balance_d"]
+            avail_notes = [c for c in rated_notes if c in liab.columns]
+            liab["total_rated_debt"] = liab[avail_notes].fillna(0).sum(axis=1)
+            if "note_balance_n" in liab.columns:
+                liab["total_all_debt"] = liab["total_rated_debt"] + liab["note_balance_n"].fillna(0)
+            else:
+                liab["total_all_debt"] = liab["total_rated_debt"]
             merged = assets.merge(liab, on="period", how="left")
         else:
             merged = assets.copy()
 
-        st.markdown("### Dollar Amounts")
-        display_cols = ["period", "performing", "dq_30_balance", "dq_60_balance", "dq_90_balance",
-                        "dq_120_plus_balance", "total_balance"]
-        col_names = ["Period", "Performing", "30d DQ", "60d DQ", "90d DQ", "120+ DQ", "Total Pool"]
+        # ── Asset side table ──
+        st.markdown("### Assets (Loan Pool by Status) — Dollar Amounts")
+        asset_display = merged[["period", "performing", "dq_30_balance", "dq_60_balance",
+                                "dq_90_balance", "dq_120_plus_balance", "total_balance",
+                                "cum_chargeoffs", "cum_recoveries", "cum_net_losses"]].copy()
+        asset_display.columns = ["Period", "Performing", "30d DQ", "60d DQ", "90d DQ",
+                                  "120+ DQ", "Total Pool", "Cum Gross Losses", "Cum Recoveries", "Cum Net Losses"]
+        a_fmt = asset_display.copy()
+        for c in a_fmt.columns[1:]:
+            a_fmt[c] = a_fmt[c].apply(lambda x: f"${x:,.0f}" if pd.notna(x) else "-")
+        st.dataframe(a_fmt, use_container_width=True, hide_index=True, height=400)
 
-        if "total_debt" in merged.columns:
-            display_cols += ["total_debt", "overcollateralization_amount", "reserve_account_balance"]
-            col_names += ["Total Debt", "OC", "Reserve"]
+        # Normalized assets
+        st.markdown(f"### Assets — Normalized (% of ${ORIG_BAL/1e6:.0f}M)")
+        a_norm = asset_display.copy()
+        for c in a_norm.columns[1:]:
+            a_norm[c] = asset_display[c].apply(lambda x: f"{x/ORIG_BAL:.2%}" if pd.notna(x) else "-")
+        st.dataframe(a_norm, use_container_width=True, hide_index=True, height=400)
 
-        bs_df = merged[display_cols].copy()
-        bs_df.columns = col_names
-        bs_fmt = bs_df.copy()
-        for c in bs_fmt.columns[1:]:
-            bs_fmt[c] = bs_fmt[c].apply(lambda x: f"${x:,.0f}" if pd.notna(x) and x != 0 else "-")
-        st.dataframe(bs_fmt, use_container_width=True, hide_index=True, height=500)
+        # ── Liability side table ──
+        if "total_rated_debt" in merged.columns:
+            st.markdown("### Liabilities & Equity — Dollar Amounts")
+            liab_display_cols = ["period"]
+            liab_names = ["Period"]
+            for nc in ["note_balance_a1", "note_balance_a2", "note_balance_a3", "note_balance_a4",
+                        "note_balance_b", "note_balance_c", "note_balance_d"]:
+                if nc in merged.columns:
+                    liab_display_cols.append(nc)
+                    liab_names.append(nc.replace("note_balance_", "").upper())
+            liab_display_cols += ["total_rated_debt"]
+            liab_names += ["Total Rated Debt"]
+            if "note_balance_n" in merged.columns:
+                liab_display_cols += ["note_balance_n"]
+                liab_names += ["Class N"]
+            liab_display_cols += ["total_all_debt"]
+            liab_names += ["Total All Debt"]
+            if "overcollateralization_amount" in merged.columns:
+                liab_display_cols += ["overcollateralization_amount"]
+                liab_names += ["OC"]
+            if "reserve_account_balance" in merged.columns:
+                liab_display_cols += ["reserve_account_balance"]
+                liab_names += ["Reserve"]
 
-        # Normalized
-        st.markdown(f"### Normalized (% of ${ORIG_BAL/1e6:.0f}M)")
-        bs_norm = bs_df.copy()
-        for c in bs_norm.columns[1:]:
-            bs_norm[c] = bs_df[c].apply(lambda x: f"{x/ORIG_BAL:.2%}" if pd.notna(x) and x != 0 else "-")
-        st.dataframe(bs_norm, use_container_width=True, hide_index=True, height=500)
+            liab_df = merged[liab_display_cols].copy()
+            liab_df.columns = liab_names
+            l_fmt = liab_df.copy()
+            for c in l_fmt.columns[1:]:
+                l_fmt[c] = l_fmt[c].apply(lambda x: f"${x:,.0f}" if pd.notna(x) else "-")
+            st.dataframe(l_fmt, use_container_width=True, hide_index=True, height=400)
+
+            # Normalized liabilities
+            st.markdown(f"### Liabilities & Equity — Normalized (% of ${ORIG_BAL/1e6:.0f}M)")
+            l_norm = liab_df.copy()
+            for c in l_norm.columns[1:]:
+                l_norm[c] = liab_df[c].apply(lambda x: f"{x/ORIG_BAL:.2%}" if pd.notna(x) else "-")
+            st.dataframe(l_norm, use_container_width=True, hide_index=True, height=400)
 
 
 # ═══════════════════════════════════════════════════════════
