@@ -25,41 +25,126 @@ AUTO_LOAN_NS = "http://www.sec.gov/edgar/document/absee/autoloan/assetdata"
 
 # --- Deal Registry ---
 # Each deal is keyed by a short slug used in the DB filename and dashboard selector.
-# Add new Carvana deals here as needed.
+# Carvana ABS deals from SEC EDGAR. "P" series = prime, "N" series = non-prime.
 DEALS = {
+    # ── 2020 ──
     "2020-P1": {
         "cik": "0001801738",
         "entity_name": "Carvana Auto Receivables Trust 2020-P1",
-        "closing_date": "2020-12-10",
         "distribution_day": 8,
-        "original_pool_balance": 405_000_000,  # approximate from prospectus
-        "note_classes": ["A-1", "A-2", "A-3", "A-4", "B", "C", "D", "N"],
+        "original_pool_balance": 405_000_000,
     },
-    # Future deals — uncomment or add as needed:
-    # "2021-N1": {
-    #     "cik": "0001841341",
-    #     "entity_name": "Carvana Auto Receivables Trust 2021-N1",
-    #     "closing_date": "2021-03-17",
-    #     "distribution_day": 8,
-    #     "original_pool_balance": 500_000_000,
-    #     "note_classes": ["A", "B", "C", "D", "E", "N"],
-    # },
-    # "2021-P1": {
-    #     "cik": "0001841341",  # verify CIK
-    #     "entity_name": "Carvana Auto Receivables Trust 2021-P1",
-    #     "closing_date": "2021-05-12",
-    #     "distribution_day": 8,
-    #     "original_pool_balance": 550_000_000,
-    #     "note_classes": ["A-1", "A-2", "A-3", "A-4", "B", "C", "D", "N"],
-    # },
-    # "2022-P1": {
-    #     "cik": "0001903763",
-    #     "entity_name": "Carvana Auto Receivables Trust 2022-P1",
-    #     "closing_date": "2022-09-14",
-    #     "distribution_day": 8,
-    #     "original_pool_balance": 600_000_000,
-    #     "note_classes": ["A-1", "A-2", "A-3", "A-4", "B", "C", "D", "N"],
-    # },
+    # ── 2021 ──
+    "2021-N1": {
+        "cik": "0001842012",
+        "entity_name": "Carvana Auto Receivables Trust 2021-N1",
+        "distribution_day": 8,
+        "original_pool_balance": None,  # will be set from first servicer cert
+    },
+    "2021-N2": {
+        "cik": "0001843643",
+        "entity_name": "Carvana Auto Receivables Trust 2021-N2",
+        "distribution_day": 8,
+        "original_pool_balance": None,
+    },
+    "2021-N3": {
+        "cik": "0001843653",
+        "entity_name": "Carvana Auto Receivables Trust 2021-N3",
+        "distribution_day": 8,
+        "original_pool_balance": None,
+    },
+    "2021-N4": {
+        "cik": "0001845211",
+        "entity_name": "Carvana Auto Receivables Trust 2021-N4",
+        "distribution_day": 8,
+        "original_pool_balance": None,
+    },
+    "2021-P1": {
+        "cik": "0001841341",
+        "entity_name": "Carvana Auto Receivables Trust 2021-P1",
+        "distribution_day": 8,
+        "original_pool_balance": None,
+    },
+    "2021-P2": {
+        "cik": "0001843657",
+        "entity_name": "Carvana Auto Receivables Trust 2021-P2",
+        "distribution_day": 8,
+        "original_pool_balance": None,
+    },
+    # ── 2022 ──
+    "2022-P1": {
+        "cik": "0001903763",
+        "entity_name": "Carvana Auto Receivables Trust 2022-P1",
+        "distribution_day": 8,
+        "original_pool_balance": None,
+    },
+    "2022-P2": {
+        "cik": "0001903753",
+        "entity_name": "Carvana Auto Receivables Trust 2022-P2",
+        "distribution_day": 8,
+        "original_pool_balance": None,
+    },
+    "2022-P3": {
+        "cik": "0001903756",
+        "entity_name": "Carvana Auto Receivables Trust 2022-P3",
+        "distribution_day": 8,
+        "original_pool_balance": None,
+    },
+    # ── 2023 ──
+    "2023-P5": {
+        "cik": "0001967527",
+        "entity_name": "Carvana Auto Receivables Trust 2023-P5",
+        "distribution_day": 8,
+        "original_pool_balance": None,
+    },
+    # ── 2024 ──
+    "2024-N1": {
+        "cik": "0001903764",
+        "entity_name": "Carvana Auto Receivables Trust 2024-N1",
+        "distribution_day": 8,
+        "original_pool_balance": None,
+    },
+    "2024-P2": {
+        "cik": "0001999671",
+        "entity_name": "Carvana Auto Receivables Trust 2024-P2",
+        "distribution_day": 8,
+        "original_pool_balance": None,
+    },
+    "2024-P3": {
+        "cik": "0001999856",
+        "entity_name": "Carvana Auto Receivables Trust 2024-P3",
+        "distribution_day": 8,
+        "original_pool_balance": None,
+    },
+    "2024-P4": {
+        "cik": "0001999854",
+        "entity_name": "Carvana Auto Receivables Trust 2024-P4",
+        "distribution_day": 8,
+        "original_pool_balance": None,
+    },
+    # ── 2025 ──
+    "2025-P2": {
+        "cik": "0002037955",
+        "entity_name": "Carvana Auto Receivables Trust 2025-P2",
+        "distribution_day": 8,
+        "original_pool_balance": None,
+    },
+    "2025-P3": {
+        "cik": "0002037953",
+        "entity_name": "Carvana Auto Receivables Trust 2025-P3",
+        "distribution_day": 8,
+        "original_pool_balance": None,
+    },
+    "2025-P4": {
+        "cik": "0002037952",
+        "entity_name": "Carvana Auto Receivables Trust 2025-P4",
+        "distribution_day": 8,
+        "original_pool_balance": None,
+    },
+    # NOTE: Some deals are missing (2022-N1, 2023-P1 through P4, 2023-N series,
+    # 2024-P1, 2025-P1, 2025-N series). Their CIKs weren't found in web search.
+    # They can be discovered by searching SEC EDGAR directly:
+    # https://www.sec.gov/cgi-bin/browse-edgar?company=carvana+auto+receivables&CIK=&type=&dateb=&owner=include&count=100
 }
 
 # Default deal for backward compatibility

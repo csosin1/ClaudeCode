@@ -69,7 +69,20 @@ with st.sidebar:
     st.markdown("---")
     st.caption("Data sourced from SEC EDGAR")
 
-ORIG_BAL = deal_cfg.get("original_pool_balance", 405_000_000)
+# Get original pool balance — from config, or auto-detect from first pool_performance record
+_configured_bal = deal_cfg.get("original_pool_balance")
+if _configured_bal:
+    ORIG_BAL = _configured_bal
+else:
+    # Auto-detect from pool_performance or loan data
+    _first_pool = query_df(
+        "SELECT beginning_pool_balance FROM pool_performance WHERE deal = ? ORDER BY distribution_date LIMIT 1",
+        (selected_deal,))
+    if not _first_pool.empty and _first_pool.iloc[0]["beginning_pool_balance"]:
+        ORIG_BAL = _first_pool.iloc[0]["beginning_pool_balance"]
+    else:
+        _total = query_df("SELECT SUM(original_loan_amount) as s FROM loans WHERE deal = ?", (selected_deal,))
+        ORIG_BAL = _total.iloc[0]["s"] if not _total.empty and _total.iloc[0]["s"] else 405_000_000
 
 
 # ── Data Loading ──────────────────────────────────────────
