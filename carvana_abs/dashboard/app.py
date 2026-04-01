@@ -242,28 +242,73 @@ tab_pool, tab_dq, tab_losses, tab_wf, tab_bs, tab_rec, tab_loans, tab_fields = s
 # TAB 1: POOL SUMMARY
 # ═══════════════════════════════════════════════════════════
 with tab_pool:
-    if lp.empty:
+    # Use pool_performance (servicer cert) as primary source — no sawtooth
+    has_pool = not pool_df.empty and "ending_pool_balance" in pool_df.columns and pool_df["ending_pool_balance"].notna().any()
+
+    if not has_pool and lp.empty:
         st.info("No data yet.")
     else:
-        last = lp.iloc[-1]
+        if has_pool:
+            latest_pool = pool_df.iloc[-1]
+            cur_bal = latest_pool["ending_pool_balance"]
+            cur_count = int(latest_pool["ending_pool_count"]) if pd.notna(latest_pool.get("ending_pool_count")) else None
+        else:
+            latest_pool = lp.iloc[-1]
+            cur_bal = latest_pool["total_balance"]
+            cur_count = int(latest_pool["active_loans"])
+
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Original Pool Balance", f"${ORIG_BAL:,.0f}")
-        c2.metric("Current Pool Balance", f"${last['total_balance']:,.0f}")
-        c3.metric("Pool Factor", f"{last['total_balance']/ORIG_BAL:.2%}")
-        c4.metric("Active Loans", f"{int(last['active_loans']):,}")
+        c2.metric("Current Pool Balance", f"${cur_bal:,.0f}")
+        c3.metric("Pool Factor", f"{cur_bal/ORIG_BAL:.2%}")
+        if cur_count:
+            c4.metric("Active Loans", f"{cur_count:,}")
 
-        fig = px.area(lp, x="period", y="total_balance", title="Remaining Pool Balance",
-                      labels={"period": "Period", "total_balance": "Balance ($)"})
+        # Pool balance chart — use servicer cert data (smooth, authoritative)
+        if has_pool:
+            fig = px.area(pool_df, x="period", y="ending_pool_balance", title="Remaining Pool Balance",
+                          labels={"period": "Distribution Date", "ending_pool_balance": "Balance ($)"})
+        else:
+            fig = px.area(lp, x="period", y="total_balance", title="Remaining Pool Balance",
+                          labels={"period": "Period", "total_balance": "Balance ($)"})
         fig.update_layout(yaxis_tickformat="$,.0f", hovermode="x unified")
         st.plotly_chart(fig, use_container_width=True)
 
-        fig2 = px.line(lp, x="period", y="active_loans", title="Active Loan Count",
-                       labels={"period": "Period", "active_loans": "Loans"})
-        fig2.update_layout(hovermode="x unified")
-        st.plotly_chart(fig2, use_container_width=True)
+        # Loan count chart
+        if has_pool and "ending_pool_count" in pool_df.columns:
+            fig2 = px.line(pool_df.dropna(subset=["ending_pool_count"]), x="period", y="ending_pool_count",
+                           title="Active Loan Count",
+                           labels={"period": "Distribution Date", "ending_pool_count": "Loans"})
+        elif not lp.empty:
+            fig2 = px.line(lp, x="period", y="active_loans", title="Active Loan Count",
+                           labels={"period": "Period", "active_loans": "Loans"})
+        else:
+            fig2 = None
+        if fig2:
+            fig2.update_layout(hovermode="x unified")
+            st.plotly_chart(fig2, use_container_width=True)
+
+        # WAC and WAM from pool_performance
+        if has_pool:
+            wac_data = pool_df[["period", "weighted_avg_apr"]].dropna()
+            wam_data = pool_df[["period", "weighted_avg_remaining_term"]].dropna()
+            if not wac_data.empty or not wam_data.empty:
+                st.subheader("Pool Statistics")
+                sc1, sc2 = st.columns(2)
+                if not wac_data.empty:
+                    with sc1:
+                        fig_wac = px.line(wac_data, x="period", y="weighted_avg_apr", title="Weighted Average Coupon (WAC)")
+                        fig_wac.update_layout(yaxis_tickformat=".2%", hovermode="x unified")
+                        st.plotly_chart(fig_wac, use_container_width=True)
+                if not wam_data.empty:
+                    with sc2:
+                        fig_wam = px.line(wam_data, x="period", y="weighted_avg_remaining_term",
+                                          title="Weighted Average Remaining Term (months)")
+                        fig_wam.update_layout(hovermode="x unified")
+                        st.plotly_chart(fig_wam, use_container_width=True)
 
         # Note balances from pool_performance
-        if not pool_df.empty:
+        if has_pool:
             note_cols = ["note_balance_a1", "note_balance_a2", "note_balance_a3",
                          "note_balance_a4", "note_balance_b", "note_balance_c",
                          "note_balance_d", "note_balance_n"]
@@ -275,6 +320,23 @@ with tab_pool:
                 fig3 = px.area(nm, x="period", y="Balance", color="Class", title="Note Balances Over Time")
                 fig3.update_layout(yaxis_tickformat="$,.0f", hovermode="x unified")
                 st.plotly_chart(fig3, use_container_width=True)
+
+        # OC and Reserve from pool_performance
+        if has_pool:
+            oc_data = pool_df[["period", "overcollateralization_amount", "reserve_account_balance"]].dropna(how="all",
+                subset=["overcollateralization_amount", "reserve_account_balance"])
+            if not oc_data.empty:
+                st.subheader("Credit Enhancement")
+                fig_oc = go.Figure()
+                if oc_data["overcollateralization_amount"].notna().any():
+                    fig_oc.add_trace(go.Scatter(x=oc_data["period"], y=oc_data["overcollateralization_amount"],
+                                                name="Overcollateralization", mode="lines"))
+                if oc_data["reserve_account_balance"].notna().any():
+                    fig_oc.add_trace(go.Scatter(x=oc_data["period"], y=oc_data["reserve_account_balance"],
+                                                name="Reserve Account", mode="lines"))
+                fig_oc.update_layout(yaxis_tickformat="$,.0f", hovermode="x unified",
+                                     title="Overcollateralization & Reserve Account")
+                st.plotly_chart(fig_oc, use_container_width=True)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -304,6 +366,19 @@ with tab_dq:
             fig.update_traces(line_color="#FF9800")
         fig.update_layout(yaxis_tickformat=".2%", hovermode="x unified")
         st.plotly_chart(fig, use_container_width=True)
+
+        # Delinquency trigger from pool_performance
+        if not pool_df.empty and "delinquency_trigger_level" in pool_df.columns:
+            trig = pool_df[["period", "delinquency_trigger_level", "delinquency_trigger_actual"]].dropna()
+            if not trig.empty:
+                st.subheader("60+ Day Delinquency vs Trigger Level")
+                fig_t = go.Figure()
+                fig_t.add_trace(go.Scatter(x=trig["period"], y=trig["delinquency_trigger_level"],
+                                           name="Trigger Level", line=dict(dash="dash", color="red")))
+                fig_t.add_trace(go.Scatter(x=trig["period"], y=trig["delinquency_trigger_actual"],
+                                           name="Actual 60+ DQ %", line=dict(color="blue")))
+                fig_t.update_layout(yaxis_tickformat=".2%", hovermode="x unified")
+                st.plotly_chart(fig_t, use_container_width=True)
 
         last = lp.iloc[-1]
         st.dataframe(pd.DataFrame({
