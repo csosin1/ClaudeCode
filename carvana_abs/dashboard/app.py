@@ -262,9 +262,9 @@ def load_recovery_data(deal):
 
 pool_df = load_pool(selected_deal)
 lp = load_loan_perf_agg(selected_deal)
-loans_df = load_loans(selected_deal)
+# NOTE: loans_df and recovery_data are loaded lazily inside their tabs
 
-# Compute cumulative columns
+# Compute cumulative columns (lp is small — ~50 rows from monthly_summary)
 if not lp.empty:
     lp["cum_chargeoffs"] = lp["period_chargeoffs"].cumsum()
     lp["cum_recoveries"] = lp["period_recoveries"].cumsum()
@@ -765,6 +765,7 @@ with tab_rec:
 # TAB 7: LOAN EXPLORER
 # ═══════════════════════════════════════════════════════════
 with tab_loans:
+    loans_df = load_loans(selected_deal)
     if loans_df.empty:
         st.info("No data yet.")
     else:
