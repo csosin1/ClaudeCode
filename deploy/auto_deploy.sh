@@ -19,6 +19,13 @@ if [ "$LOCAL" != "$REMOTE" ]; then
         bash /opt/abs-dashboard/deploy/update_nginx.sh
     fi
 
+    # Re-ingest pool data if reingest flag exists (one-time after parser fix)
+    if [ -f /opt/abs-dashboard/carvana_abs/reingest_pool.py ] && [ ! -f /opt/.pool_reingested ]; then
+        echo "$(date): Re-ingesting pool data with fixed parser..."
+        /opt/abs-venv/bin/python /opt/abs-dashboard/carvana_abs/reingest_pool.py 2>&1 || true
+        touch /opt/.pool_reingested
+    fi
+
     # Rebuild summary tables if schema changed
     if [ -f /opt/abs-dashboard/carvana_abs/rebuild_summaries.py ]; then
         /opt/abs-venv/bin/python /opt/abs-dashboard/carvana_abs/rebuild_summaries.py 2>&1 || true
