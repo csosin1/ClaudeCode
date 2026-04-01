@@ -10,11 +10,21 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 from carvana_abs.config import DB_PATH, DEALS
 
 
+@st.cache_resource
 def get_db():
     if not os.path.exists(DB_PATH):
         return None
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    # SQLite performance optimizations
+    conn.execute("PRAGMA cache_size=10000")       # 10MB in-memory page cache
+    conn.execute("PRAGMA temp_store=memory")       # Temp tables in RAM
+    conn.execute("PRAGMA mmap_size=268435456")     # Memory-map 256MB of DB file
+    conn.execute("PRAGMA journal_mode=WAL")        # Write-ahead logging
+    conn.execute("PRAGMA synchronous=NORMAL")      # Faster writes
+    # Pre-warm: force SQLite to load index pages
+    conn.execute("SELECT COUNT(*) FROM filings").fetchone()
+    conn.execute("SELECT COUNT(*) FROM monthly_summary").fetchone()
     return conn
 
 
