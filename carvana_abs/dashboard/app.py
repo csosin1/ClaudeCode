@@ -145,6 +145,69 @@ def load_losses_by_segment(deal, col):
     """, (deal, deal))
 
 
+@st.cache_data(ttl=300)
+def load_recovery_data(deal):
+    """Per-loan recovery analysis: chargeoff timing, recovery timing, amounts."""
+    df = query_df("""
+        SELECT
+            co.asset_number,
+            co.chargeoff_period,
+            co.total_chargeoff,
+            rec.first_recovery_period,
+            rec.total_recoveries,
+            l.obligor_credit_score,
+            l.original_interest_rate,
+            l.original_loan_amount
+        FROM (
+            SELECT deal, asset_number,
+                   MIN(reporting_period_end) as chargeoff_period,
+                   SUM(charged_off_amount) as total_chargeoff
+            FROM loan_performance
+            WHERE deal = ? AND charged_off_amount > 0
+            GROUP BY deal, asset_number
+        ) co
+        LEFT JOIN (
+            SELECT deal, asset_number,
+                   MIN(reporting_period_end) as first_recovery_period,
+                   SUM(recoveries) as total_recoveries
+            FROM loan_performance
+            WHERE deal = ? AND recoveries > 0
+            GROUP BY deal, asset_number
+        ) rec ON co.deal = rec.deal AND co.asset_number = rec.asset_number
+        LEFT JOIN loans l ON co.deal = l.deal AND co.asset_number = l.asset_number
+        WHERE co.deal = ?
+    """, (deal, deal, deal))
+
+    if df.empty:
+        return df
+
+    # Normalize dates and compute months between chargeoff and first recovery
+    from datetime import datetime
+
+    def parse_date(d):
+        if not d:
+            return None
+        d = str(d).strip()
+        for fmt in ["%m-%d-%Y", "%m/%d/%Y", "%Y-%m-%d"]:
+            try:
+                return datetime.strptime(d, fmt)
+            except ValueError:
+                continue
+        return None
+
+    df["co_dt"] = df["chargeoff_period"].apply(parse_date)
+    df["rec_dt"] = df["first_recovery_period"].apply(parse_date)
+    df["has_recovery"] = df["total_recoveries"].notna() & (df["total_recoveries"] > 0)
+    df["recovery_rate"] = df.apply(
+        lambda r: r["total_recoveries"] / r["total_chargeoff"]
+        if r["has_recovery"] and r["total_chargeoff"] > 0 else None, axis=1)
+    df["months_to_recovery"] = df.apply(
+        lambda r: ((r["rec_dt"].year - r["co_dt"].year) * 12 + r["rec_dt"].month - r["co_dt"].month)
+        if pd.notna(r["rec_dt"]) and pd.notna(r["co_dt"]) else None, axis=1)
+
+    return df
+
+
 pool_df = load_pool(selected_deal)
 lp = load_loan_perf_agg(selected_deal)
 loans_df = load_loans(selected_deal)
@@ -170,9 +233,9 @@ if not lp.empty:
 
 # ── Tabs ──────────────────────────────────────────────────
 
-tab_pool, tab_dq, tab_losses, tab_wf, tab_bs, tab_loans, tab_fields = st.tabs([
+tab_pool, tab_dq, tab_losses, tab_wf, tab_bs, tab_rec, tab_loans, tab_fields = st.tabs([
     "Pool Summary", "Delinquencies", "Losses", "Cash Waterfall",
-    "Trust Balance Sheet", "Loan Explorer", "Data Fields"
+    "Trust Balance Sheet", "Recovery Analysis", "Loan Explorer", "Data Fields"
 ])
 
 # ═══════════════════════════════════════════════════════════
@@ -432,7 +495,95 @@ with tab_bs:
 
 
 # ═══════════════════════════════════════════════════════════
-# TAB 6: LOAN EXPLORER
+# TAB 6: RECOVERY ANALYSIS
+# ═══════════════════════════════════════════════════════════
+with tab_rec:
+    rec_df = load_recovery_data(selected_deal)
+    if rec_df.empty:
+        st.info("No chargeoff data found.")
+    else:
+        st.subheader("Recovery Analysis (Per-Loan)")
+
+        total_co = len(rec_df)
+        with_rec = rec_df["has_recovery"].sum()
+        no_rec = total_co - with_rec
+        avg_rate = rec_df.loc[rec_df["has_recovery"], "recovery_rate"].mean()
+        median_months = rec_df.loc[rec_df["has_recovery"], "months_to_recovery"].median()
+        total_co_amt = rec_df["total_chargeoff"].sum()
+        total_rec_amt = rec_df.loc[rec_df["has_recovery"], "total_recoveries"].sum()
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Charged-Off Loans", f"{total_co:,}")
+        c2.metric("With Any Recovery", f"{int(with_rec):,} ({with_rec/total_co:.0%})")
+        c3.metric("Avg Recovery Rate", f"{avg_rate:.1%}" if pd.notna(avg_rate) else "N/A")
+        c4.metric("Median Months to Recovery", f"{median_months:.0f}" if pd.notna(median_months) else "N/A")
+
+        c5, c6 = st.columns(2)
+        c5.metric("Total Chargeoff Amount", f"${total_co_amt:,.0f}")
+        c6.metric("Total Recovered", f"${total_rec_amt:,.0f} ({total_rec_amt/total_co_amt:.1%})")
+
+        # Months to first recovery histogram
+        rec_with = rec_df[rec_df["has_recovery"] & rec_df["months_to_recovery"].notna()].copy()
+        if not rec_with.empty:
+            st.subheader("Time from Chargeoff to First Recovery")
+            fig = px.histogram(rec_with, x="months_to_recovery", nbins=30,
+                               title="Months from Chargeoff to First Recovery",
+                               labels={"months_to_recovery": "Months"},
+                               color_discrete_sequence=["#1976D2"])
+            fig.update_layout(showlegend=False)
+            st.plotly_chart(fig, use_container_width=True)
+
+            # Summary stats
+            stats = rec_with["months_to_recovery"].describe()
+            st.dataframe(pd.DataFrame({
+                "Statistic": ["Count", "Mean", "Median", "Min", "Max", "Std Dev"],
+                "Months": [f"{stats['count']:.0f}", f"{stats['mean']:.1f}", f"{stats['50%']:.1f}",
+                           f"{stats['min']:.0f}", f"{stats['max']:.0f}", f"{stats['std']:.1f}"],
+            }), use_container_width=True, hide_index=True)
+
+        # Recovery rate distribution
+        rec_rates = rec_df[rec_df["has_recovery"]]["recovery_rate"].dropna()
+        if not rec_rates.empty:
+            st.subheader("Recovery Rate Distribution (per loan)")
+            # Cap at 100% for display
+            fig2 = px.histogram(rec_rates.clip(upper=1.5), nbins=40,
+                                title="Recovery Rate per Charged-Off Loan (recoveries / chargeoff amount)",
+                                labels={"value": "Recovery Rate"},
+                                color_discrete_sequence=["#4CAF50"])
+            fig2.update_layout(xaxis_tickformat=".0%", showlegend=False)
+            st.plotly_chart(fig2, use_container_width=True)
+
+        # Recovery rate by credit score bucket
+        st.subheader("Recovery Rate by Credit Score")
+        rec_scored = rec_df[rec_df["obligor_credit_score"].notna()].copy()
+        if not rec_scored.empty:
+            rec_scored["score_bucket"] = pd.cut(
+                rec_scored["obligor_credit_score"],
+                bins=[0, 580, 620, 660, 700, 740, 780, 820, 900],
+                labels=["<580", "580-619", "620-659", "660-699", "700-739", "740-779", "780-819", "820+"],
+                right=False)
+            by_score = rec_scored.groupby("score_bucket", observed=True).agg(
+                chargeoff_count=("asset_number", "count"),
+                with_recovery=("has_recovery", "sum"),
+                total_chargeoff=("total_chargeoff", "sum"),
+                total_recovered=("total_recoveries", lambda x: x.dropna().sum()),
+            ).reset_index()
+            by_score["recovery_rate"] = by_score["total_recovered"] / by_score["total_chargeoff"]
+            by_score["pct_with_recovery"] = by_score["with_recovery"] / by_score["chargeoff_count"]
+
+            d = by_score.copy()
+            d.columns = ["Score", "Chargeoffs", "With Recovery", "Total Chargeoff", "Total Recovered", "Recovery Rate", "% With Recovery"]
+            d["Total Chargeoff"] = d["Total Chargeoff"].apply(lambda x: f"${x:,.0f}")
+            d["Total Recovered"] = d["Total Recovered"].apply(lambda x: f"${x:,.0f}")
+            d["Recovery Rate"] = d["Recovery Rate"].apply(lambda x: f"{x:.1%}")
+            d["% With Recovery"] = d["% With Recovery"].apply(lambda x: f"{x:.0%}")
+            d["Chargeoffs"] = d["Chargeoffs"].apply(lambda x: f"{x:,}")
+            d["With Recovery"] = d["With Recovery"].apply(lambda x: f"{int(x):,}")
+            st.dataframe(d, use_container_width=True, hide_index=True)
+
+
+# ═══════════════════════════════════════════════════════════
+# TAB 7: LOAN EXPLORER
 # ═══════════════════════════════════════════════════════════
 with tab_loans:
     if loans_df.empty:
@@ -490,7 +641,7 @@ with tab_loans:
 
 
 # ═══════════════════════════════════════════════════════════
-# TAB 7: DATA FIELDS
+# TAB 8: DATA FIELDS
 # ═══════════════════════════════════════════════════════════
 with tab_fields:
     st.subheader("Available Data Fields")
