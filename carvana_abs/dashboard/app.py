@@ -583,9 +583,34 @@ with tab_bs:
                 liab["total_all_debt"] = liab["total_rated_debt"] + liab["note_balance_n"].fillna(0)
             else:
                 liab["total_all_debt"] = liab["total_rated_debt"]
-            # Merge by year-month (distribution_date and reporting_period_end differ)
-            assets["ym"] = assets["period"].str[:7]
-            liab["ym"] = liab["period"].str[:7]
+            # Merge by year-month: distribution_date (e.g., 12/8/2025) maps to
+            # reporting_period_end of the PREVIOUS month (e.g., 11-30-2025).
+            # Normalize both to YYYY-MM, but shift distribution_date back one month.
+            def period_to_ym(p):
+                """Extract YYYY-MM from a normalized date string."""
+                s = str(p).replace("/", "-")
+                return s[:7] if len(s) >= 7 else s
+
+            def dist_date_to_collection_ym(p):
+                """Distribution date is ~8th of month AFTER collection period.
+                Map it back to the collection month (subtract 1 month)."""
+                s = str(p).replace("/", "-")
+                if len(s) < 7:
+                    return s
+                try:
+                    year = int(s[:4])
+                    month = int(s[5:7])
+                    # Go back one month
+                    month -= 1
+                    if month == 0:
+                        month = 12
+                        year -= 1
+                    return f"{year:04d}-{month:02d}"
+                except (ValueError, IndexError):
+                    return s[:7]
+
+            assets["ym"] = assets["period"].apply(period_to_ym)
+            liab["ym"] = liab["period"].apply(dist_date_to_collection_ym)
             merged = assets.merge(liab.drop(columns=["period"]), on="ym", how="left")
         else:
             merged = assets.copy()
