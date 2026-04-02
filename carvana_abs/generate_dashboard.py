@@ -85,11 +85,10 @@ def table_html(df):
 
 def get_orig_bal(deal):
     """Auto-detect original pool balance from first pool_performance record or loan sum."""
-    from carvana_abs.config import DEALS
-    cfg = DEALS.get(deal, {})
-    bal = cfg.get("original_pool_balance")
-    if bal:
-        return bal
+    # Known balances
+    KNOWN = {"2020-P1": 405_000_000}
+    if deal in KNOWN:
+        return KNOWN[deal]
     fp = q("SELECT beginning_pool_balance FROM pool_performance WHERE deal=? ORDER BY distribution_date LIMIT 1", (deal,))
     if not fp.empty and fp.iloc[0]["beginning_pool_balance"] and fp.iloc[0]["beginning_pool_balance"] > 0:
         return fp.iloc[0]["beginning_pool_balance"]
