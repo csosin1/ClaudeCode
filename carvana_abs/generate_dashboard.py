@@ -61,8 +61,9 @@ def fm(v):
 def ch(fig, h=350):
     fig.update_layout(margin=dict(l=40,r=20,t=40,b=30), height=h,
                       template="plotly_white", font=dict(size=11))
-    return pio.to_html(fig, full_html=False, include_plotlyjs=False,
-                       config={"displayModeBar": False})
+    # Use div_id to avoid conflicts, include_plotlyjs=False since we load from CDN in <head>
+    return fig.to_html(full_html=False, include_plotlyjs=False,
+                       default_width="100%", default_height=f"{h}px")
 
 
 def table_html(df, max_rows=None):
