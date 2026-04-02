@@ -15,8 +15,14 @@ ACTIVE_DB = DASH_DB if os.path.exists(DASH_DB) else FULL_DB
 OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static_site")
 os.makedirs(OUT_DIR, exist_ok=True)
 
-# Deals to include in the dashboard (add more as they're verified)
-DASHBOARD_DEALS = ["2020-P1", "2021-P1"]
+# Deals to include in the dashboard — all deals with ingested data
+DASHBOARD_DEALS = [
+    "2020-P1",
+    "2021-N1", "2021-N2", "2021-N3", "2021-N4", "2021-P1", "2021-P2",
+    "2022-P1", "2022-P2", "2022-P3",
+    "2024-P2", "2024-P3", "2024-P4",
+    "2025-P2", "2025-P3", "2025-P4",
+]
 _chart_id = 0
 
 
