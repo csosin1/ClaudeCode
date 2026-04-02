@@ -36,8 +36,18 @@ if [ "$LOCAL" != "$REMOTE" ]; then
         /opt/abs-venv/bin/python /opt/abs-dashboard/carvana_abs/export_dashboard_db.py 2>&1 || true
     fi
 
-    systemctl restart streamlit
-    echo "$(date): Deploy complete."
+    # Generate preview (not live) — user must approve to promote
+    if [ -f /opt/abs-dashboard/carvana_abs/generate_preview.py ]; then
+        /opt/abs-venv/bin/python /opt/abs-dashboard/carvana_abs/generate_preview.py 2>&1 || true
+    fi
+
+    # Set up preview nginx if not done yet
+    if [ -f /opt/abs-dashboard/deploy/setup_preview.sh ] && [ ! -f /opt/.preview_setup ]; then
+        bash /opt/abs-dashboard/deploy/setup_preview.sh
+        touch /opt/.preview_setup
+    fi
+
+    echo "$(date): Deploy complete. Preview updated."
 else
     echo "$(date): No changes."
 fi
