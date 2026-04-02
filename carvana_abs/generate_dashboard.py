@@ -124,15 +124,10 @@ def main():
     if not pool.empty and "weighted_avg_apr" in pool.columns:
         wac = pool.dropna(subset=["weighted_avg_apr"])
         if not wac.empty:
-            # Interpolate WAC onto the same x-axis as the other charts
-            wac_dict = dict(zip(wac["period"].tolist(), wac["weighted_avg_apr"].tolist()))
-            wac_y = [wac_dict.get(p) for p in x]
-            # Filter to only periods where we have WAC data
-            wac_x = [p for p, v in zip(x, wac_y) if v is not None]
-            wac_vals = [v for v in wac_y if v is not None]
-            h += chart([{"x": wac_x, "y": wac_vals, "type": "scatter"}],
+            # Use pool dates directly but set x-axis range to match other charts
+            h += chart([{"x": wac["period"].tolist(), "y": wac["weighted_avg_apr"].tolist(), "type": "scatter"}],
                        {"title": "Weighted Average Coupon", "yaxis": {"tickformat": ".2%"}, "hovermode": "x unified",
-                        "xaxis": {"range": [x[0], x[-1]]}})
+                        "xaxis": {"range": [x[0], x[-1]], "tickangle": -45, "automargin": True}})
     sections["Pool Summary"] = h
 
     # ── DELINQUENCIES ──
