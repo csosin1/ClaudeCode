@@ -126,11 +126,21 @@ def generate_deal_content(deal):
     lp["dq90r"] = lp["dq_90_balance"] / lp["total_balance"]
     lp["dq120r"] = lp["dq_120_plus_balance"] / lp["total_balance"]
     lp["net_loss"] = lp["period_chargeoffs"] - lp["period_recoveries"]
-    # Excess spread = interest available after servicing fee and net losses
-    # This approximates cash to residual/equity holders
-    lp["excess"] = lp["interest_collected"] - lp["est_servicing_fee"] - lp["net_loss"]
-    lp["cum_excess"] = lp["excess"].cumsum()
-    lp["cum_excess_pct"] = lp["cum_excess"] / ORIG_BAL
+
+    # For cash waterfall, we need pool_performance data to compute note paydowns
+    # and estimate note interest. Without it, we can only show collections/losses.
+    note_cols = ["note_balance_a1","note_balance_a2","note_balance_a3","note_balance_a4",
+                 "note_balance_b","note_balance_c","note_balance_d","note_balance_n"]
+    if not pool.empty:
+        avail_notes = [c for c in note_cols if c in pool.columns]
+        if avail_notes:
+            pool["total_notes"] = pool[avail_notes].fillna(0).sum(axis=1)
+            pool["note_principal_paid"] = -pool["total_notes"].diff().fillna(0)
+            pool["note_principal_paid"] = pool["note_principal_paid"].clip(lower=0)
+            # Estimate note interest: WAC of pool is ~8%, note WAC is roughly 1-2% for investment grade
+            # Use a conservative estimate: total_notes * 0.02 / 12 (2% annual blended coupon)
+            pool["est_note_interest"] = pool["total_notes"] * 0.02 / 12
+
     lp["cum_rec_rate"] = lp["cum_rec"] / lp["cum_co"].replace(0, float("nan"))
 
     x = lp["period"].tolist()
@@ -223,17 +233,65 @@ def generate_deal_content(deal):
     sections["Losses"] = h
 
     # ── CASH WATERFALL ──
-    wf = lp[["period","interest_collected","principal_collected","period_recoveries","est_servicing_fee","period_chargeoffs","net_loss","excess"]].copy()
-    wf.columns = ["Period","Interest","Principal","Recoveries","Svc Fee","Chargeoffs","Net Loss","Excess"]
+    h = ""
+
+    # Collections table from loan-level data
+    wf = lp[["period","interest_collected","principal_collected","period_recoveries",
+             "est_servicing_fee","period_chargeoffs","net_loss"]].copy()
+    wf.columns = ["Period","Interest","Principal","Recoveries","Svc Fee","Chargeoffs","Net Loss"]
     sums = wf.select_dtypes(include="number").sum()
     sr = pd.DataFrame([["TOTAL"]+sums.tolist()], columns=wf.columns)
     wf_all = pd.concat([wf, sr], ignore_index=True)
     wf_fmt = wf_all.copy()
     for c in wf_fmt.columns[1:]:
         wf_fmt[c] = wf_all[c].apply(lambda x: fm(x) if pd.notna(x) else "")
-    h = "<h3>Monthly Cash Flows</h3>" + table_html(wf_fmt)
-    h += chart([{"x": x, "y": lp["cum_excess_pct"].tolist(), "type": "scatter", "fill": "tozeroy", "line": {"color": "#388E3C"}}],
-               {"title": "Cumulative Excess Spread (% of Original Balance)", "yaxis": {"tickformat": ".2%"}, "hovermode": "x unified"})
+    h += "<h3>Monthly Collections & Losses</h3>" + table_html(wf_fmt)
+
+    # Cumulative cash flow chart
+    cum_int = lp["interest_collected"].cumsum()
+    cum_prin = lp["principal_collected"].cumsum()
+    cum_svc = lp["est_servicing_fee"].cumsum()
+    h += chart([
+        {"x": x, "y": cum_int.tolist(), "name": "Cum Interest", "line": {"color": "#1976D2"}},
+        {"x": x, "y": cum_prin.tolist(), "name": "Cum Principal", "line": {"color": "#388E3C"}},
+        {"x": x, "y": lp["cum_co"].tolist(), "name": "Cum Chargeoffs", "line": {"color": "#D32F2F"}},
+        {"x": x, "y": lp["cum_rec"].tolist(), "name": "Cum Recoveries", "line": {"color": "#4CAF50"}},
+        {"x": x, "y": cum_svc.tolist(), "name": "Cum Servicing Fee", "line": {"color": "#FF9800", "dash": "dash"}},
+    ], {"title": "Cumulative Cash Flows", "yaxis": {"tickformat": "$,.0f"}, "hovermode": "x unified"})
+
+    # Note paydown table from pool_performance (where available)
+    if not pool.empty and "total_notes" in pool.columns:
+        pool_x = pool["period"].tolist()
+        h += "<h3>Debt & Equity (from Servicer Certificate)</h3>"
+
+        # Build debt paydown table
+        debt_cols = ["period"]
+        debt_names = ["Period"]
+        for nc in note_cols:
+            if nc in pool.columns and pool[nc].notna().any():
+                debt_cols.append(nc)
+                debt_names.append(nc.replace("note_balance_","").upper())
+        if "total_notes" in pool.columns:
+            debt_cols.append("total_notes")
+            debt_names.append("Total Debt")
+        if "overcollateralization_amount" in pool.columns:
+            debt_cols.append("overcollateralization_amount")
+            debt_names.append("OC")
+        if "reserve_account_balance" in pool.columns:
+            debt_cols.append("reserve_account_balance")
+            debt_names.append("Reserve")
+        dt = pool[debt_cols].copy()
+        dt.columns = debt_names
+        dt_fmt = dt.copy()
+        for c in dt_fmt.columns[1:]:
+            dt_fmt[c] = dt[c].apply(lambda x: fm(x) if pd.notna(x) and x != 0 else "-")
+        h += table_html(dt_fmt)
+
+        # Debt paydown chart
+        h += chart([
+            {"x": pool_x, "y": pool["total_notes"].tolist(), "name": "Total Debt", "fill": "tozeroy", "line": {"color": "#7B1FA2"}},
+        ], {"title": "Outstanding Debt Over Time", "yaxis": {"tickformat": "$,.0f"}, "hovermode": "x unified"})
+
     sections["Cash Waterfall"] = h
 
     # ── RECOVERY ──
