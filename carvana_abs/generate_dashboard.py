@@ -259,7 +259,43 @@ def generate_deal_content(deal):
         {"x": x, "y": cum_svc.tolist(), "name": "Cum Servicing Fee", "line": {"color": "#FF9800", "dash": "dash"}},
     ], {"title": "Cumulative Cash Flows", "yaxis": {"tickformat": "$,.0f"}, "hovermode": "x unified"})
 
-    # Note paydown table from pool_performance (where available)
+    # Actual waterfall from servicer certificate (where available)
+    if not pool.empty and "residual_cash" in pool.columns and pool["residual_cash"].notna().any():
+        pool_x = pool["period"].tolist()
+        h += "<h3>Cash Waterfall (from Servicer Certificate)</h3>"
+
+        # Build waterfall table with actual filing data
+        wf_cols = ["period"]
+        wf_names = ["Period"]
+        for col, name in [("total_deposited", "Total Deposited"), ("available_funds", "Available Funds"),
+                          ("actual_servicing_fee", "Servicing Fee"), ("total_note_interest", "Note Interest"),
+                          ("regular_pda", "Principal Dist"), ("residual_cash", "Residual (to Equity)")]:
+            if col in pool.columns and pool[col].notna().any():
+                wf_cols.append(col)
+                wf_names.append(name)
+        if len(wf_cols) > 1:
+            wf_pool = pool[wf_cols].copy()
+            wf_pool.columns = wf_names
+            # Add totals row
+            sums_p = wf_pool.select_dtypes(include="number").sum()
+            sr_p = pd.DataFrame([["TOTAL"] + sums_p.tolist()], columns=wf_pool.columns)
+            wf_pool_all = pd.concat([wf_pool, sr_p], ignore_index=True)
+            wf_pool_fmt = wf_pool_all.copy()
+            for c in wf_pool_fmt.columns[1:]:
+                wf_pool_fmt[c] = wf_pool_all[c].apply(lambda x: fm(x) if pd.notna(x) and x != 0 else "-")
+            h += table_html(wf_pool_fmt)
+
+        # Residual cash chart
+        res_data = pool[pool["residual_cash"].notna()]
+        if not res_data.empty:
+            cum_res = res_data["residual_cash"].cumsum()
+            cum_res_pct = cum_res / ORIG_BAL
+            h += chart([{"x": res_data["period"].tolist(), "y": cum_res_pct.tolist(),
+                         "type": "scatter", "fill": "tozeroy", "line": {"color": "#388E3C"}}],
+                       {"title": "Cumulative Cash to Residual (% of Original Balance)",
+                        "yaxis": {"tickformat": ".2%"}, "hovermode": "x unified"})
+
+    # Debt table from pool_performance (where available)
     if not pool.empty and "total_notes" in pool.columns:
         pool_x = pool["period"].tolist()
         h += "<h3>Debt & Equity (from Servicer Certificate)</h3>"

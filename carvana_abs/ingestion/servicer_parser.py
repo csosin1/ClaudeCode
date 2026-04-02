@@ -178,6 +178,50 @@ def parse_servicer_certificate(html_content: str) -> dict:
     if not best_result.get("distribution_date"):
         logger.warning("No parseable content found in servicer certificate")
 
+    # ── Extract waterfall items ──
+    # The waterfall section has lines like:
+    #   "18 To holders of the certificates, any remaining amounts 8,178,991.69"
+    # These use plain numbers (not in parentheses) as priority items.
+    all_text = soup.get_text(separator=" ", strip=True)
+    # Pre-clean
+    all_text = re.sub(r'\(\s*(\d+)\s*\)', r'(\1)', all_text)
+    all_text = re.sub(r'(\d)\s+%', r'\1%', all_text)
+
+    # Extract residual cash: "18 To holders of the certificates, any remaining amounts XXXX"
+    m = re.search(r'(?:18|18\.)\s+[Tt]o\s+holders?\s+of\s+the\s+certificates?,?\s+any\s+remaining\s+amounts?\s+([\d,]+\.?\d*)', all_text)
+    if m:
+        best_result["residual_cash"] = _clean_number(m.group(1))
+
+    # Extract total deposited to collection account
+    m = re.search(r'[Tt]otal\s+[Dd]eposited\s+to\s+[Cc]ollection\s+[Aa]ccount\s+([\d,]+\.?\d*)', all_text)
+    if m:
+        best_result["total_deposited"] = _clean_number(m.group(1))
+
+    # Extract available funds
+    m = re.search(r'[Aa]vailable\s+[Ff]unds\s+([\d,]+\.?\d*)', all_text)
+    if m:
+        best_result["available_funds"] = _clean_number(m.group(1))
+
+    # Extract servicing fee paid (from waterfall, not the loan-level estimate)
+    m = re.search(r'[Ss]ervicing\s+[Ff]ee\s+(?:[Pp]ayable\s+)?(?:from\s+)?(?:[Ss]ervicing\s+)?(?:[Ss]trip\s+)?(?:[Aa]mount\s+)?([\d,]+\.?\d*)', all_text)
+    if m and _clean_number(m.group(1)):
+        best_result["actual_servicing_fee"] = _clean_number(m.group(1))
+
+    # Extract total note interest (sum of all class interest distributable amounts)
+    # Pattern: "Class X Interest Distributable Amount XXXX"
+    note_interest_total = 0
+    for m in re.finditer(r'[Cc]lass\s+\S+\s+[Ii]nterest\s+[Dd]istributable\s+[Aa]mount\s+([\d,]+\.?\d*)', all_text):
+        val = _clean_number(m.group(1))
+        if val and val > 0:
+            note_interest_total += val
+    if note_interest_total > 0:
+        best_result["total_note_interest"] = note_interest_total
+
+    # Extract Regular PDA (principal distribution amount)
+    m = re.search(r'[Rr]egular\s+PDA\s+(?:\(other\s+than\s+[^)]*\)\s+)?([\d,]+\.?\d*)', all_text)
+    if m:
+        best_result["regular_pda"] = _clean_number(m.group(1))
+
     return best_result
 
 
@@ -466,10 +510,12 @@ def store_pool_data(html_content: str, accession_number: str,
              weighted_avg_original_term, avg_principal_balance,
              overcollateralization_amount, reserve_account_balance,
              specified_reserve_amount,
-             extensions_count, extensions_balance)
+             extensions_count, extensions_balance,
+             residual_cash, total_deposited, available_funds,
+             actual_servicing_fee, total_note_interest, regular_pda)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?)
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             deal, data["distribution_date"], accession_number,
             data.get("beginning_pool_balance"), data.get("ending_pool_balance"),
@@ -495,6 +541,9 @@ def store_pool_data(html_content: str, accession_number: str,
             data.get("overcollateralization_amount"), data.get("reserve_account_balance"),
             data.get("specified_reserve_amount"),
             data.get("extensions_count"), data.get("extensions_balance"),
+            data.get("residual_cash"), data.get("total_deposited"),
+            data.get("available_funds"), data.get("actual_servicing_fee"),
+            data.get("total_note_interest"), data.get("regular_pda"),
         ))
 
         cursor.execute("UPDATE filings SET ingested_pool = 1 WHERE accession_number = ?",

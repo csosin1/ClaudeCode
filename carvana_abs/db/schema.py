@@ -94,6 +94,13 @@ def init_db(db_path: str = DB_PATH) -> None:
             -- Extensions
             extensions_count INTEGER,
             extensions_balance REAL,
+            -- Waterfall items (from cash distribution section)
+            residual_cash REAL,
+            total_deposited REAL,
+            available_funds REAL,
+            actual_servicing_fee REAL,
+            total_note_interest REAL,
+            regular_pda REAL,
             PRIMARY KEY (deal, distribution_date)
         );
 
