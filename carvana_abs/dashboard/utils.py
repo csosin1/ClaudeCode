@@ -9,12 +9,16 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from carvana_abs.config import DB_PATH, DEALS
 
+# Use the small dashboard DB (~50MB) if it exists, otherwise fall back to full DB (1.7GB)
+_DASHBOARD_DB = os.path.join(os.path.dirname(DB_PATH), "dashboard.db")
+_ACTIVE_DB = _DASHBOARD_DB if os.path.exists(_DASHBOARD_DB) else DB_PATH
+
 
 @st.cache_resource
 def get_db():
-    if not os.path.exists(DB_PATH):
+    if not os.path.exists(_ACTIVE_DB):
         return None
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn = sqlite3.connect(_ACTIVE_DB, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     # SQLite performance optimizations
     conn.execute("PRAGMA cache_size=10000")       # 10MB in-memory page cache

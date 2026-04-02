@@ -31,6 +31,11 @@ if [ "$LOCAL" != "$REMOTE" ]; then
         /opt/abs-venv/bin/python /opt/abs-dashboard/carvana_abs/rebuild_summaries.py 2>&1 || true
     fi
 
+    # Export small dashboard DB from the full DB
+    if [ -f /opt/abs-dashboard/carvana_abs/export_dashboard_db.py ]; then
+        /opt/abs-venv/bin/python /opt/abs-dashboard/carvana_abs/export_dashboard_db.py 2>&1 || true
+    fi
+
     systemctl restart streamlit
     echo "$(date): Deploy complete."
 else

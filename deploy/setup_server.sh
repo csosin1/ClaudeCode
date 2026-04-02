@@ -129,7 +129,8 @@ export SEC_USER_AGENT="Clifford Sosin clifford.sosin@casinvestmentpartners.com"
 cd /opt/abs-dashboard
 git pull origin claude/carvana-loan-dashboard-4QMPM >> /var/log/abs-ingestion.log 2>&1
 
-# Restart streamlit to pick up any code changes
+# Export dashboard DB and restart
+/opt/abs-venv/bin/python /opt/abs-dashboard/carvana_abs/export_dashboard_db.py >> /var/log/abs-ingestion.log 2>&1
 systemctl restart streamlit
 CRONEOF
 chmod +x /opt/abs-dashboard/deploy/cron_ingest.sh
