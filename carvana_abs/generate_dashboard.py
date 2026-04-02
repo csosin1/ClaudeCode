@@ -115,15 +115,24 @@ def main():
     sections = {}
 
     # ── POOL SUMMARY ──
-    h = chart([{"x": x, "y": lp["total_balance"].tolist(), "type": "scatter", "fill": "tozeroy", "name": "Balance"}],
-              {"title": "Remaining Pool Balance", "yaxis": {"tickformat": "$,.0f"}, "hovermode": "x unified"})
-    h += chart([{"x": x, "y": lp["active_loans"].tolist(), "type": "scatter", "name": "Loans"}],
+    # Use compact y-axis labels ($100M instead of $100,000,000) and same x-axis for all 3 charts
+    bal_in_millions = [round(v / 1e6, 1) for v in lp["total_balance"].tolist()]
+    h = chart([{"x": x, "y": bal_in_millions, "type": "scatter", "fill": "tozeroy", "name": "Balance"}],
+              {"title": "Remaining Pool Balance ($M)", "yaxis": {"ticksuffix": "M", "tickprefix": "$"}, "hovermode": "x unified"})
+    h += chart([{"x": x, "y": [int(v) for v in lp["active_loans"].tolist()], "type": "scatter", "name": "Loans"}],
                {"title": "Active Loan Count", "hovermode": "x unified"})
     if not pool.empty and "weighted_avg_apr" in pool.columns:
         wac = pool.dropna(subset=["weighted_avg_apr"])
         if not wac.empty:
-            h += chart([{"x": wac["period"].tolist(), "y": wac["weighted_avg_apr"].tolist(), "type": "scatter"}],
-                       {"title": "Weighted Average Coupon", "yaxis": {"tickformat": ".2%"}, "hovermode": "x unified"})
+            # Interpolate WAC onto the same x-axis as the other charts
+            wac_dict = dict(zip(wac["period"].tolist(), wac["weighted_avg_apr"].tolist()))
+            wac_y = [wac_dict.get(p) for p in x]
+            # Filter to only periods where we have WAC data
+            wac_x = [p for p, v in zip(x, wac_y) if v is not None]
+            wac_vals = [v for v in wac_y if v is not None]
+            h += chart([{"x": wac_x, "y": wac_vals, "type": "scatter"}],
+                       {"title": "Weighted Average Coupon", "yaxis": {"tickformat": ".2%"}, "hovermode": "x unified",
+                        "xaxis": {"range": [x[0], x[-1]]}})
     sections["Pool Summary"] = h
 
     # ── DELINQUENCIES ──
