@@ -126,7 +126,9 @@ def generate_deal_content(deal):
     lp["dq90r"] = lp["dq_90_balance"] / lp["total_balance"]
     lp["dq120r"] = lp["dq_120_plus_balance"] / lp["total_balance"]
     lp["net_loss"] = lp["period_chargeoffs"] - lp["period_recoveries"]
-    lp["excess"] = lp["interest_collected"] + lp["period_recoveries"] - lp["est_servicing_fee"] - lp["net_loss"]
+    # Excess spread = interest available after servicing fee and net losses
+    # This approximates cash to residual/equity holders
+    lp["excess"] = lp["interest_collected"] - lp["est_servicing_fee"] - lp["net_loss"]
     lp["cum_excess"] = lp["excess"].cumsum()
     lp["cum_excess_pct"] = lp["cum_excess"] / ORIG_BAL
     lp["cum_rec_rate"] = lp["cum_rec"] / lp["cum_co"].replace(0, float("nan"))

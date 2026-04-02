@@ -103,7 +103,7 @@ def load_lp(deal):
     df["dq_90_rate"] = df["dq_90_balance"] / df["total_balance"]
     df["dq_120_plus_rate"] = df["dq_120_plus_balance"] / df["total_balance"]
     df["net_losses"] = df["period_chargeoffs"] - df["period_recoveries"]
-    df["excess_spread"] = df["interest_collected"] + df["period_recoveries"] - df["est_servicing_fee"] - df["net_losses"]
+    df["excess_spread"] = df["interest_collected"] - df["est_servicing_fee"] - df["net_losses"]
     df["cum_excess"] = df["excess_spread"].cumsum()
     df["cum_interest"] = df["interest_collected"].cumsum()
     df["cum_principal"] = df["principal_collected"].cumsum()
