@@ -15,8 +15,8 @@ ACTIVE_DB = DASH_DB if os.path.exists(DASH_DB) else FULL_DB
 OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static_site")
 os.makedirs(OUT_DIR, exist_ok=True)
 
-DEAL = "2020-P1"
-ORIG_BAL = 405_000_000
+# Deals to include in the dashboard (add more as they're verified)
+DASHBOARD_DEALS = ["2020-P1", "2021-P1"]
 _chart_id = 0
 
 
@@ -77,19 +77,35 @@ def table_html(df):
     return f'<div class="tbl"><table><thead>{header}</thead><tbody>{body}</tbody></table></div>'
 
 
-def main():
-    global _chart_id
-    _chart_id = 0
-    logger.info(f"Generating dashboard for {DEAL}...")
+def get_orig_bal(deal):
+    """Auto-detect original pool balance from first pool_performance record or loan sum."""
+    from carvana_abs.config import DEALS
+    cfg = DEALS.get(deal, {})
+    bal = cfg.get("original_pool_balance")
+    if bal:
+        return bal
+    fp = q("SELECT beginning_pool_balance FROM pool_performance WHERE deal=? ORDER BY distribution_date LIMIT 1", (deal,))
+    if not fp.empty and fp.iloc[0]["beginning_pool_balance"] and fp.iloc[0]["beginning_pool_balance"] > 0:
+        return fp.iloc[0]["beginning_pool_balance"]
+    t = q("SELECT SUM(original_loan_amount) as s FROM loans WHERE deal=?", (deal,))
+    if not t.empty and t.iloc[0]["s"] and t.iloc[0]["s"] > 0:
+        return t.iloc[0]["s"]
+    return 405_000_000
 
-    lp = q("SELECT * FROM monthly_summary WHERE deal=? ORDER BY reporting_period_end", (DEAL,))
+
+def generate_deal_content(deal):
+    """Generate all HTML content (metrics + tabs) for a single deal. Returns (metrics_html, tabs_content) or None."""
+    global _chart_id
+
+    ORIG_BAL = get_orig_bal(deal)
+    lp = q("SELECT * FROM monthly_summary WHERE deal=? ORDER BY reporting_period_end", (deal,))
     if lp.empty:
-        logger.error("No data. Run rebuild_summaries.py first.")
-        return
+        logger.warning(f"No monthly_summary data for {deal}, skipping.")
+        return None
     lp["period"] = lp["reporting_period_end"].apply(nd)
     lp = lp.sort_values("period").reset_index(drop=True)
 
-    pool = q("SELECT * FROM pool_performance WHERE deal=? ORDER BY distribution_date", (DEAL,))
+    pool = q("SELECT * FROM pool_performance WHERE deal=? ORDER BY distribution_date", (deal,))
     if not pool.empty:
         pool["period"] = pool["distribution_date"].apply(nd)
         pool = pool.sort_values("period").reset_index(drop=True)
@@ -174,7 +190,7 @@ def main():
     lbs = q("""SELECT l.obligor_credit_score as segment, COUNT(*) as lc, SUM(l.original_loan_amount) as ob,
                SUM(COALESCE(s.total_chargeoff,0)) as co, SUM(COALESCE(s.total_recovery,0)) as rec
             FROM loans l LEFT JOIN loan_loss_summary s ON l.deal=s.deal AND l.asset_number=s.asset_number
-            WHERE l.deal=? AND l.obligor_credit_score IS NOT NULL GROUP BY l.obligor_credit_score""", (DEAL,))
+            WHERE l.deal=? AND l.obligor_credit_score IS NOT NULL GROUP BY l.obligor_credit_score""", (deal,))
     if not lbs.empty:
         lbs["bkt"] = pd.cut(lbs["segment"], bins=[0,580,620,660,700,740,780,820,900],
                             labels=["<580","580-619","620-659","660-699","700-739","740-779","780-819","820+"], right=False)
@@ -188,7 +204,7 @@ def main():
     lbr = q("""SELECT l.original_interest_rate as segment, COUNT(*) as lc, SUM(l.original_loan_amount) as ob,
                SUM(COALESCE(s.total_chargeoff,0)) as co, SUM(COALESCE(s.total_recovery,0)) as rec
             FROM loans l LEFT JOIN loan_loss_summary s ON l.deal=s.deal AND l.asset_number=s.asset_number
-            WHERE l.deal=? AND l.original_interest_rate IS NOT NULL GROUP BY l.original_interest_rate""", (DEAL,))
+            WHERE l.deal=? AND l.original_interest_rate IS NOT NULL GROUP BY l.original_interest_rate""", (deal,))
     if not lbr.empty:
         lbr["bkt"] = pd.cut(lbr["segment"], bins=[0,0.04,0.06,0.08,0.10,0.12,0.15,0.20,1.0],
                             labels=["<4%","4-5.99%","6-7.99%","8-9.99%","10-11.99%","12-14.99%","15-19.99%","20%+"], right=False)
@@ -217,7 +233,7 @@ def main():
     rec = q("""SELECT s.asset_number, s.chargeoff_period, s.total_chargeoff,
                s.first_recovery_period, s.total_recovery, l.obligor_credit_score
             FROM loan_loss_summary s LEFT JOIN loans l ON s.deal=l.deal AND s.asset_number=l.asset_number
-            WHERE s.deal=? AND s.total_chargeoff > 0""", (DEAL,))
+            WHERE s.deal=? AND s.total_chargeoff > 0""", (deal,))
     h = ""
     if not rec.empty:
         from datetime import datetime as dt
@@ -273,23 +289,65 @@ def main():
                 h += chart(traces, {"title": "OC & Reserve Account", "yaxis": {"tickformat": "$,.0f"}, "hovermode": "x unified"})
     sections["Notes & OC"] = h
 
-    # ── BUILD PAGE ──
+    # Build metrics + tabs HTML for this deal
+    metrics_html = f"""<div class="metrics">
+<div class="metric"><div class="mv">{fm(ORIG_BAL)}</div><div class="ml">Original Balance</div></div>
+<div class="metric"><div class="mv">{fm(last['total_balance'])}</div><div class="ml">Current Balance</div></div>
+<div class="metric"><div class="mv">{last['total_balance']/ORIG_BAL:.1%}</div><div class="ml">Pool Factor</div></div>
+<div class="metric"><div class="mv">{int(last['active_loans']):,}</div><div class="ml">Active Loans</div></div>
+<div class="metric"><div class="mv">{last['loss_rate']:.2%}</div><div class="ml">Cum Loss Rate</div></div>
+<div class="metric"><div class="mv">{last['dq_rate']:.2%}</div><div class="ml">30+ DQ Rate</div></div>
+</div>"""
+
+    # Build tab buttons and content
+    deal_safe = deal.replace("-","_")
     tabs_html = ""; content_html = ""; first = True
     for name, body in sections.items():
-        tid = name.replace(" ","_").replace("&","and")
+        tid = f"{deal_safe}_{name.replace(' ','_').replace('&','and')}"
         tabs_html += f'<button class="tab{" active" if first else ""}" onclick="showTab(\'{tid}\',this)">{name}</button>\n'
         content_html += f'<div id="{tid}" class="tc" style="display:{"block" if first else "none"}">{body}</div>\n'
         first = False
 
+    return metrics_html, f'<div class="tabs">{tabs_html}</div>\n{content_html}'
+
+
+def main():
+    global _chart_id
+    _chart_id = 0
+
+    deal_contents = {}
+    for deal in DASHBOARD_DEALS:
+        logger.info(f"Generating {deal}...")
+        result = generate_deal_content(deal)
+        if result:
+            deal_contents[deal] = result
+
+    if not deal_contents:
+        logger.error("No deals with data found.")
+        return
+
+    # Build deal selector dropdown
+    first_deal = list(deal_contents.keys())[0]
+    options = "\n".join(f'<option value="{d}" {"selected" if d == first_deal else ""}>{d}</option>' for d in deal_contents)
+    deal_selector = f'<div class="deal-select"><select id="dealSelect" onchange="switchDeal(this.value)">{options}</select></div>'
+
+    # Build per-deal content divs
+    all_deal_html = ""
+    for deal, (metrics, tabs) in deal_contents.items():
+        display = "block" if deal == first_deal else "none"
+        all_deal_html += f'<div id="deal-{deal}" class="deal-block" style="display:{display}">\n{metrics}\n{tabs}\n</div>\n'
+
     page = f"""<!DOCTYPE html><html lang="en"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>Carvana 2020-P1 ABS Dashboard</title>
+<title>Carvana ABS Dashboard</title>
 <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
 <style>
 *{{margin:0;padding:0;box-sizing:border-box}}
 body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f5f5f5;color:#212121}}
-header{{background:#1976D2;color:white;padding:12px 16px;position:sticky;top:0;z-index:100}}
+header{{background:#1976D2;color:white;padding:12px 16px;position:sticky;top:0;z-index:100;display:flex;align-items:center;justify-content:space-between}}
 header h1{{font-size:1.1rem;font-weight:600}}
+.deal-select{{padding:4px 12px}}
+.deal-select select{{font-size:.9rem;padding:6px 10px;border-radius:6px;border:1px solid #ccc;width:100%;max-width:300px}}
 .metrics{{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:6px;padding:8px 12px}}
 .metric{{background:white;border-radius:8px;padding:8px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.1)}}
 .mv{{font-size:1.1rem;font-weight:700;color:#1976D2}}.ml{{font-size:.65rem;color:#666;margin-top:2px}}
@@ -306,25 +364,32 @@ h3{{font-size:.85rem;color:#333;margin:10px 0 4px;padding:0 4px}}
 footer{{text-align:center;padding:12px;color:#999;font-size:.65rem}}
 @media(max-width:600px){{.metrics{{grid-template-columns:repeat(2,1fr)}}.mv{{font-size:.95rem}}.tab{{font-size:.65rem;padding:4px 6px}}}}
 </style></head><body>
-<header><h1>Carvana 2020-P1 ABS Dashboard</h1></header>
-<div class="metrics">
-<div class="metric"><div class="mv">{fm(ORIG_BAL)}</div><div class="ml">Original Balance</div></div>
-<div class="metric"><div class="mv">{fm(last['total_balance'])}</div><div class="ml">Current Balance</div></div>
-<div class="metric"><div class="mv">{last['total_balance']/ORIG_BAL:.1%}</div><div class="ml">Pool Factor</div></div>
-<div class="metric"><div class="mv">{int(last['active_loans']):,}</div><div class="ml">Active Loans</div></div>
-<div class="metric"><div class="mv">{last['loss_rate']:.2%}</div><div class="ml">Cum Loss Rate</div></div>
-<div class="metric"><div class="mv">{last['dq_rate']:.2%}</div><div class="ml">30+ DQ Rate</div></div>
-</div>
-<div class="tabs">{tabs_html}</div>
-{content_html}
+<header><h1>Carvana ABS Dashboard</h1></header>
+{deal_selector}
+{all_deal_html}
 <footer>Data from SEC EDGAR | Generated {datetime.now().strftime('%Y-%m-%d %H:%M UTC')}</footer>
-<script>function showTab(id,btn){{document.querySelectorAll('.tc').forEach(e=>e.style.display='none');document.querySelectorAll('.tab').forEach(e=>e.classList.remove('active'));document.getElementById(id).style.display='block';btn.classList.add('active');setTimeout(()=>window.dispatchEvent(new Event('resize')),100);}}</script>
+<script>
+function showTab(id,btn){{
+    // Hide all tabs in current deal, show selected
+    var deal = btn.closest('.deal-block');
+    deal.querySelectorAll('.tc').forEach(e=>e.style.display='none');
+    deal.querySelectorAll('.tab').forEach(e=>e.classList.remove('active'));
+    document.getElementById(id).style.display='block';
+    btn.classList.add('active');
+    setTimeout(()=>window.dispatchEvent(new Event('resize')),100);
+}}
+function switchDeal(deal){{
+    document.querySelectorAll('.deal-block').forEach(e=>e.style.display='none');
+    document.getElementById('deal-'+deal).style.display='block';
+    setTimeout(()=>window.dispatchEvent(new Event('resize')),100);
+}}
+</script>
 </body></html>"""
 
     out = os.path.join(OUT_DIR, "index.html")
     with open(out, "w", encoding="utf-8") as f:
         f.write(page)
-    logger.info(f"Dashboard: {out} ({os.path.getsize(out)/1024:.0f} KB)")
+    logger.info(f"Dashboard: {out} ({os.path.getsize(out)/1024:.0f} KB, {len(deal_contents)} deals)")
 
 
 if __name__ == "__main__":
