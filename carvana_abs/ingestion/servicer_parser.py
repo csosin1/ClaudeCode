@@ -41,12 +41,15 @@ def _extract_numbered_fields(text: str) -> dict:
 
     Handles TWO formats:
     1. Workiva (2023+): (N) Label text (N) Value  — number appears twice
-       Example: (1) Beginning Pool Balance (1) 5,401 20,294,118.53
     2. Donnelley (pre-2023): Label text (N) Value  — number appears once after label
-       Example: Beginning Pool Balance (1) 19,941 387,718,618.94
+       Note: Donnelley HTML can split (105) across cells as "(105 )" with a space.
 
     Returns: {1: {"label": "...", "raw": "value string"}, ...}
     """
+    # Pre-clean: normalize "(105 )" to "(105)" and "8.20 %" to "8.20%"
+    text = re.sub(r'\(\s*(\d+)\s*\)', r'(\1)', text)
+    text = re.sub(r'(\d)\s+%', r'\1%', text)
+
     fields = {}
 
     # Strategy 1: Workiva double-number format: (N) label (N) value
@@ -62,7 +65,6 @@ def _extract_numbered_fields(text: str) -> dict:
         return fields
 
     # Strategy 2: Donnelley single-number format: label (N) value
-    # Match: any text, then (N), then value until next (M) or end
     pattern2 = re.compile(r'(?:^|(?<=\s))\((\d+)\)\s+(.*?)(?=\(\d+\)|\Z)', re.DOTALL)
     for match in pattern2.finditer(text):
         field_num = int(match.group(1))
