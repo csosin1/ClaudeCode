@@ -24,9 +24,19 @@ ORIG_BAL = 405_000_000
 
 def q(sql, params=()):
     conn = sqlite3.connect(ACTIVE_DB)
-    conn.row_factory = sqlite3.Row
     df = pd.read_sql_query(sql, conn, params=params)
     conn.close()
+    # Ensure numeric columns are actually numeric (sqlite can return strings)
+    for col in df.columns:
+        if col not in ("deal", "period", "reporting_period_end", "distribution_date",
+                        "asset_number", "segment", "chargeoff_period", "first_recovery_period",
+                        "accession_number", "filing_type", "filing_date", "filing_url",
+                        "absee_url", "servicer_cert_url", "originator_name", "origination_date",
+                        "loan_maturity_date", "vehicle_manufacturer", "vehicle_model",
+                        "vehicle_new_used", "vehicle_type", "obligor_credit_score_type",
+                        "obligor_geographic_location", "co_obligor_indicator",
+                        "income_verification_level", "payment_type", "subvention_indicator"):
+            df[col] = pd.to_numeric(df[col], errors="coerce")
     return df
 
 
