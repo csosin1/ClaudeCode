@@ -56,10 +56,13 @@ def chart(traces, layout, height=350):
     _chart_id += 1
     cid = f"c{_chart_id}"
     traces_json = json.dumps(traces)
-    layout["margin"] = {"l": 60, "r": 20, "t": 40, "b": 30}
+    layout["margin"] = {"l": 70, "r": 15, "t": 40, "b": 50}
     layout["height"] = height
     layout["template"] = "plotly_white"
     layout["font"] = {"size": 11}
+    layout.setdefault("xaxis", {})["tickangle"] = -45
+    layout["xaxis"]["automargin"] = True
+    layout.setdefault("yaxis", {})["automargin"] = True
     layout_json = json.dumps(layout)
     return f'<div id="{cid}" style="width:100%;height:{height}px;background:white;border-radius:8px;margin:8px 0;box-shadow:0 1px 3px rgba(0,0,0,.1)"></div>\n<script>Plotly.newPlot("{cid}",{traces_json},{layout_json},{{displayModeBar:false,responsive:true}});</script>\n'
 
