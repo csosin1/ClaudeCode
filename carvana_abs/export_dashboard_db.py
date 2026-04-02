@@ -78,9 +78,9 @@ def main():
             pass  # Index may reference table we didn't copy
 
     # Optimize the new DB
-    dst.execute("PRAGMA journal_mode=WAL")
-    dst.execute("VACUUM")
     dst.commit()
+    dst.execute("VACUUM")
+    dst.execute("PRAGMA journal_mode=WAL")
     dst.close()
     src.close()
 
