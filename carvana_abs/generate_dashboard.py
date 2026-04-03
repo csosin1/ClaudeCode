@@ -159,13 +159,39 @@ def generate_deal_content(deal):
               {"title": "Remaining Pool Balance ($M)", "yaxis": {"ticksuffix": "M", "tickprefix": "$"}, "hovermode": "x unified"})
     h += chart([{"x": x, "y": [int(v) for v in lp["active_loans"].tolist()], "type": "scatter", "name": "Loans"}],
                {"title": "Active Loan Count", "hovermode": "x unified"})
+    # ── Rate Curves: Collateral WAC and Cost of Debt ──
+    # 1) Collateral WAC: prefer pool_performance, fall back to loan-level
+    wac = pd.DataFrame()
     if not pool.empty and "weighted_avg_apr" in pool.columns:
-        wac = pool.dropna(subset=["weighted_avg_apr"])
-        if not wac.empty:
-            # Use pool dates directly but set x-axis range to match other charts
-            h += chart([{"x": wac["period"].tolist(), "y": wac["weighted_avg_apr"].tolist(), "type": "scatter"}],
-                       {"title": "Weighted Average Coupon", "yaxis": {"tickformat": ".2%"}, "hovermode": "x unified",
-                        "xaxis": {"range": [x[0], x[-1]], "tickangle": -45, "automargin": True}})
+        wac = pool.dropna(subset=["weighted_avg_apr"])[["period", "weighted_avg_apr"]].copy()
+    if wac.empty:
+        wac_loan = q("""SELECT reporting_period_end,
+            SUM(current_interest_rate * ending_balance) / NULLIF(SUM(ending_balance), 0) as weighted_avg_apr
+            FROM loan_performance WHERE deal=? AND ending_balance > 0 AND current_interest_rate IS NOT NULL
+            GROUP BY reporting_period_end ORDER BY reporting_period_end""", (deal,))
+        if not wac_loan.empty:
+            wac_loan["period"] = wac_loan["reporting_period_end"].apply(nd)
+            wac = wac_loan[["period", "weighted_avg_apr"]].dropna()
+    # 2) Cost of Debt: total_note_interest / aggregate_note_balance * 12
+    cod = pd.DataFrame()
+    if not pool.empty and "total_note_interest" in pool.columns and "aggregate_note_balance" in pool.columns:
+        cod = pool.dropna(subset=["total_note_interest", "aggregate_note_balance"]).copy()
+        cod = cod[cod["aggregate_note_balance"] > 0].copy()
+        if not cod.empty:
+            cod["cost_of_debt"] = cod["total_note_interest"] / cod["aggregate_note_balance"] * 12
+    # 3) Render dual-curve chart
+    rate_traces = []
+    if not wac.empty:
+        rate_traces.append({"x": wac["period"].tolist(), "y": wac["weighted_avg_apr"].tolist(),
+                            "type": "scatter", "name": "Collateral WAC", "line": {"color": "#1976D2"}})
+    if not cod.empty:
+        rate_traces.append({"x": cod["period"].tolist(), "y": cod["cost_of_debt"].tolist(),
+                            "type": "scatter", "name": "Cost of Debt", "line": {"color": "#D32F2F", "dash": "dash"}})
+    if rate_traces:
+        h += chart(rate_traces, {"title": "Collateral WAC vs Cost of Debt",
+                   "yaxis": {"tickformat": ".2%"}, "hovermode": "x unified",
+                   "xaxis": {"range": [x[0], x[-1]], "tickangle": -45, "automargin": True},
+                   "legend": {"orientation": "h", "y": -0.2}})
     sections["Pool Summary"] = h
 
     # ── DELINQUENCIES ──
@@ -425,12 +451,40 @@ def generate_comparison_content(deals, title):
     rows = []
     for deal in deals:
         loan_stats = q("SELECT AVG(original_interest_rate) as avg_yield, AVG(obligor_credit_score) as avg_fico FROM loans WHERE deal=?", (deal,))
-        avg_yield = loan_stats.iloc[0]["avg_yield"] if not loan_stats.empty and loan_stats.iloc[0]["avg_yield"] else None
         avg_fico = loan_stats.iloc[0]["avg_fico"] if not loan_stats.empty and loan_stats.iloc[0]["avg_fico"] else None
-
-        first_pp = q("SELECT weighted_avg_apr, beginning_pool_balance FROM pool_performance WHERE deal=? ORDER BY distribution_date LIMIT 1", (deal,))
-        wac = first_pp.iloc[0]["weighted_avg_apr"] if not first_pp.empty and first_pp.iloc[0]["weighted_avg_apr"] else None
         init_bal = get_orig_bal(deal)
+
+        # ── Collateral WAC (init + current) ──
+        # Prefer pool_performance.weighted_avg_apr, fall back to loan-level computation
+        init_wac = None
+        curr_wac = None
+        first_wac = q("SELECT weighted_avg_apr FROM pool_performance WHERE deal=? AND weighted_avg_apr IS NOT NULL ORDER BY distribution_date LIMIT 1", (deal,))
+        last_wac = q("SELECT weighted_avg_apr FROM pool_performance WHERE deal=? AND weighted_avg_apr IS NOT NULL ORDER BY distribution_date DESC LIMIT 1", (deal,))
+        if not first_wac.empty and first_wac.iloc[0]["weighted_avg_apr"]:
+            init_wac = first_wac.iloc[0]["weighted_avg_apr"]
+        if not last_wac.empty and last_wac.iloc[0]["weighted_avg_apr"]:
+            curr_wac = last_wac.iloc[0]["weighted_avg_apr"]
+        # Loan-level fallback
+        if init_wac is None or curr_wac is None:
+            wac_loan = q("""SELECT reporting_period_end,
+                SUM(current_interest_rate * ending_balance) / NULLIF(SUM(ending_balance), 0) as wac
+                FROM loan_performance WHERE deal=? AND ending_balance > 0 AND current_interest_rate IS NOT NULL
+                GROUP BY reporting_period_end ORDER BY reporting_period_end""", (deal,))
+            if not wac_loan.empty:
+                if init_wac is None and wac_loan.iloc[0]["wac"]:
+                    init_wac = wac_loan.iloc[0]["wac"]
+                if curr_wac is None and wac_loan.iloc[-1]["wac"]:
+                    curr_wac = wac_loan.iloc[-1]["wac"]
+
+        # ── Cost of Debt (init + current) ──
+        init_cod = None
+        curr_cod = None
+        first_cod = q("SELECT total_note_interest, aggregate_note_balance FROM pool_performance WHERE deal=? AND total_note_interest IS NOT NULL AND aggregate_note_balance > 0 ORDER BY distribution_date LIMIT 1", (deal,))
+        if not first_cod.empty:
+            init_cod = first_cod.iloc[0]["total_note_interest"] / first_cod.iloc[0]["aggregate_note_balance"] * 12
+        last_cod = q("SELECT total_note_interest, aggregate_note_balance FROM pool_performance WHERE deal=? AND total_note_interest IS NOT NULL AND aggregate_note_balance > 0 ORDER BY distribution_date DESC LIMIT 1", (deal,))
+        if not last_cod.empty:
+            curr_cod = last_cod.iloc[0]["total_note_interest"] / last_cod.iloc[0]["aggregate_note_balance"] * 12
 
         # Pool factor from monthly_summary (more reliable than pool_performance)
         latest_ms = q("SELECT total_balance FROM monthly_summary WHERE deal=? ORDER BY reporting_period_end DESC LIMIT 1", (deal,))
@@ -450,9 +504,11 @@ def generate_comparison_content(deals, title):
 
         rows.append({
             "Deal": deal,
-            "Avg Yield": f"{avg_yield*100:.1f}%" if avg_yield else "-",
             "Avg FICO": f"{avg_fico:.0f}" if avg_fico else "-",
-            "WAC": f"{wac*100:.2f}%" if wac else "-",
+            "Init WAC": f"{init_wac:.2%}" if init_wac is not None else "-",
+            "Curr WAC": f"{curr_wac:.2%}" if curr_wac is not None else "-",
+            "Init CoD": f"{init_cod:.2%}" if init_cod is not None else "-",
+            "Curr CoD": f"{curr_cod:.2%}" if curr_cod is not None else "-",
             "Init Balance": fm(init_bal),
             "Pool Factor": f"{pool_factor:.1%}" if pool_factor is not None else "-",
             "Cum Loss": f"{cum_loss_rate:.2%}" if cum_loss_rate is not None else "-",
