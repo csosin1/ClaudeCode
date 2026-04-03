@@ -146,7 +146,11 @@ def _precompute_summaries(deal: str, db_path: str) -> None:
             SUM(COALESCE(actual_interest_collected, 0)),
             SUM(COALESCE(actual_principal_collected, 0)),
             SUM(CASE WHEN beginning_balance > 0 AND servicing_fee > 0
-                THEN beginning_balance * servicing_fee / 12.0 ELSE 0 END)
+                THEN beginning_balance * servicing_fee / 12.0 ELSE 0 END),
+            SUM(CASE WHEN ending_balance > 0 AND current_interest_rate IS NOT NULL
+                THEN current_interest_rate * ending_balance ELSE 0 END)
+            / NULLIF(SUM(CASE WHEN ending_balance > 0 AND current_interest_rate IS NOT NULL
+                THEN ending_balance ELSE 0 END), 0)
         FROM loan_performance
         WHERE deal = ?
         GROUP BY deal, reporting_period_end

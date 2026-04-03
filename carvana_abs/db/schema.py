@@ -201,6 +201,7 @@ def init_db(db_path: str = DB_PATH) -> None:
             interest_collected REAL,
             principal_collected REAL,
             est_servicing_fee REAL,
+            weighted_avg_coupon REAL,
             PRIMARY KEY (deal, reporting_period_end)
         );
 

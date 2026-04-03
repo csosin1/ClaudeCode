@@ -22,6 +22,17 @@ def main():
     logger.info("Rebuilding summary tables...")
     init_db(DB_PATH)  # ensures new tables exist
 
+    # Add weighted_avg_coupon column if missing (schema migration)
+    conn = get_connection(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA table_info(monthly_summary)")
+    existing_cols = {row["name"] for row in cursor.fetchall()}
+    if "weighted_avg_coupon" not in existing_cols:
+        logger.info("Adding weighted_avg_coupon column to monthly_summary...")
+        cursor.execute("ALTER TABLE monthly_summary ADD COLUMN weighted_avg_coupon REAL")
+        conn.commit()
+    conn.close()
+
     for deal in get_active_deals():
         # Check if deal has any loan_performance data
         conn = get_connection(DB_PATH)

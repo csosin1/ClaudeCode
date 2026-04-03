@@ -160,18 +160,15 @@ def generate_deal_content(deal):
     h += chart([{"x": x, "y": [int(v) for v in lp["active_loans"].tolist()], "type": "scatter", "name": "Loans"}],
                {"title": "Active Loan Count", "hovermode": "x unified"})
     # ── Rate Curves: Collateral WAC and Cost of Debt ──
-    # 1) Collateral WAC: prefer pool_performance, fall back to loan-level
+    # 1) Collateral WAC: prefer pool_performance, fall back to monthly_summary pre-computed WAC
     wac = pd.DataFrame()
     if not pool.empty and "weighted_avg_apr" in pool.columns:
         wac = pool.dropna(subset=["weighted_avg_apr"])[["period", "weighted_avg_apr"]].copy()
-    if wac.empty:
-        wac_loan = q("""SELECT reporting_period_end,
-            SUM(current_interest_rate * ending_balance) / NULLIF(SUM(ending_balance), 0) as weighted_avg_apr
-            FROM loan_performance WHERE deal=? AND ending_balance > 0 AND current_interest_rate IS NOT NULL
-            GROUP BY reporting_period_end ORDER BY reporting_period_end""", (deal,))
-        if not wac_loan.empty:
-            wac_loan["period"] = wac_loan["reporting_period_end"].apply(nd)
-            wac = wac_loan[["period", "weighted_avg_apr"]].dropna()
+    if wac.empty and "weighted_avg_coupon" in lp.columns:
+        wac_ms = lp.dropna(subset=["weighted_avg_coupon"])[["period", "weighted_avg_coupon"]].copy()
+        if not wac_ms.empty:
+            wac_ms = wac_ms.rename(columns={"weighted_avg_coupon": "weighted_avg_apr"})
+            wac = wac_ms
     # 2) Cost of Debt: total_note_interest / aggregate_note_balance * 12
     cod = pd.DataFrame()
     if not pool.empty and "total_note_interest" in pool.columns and "aggregate_note_balance" in pool.columns:
@@ -455,7 +452,7 @@ def generate_comparison_content(deals, title):
         init_bal = get_orig_bal(deal)
 
         # ── Collateral WAC (init + current) ──
-        # Prefer pool_performance.weighted_avg_apr, fall back to loan-level computation
+        # Prefer pool_performance.weighted_avg_apr, fall back to monthly_summary.weighted_avg_coupon
         init_wac = None
         curr_wac = None
         first_wac = q("SELECT weighted_avg_apr FROM pool_performance WHERE deal=? AND weighted_avg_apr IS NOT NULL ORDER BY distribution_date LIMIT 1", (deal,))
@@ -464,17 +461,14 @@ def generate_comparison_content(deals, title):
             init_wac = first_wac.iloc[0]["weighted_avg_apr"]
         if not last_wac.empty and last_wac.iloc[0]["weighted_avg_apr"]:
             curr_wac = last_wac.iloc[0]["weighted_avg_apr"]
-        # Loan-level fallback
+        # monthly_summary fallback (pre-computed from loan-level data)
         if init_wac is None or curr_wac is None:
-            wac_loan = q("""SELECT reporting_period_end,
-                SUM(current_interest_rate * ending_balance) / NULLIF(SUM(ending_balance), 0) as wac
-                FROM loan_performance WHERE deal=? AND ending_balance > 0 AND current_interest_rate IS NOT NULL
-                GROUP BY reporting_period_end ORDER BY reporting_period_end""", (deal,))
-            if not wac_loan.empty:
-                if init_wac is None and wac_loan.iloc[0]["wac"]:
-                    init_wac = wac_loan.iloc[0]["wac"]
-                if curr_wac is None and wac_loan.iloc[-1]["wac"]:
-                    curr_wac = wac_loan.iloc[-1]["wac"]
+            wac_ms = q("SELECT weighted_avg_coupon FROM monthly_summary WHERE deal=? AND weighted_avg_coupon IS NOT NULL ORDER BY reporting_period_end", (deal,))
+            if not wac_ms.empty:
+                if init_wac is None and wac_ms.iloc[0]["weighted_avg_coupon"]:
+                    init_wac = wac_ms.iloc[0]["weighted_avg_coupon"]
+                if curr_wac is None and wac_ms.iloc[-1]["weighted_avg_coupon"]:
+                    curr_wac = wac_ms.iloc[-1]["weighted_avg_coupon"]
 
         # ── Cost of Debt (init + current) ──
         init_cod = None
