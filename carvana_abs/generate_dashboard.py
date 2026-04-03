@@ -23,6 +23,10 @@ DASHBOARD_DEALS = [
     "2024-P2", "2024-P3", "2024-P4",
     "2025-P2", "2025-P3", "2025-P4",
 ]
+PRIME_DEALS = [d for d in DASHBOARD_DEALS if "-P" in d]
+NONPRIME_DEALS = [d for d in DASHBOARD_DEALS if "-N" in d]
+COLORS = ["#1976D2","#D32F2F","#388E3C","#FF9800","#7B1FA2",
+          "#00BCD4","#795548","#E91E63","#607D8B","#CDDC39","#FF5722","#3F51B5"]
 _chart_id = 0
 
 
@@ -73,14 +77,15 @@ def chart(traces, layout, height=350):
     return f'<div id="{cid}" style="width:100%;height:{height}px;background:white;border-radius:8px;margin:8px 0;box-shadow:0 1px 3px rgba(0,0,0,.1)"></div>\n<script>Plotly.newPlot("{cid}",{traces_json},{layout_json},{{displayModeBar:false,responsive:true}});</script>\n'
 
 
-def table_html(df):
+def table_html(df, cls=""):
+    cls_attr = f' class="{cls}"' if cls else ""
     rows = "".join(f"<th>{c}</th>" for c in df.columns)
     header = f"<tr>{rows}</tr>"
     body = ""
     for _, row in df.iterrows():
         cells = "".join(f"<td>{row[c]}</td>" for c in df.columns)
         body += f"<tr>{cells}</tr>"
-    return f'<div class="tbl"><table><thead>{header}</thead><tbody>{body}</tbody></table></div>'
+    return f'<div class="tbl"><table{cls_attr}><thead>{header}</thead><tbody>{body}</tbody></table></div>'
 
 
 def get_orig_bal(deal):
@@ -412,6 +417,87 @@ def generate_deal_content(deal):
     return metrics_html, f'<div class="tabs">{tabs_html}</div>\n{content_html}'
 
 
+def generate_comparison_content(deals, title):
+    """Generate comparison HTML (summary table + loss curve) for a group of deals."""
+    h = ""
+
+    # ── Summary Table ──
+    rows = []
+    for deal in deals:
+        loan_stats = q("SELECT AVG(original_interest_rate) as avg_yield, AVG(obligor_credit_score) as avg_fico FROM loans WHERE deal=?", (deal,))
+        avg_yield = loan_stats.iloc[0]["avg_yield"] if not loan_stats.empty and loan_stats.iloc[0]["avg_yield"] else None
+        avg_fico = loan_stats.iloc[0]["avg_fico"] if not loan_stats.empty and loan_stats.iloc[0]["avg_fico"] else None
+
+        first_pp = q("SELECT weighted_avg_apr, beginning_pool_balance FROM pool_performance WHERE deal=? ORDER BY distribution_date LIMIT 1", (deal,))
+        wac = first_pp.iloc[0]["weighted_avg_apr"] if not first_pp.empty and first_pp.iloc[0]["weighted_avg_apr"] else None
+        init_bal = get_orig_bal(deal)
+
+        # Pool factor from monthly_summary (more reliable than pool_performance)
+        latest_ms = q("SELECT total_balance FROM monthly_summary WHERE deal=? ORDER BY reporting_period_end DESC LIMIT 1", (deal,))
+        latest_bal = latest_ms.iloc[0]["total_balance"] if not latest_ms.empty and latest_ms.iloc[0]["total_balance"] else None
+        pool_factor = latest_bal / init_bal if (latest_bal and init_bal and init_bal > 0) else None
+
+        equity = q("SELECT SUM(residual_cash) as total_residual FROM pool_performance WHERE deal=? AND residual_cash IS NOT NULL", (deal,))
+        total_residual = equity.iloc[0]["total_residual"] if not equity.empty and equity.iloc[0]["total_residual"] else 0
+        equity_pct = total_residual / init_bal if (init_bal and init_bal > 0) else None
+
+        # Cumulative loss rate
+        loss = q("SELECT SUM(period_chargeoffs) as co, SUM(period_recoveries) as rec FROM monthly_summary WHERE deal=?", (deal,))
+        cum_loss_rate = None
+        if not loss.empty and loss.iloc[0]["co"] is not None and init_bal and init_bal > 0:
+            net = (loss.iloc[0]["co"] or 0) - (loss.iloc[0]["rec"] or 0)
+            cum_loss_rate = net / init_bal
+
+        rows.append({
+            "Deal": deal,
+            "Avg Yield": f"{avg_yield*100:.1f}%" if avg_yield else "-",
+            "Avg FICO": f"{avg_fico:.0f}" if avg_fico else "-",
+            "WAC": f"{wac*100:.2f}%" if wac else "-",
+            "Init Balance": fm(init_bal),
+            "Pool Factor": f"{pool_factor:.1%}" if pool_factor is not None else "-",
+            "Cum Loss": f"{cum_loss_rate:.2%}" if cum_loss_rate is not None else "-",
+            "Equity Dist": f"{equity_pct:.2%}" if equity_pct is not None else "-",
+        })
+
+    if rows:
+        summary_df = pd.DataFrame(rows)
+        h += f"<h3>{title} — Summary</h3>" + table_html(summary_df, cls="compare")
+
+    # ── Cumulative Loss Curve (by deal age in months) ──
+    traces = []
+    for i, deal in enumerate(deals):
+        ms = q("SELECT reporting_period_end, period_chargeoffs, period_recoveries FROM monthly_summary WHERE deal=? ORDER BY reporting_period_end", (deal,))
+        if ms.empty:
+            continue
+        ms["period"] = ms["reporting_period_end"].apply(nd)
+        ms = ms.sort_values("period").reset_index(drop=True)
+        orig_bal = get_orig_bal(deal)
+        if not orig_bal or orig_bal <= 0:
+            continue
+        ms["cum_net"] = (ms["period_chargeoffs"].fillna(0) - ms["period_recoveries"].fillna(0)).cumsum()
+        ms["loss_rate"] = ms["cum_net"] / orig_bal
+        months = list(range(1, len(ms) + 1))
+        traces.append({
+            "x": months,
+            "y": [round(v, 6) for v in ms["loss_rate"].tolist()],
+            "type": "scatter",
+            "mode": "lines",
+            "name": deal,
+            "line": {"color": COLORS[i % len(COLORS)]},
+        })
+
+    if traces:
+        h += chart(traces, {
+            "title": f"{title} — Cumulative Net Loss Rate by Deal Age",
+            "xaxis": {"title": "Deal Age (Months)"},
+            "yaxis": {"tickformat": ".2%", "title": "Cum Net Loss (% of Orig Bal)"},
+            "hovermode": "x unified",
+            "legend": {"orientation": "h", "y": -0.3},
+        }, height=450)
+
+    return h
+
+
 def main():
     global _chart_id
     _chart_id = 0
@@ -427,13 +513,28 @@ def main():
         logger.error("No deals with data found.")
         return
 
-    # Build deal selector dropdown
+    # Generate comparison sections
+    logger.info("Generating Prime comparison...")
+    prime_html = generate_comparison_content(
+        [d for d in PRIME_DEALS if d in deal_contents], "Prime Deals")
+    logger.info("Generating Non-Prime comparison...")
+    nonprime_html = generate_comparison_content(
+        [d for d in NONPRIME_DEALS if d in deal_contents], "Non-Prime Deals")
+
+    # Build deal selector dropdown with comparison entries at top
     first_deal = list(deal_contents.keys())[0]
-    options = "\n".join(f'<option value="{d}" {"selected" if d == first_deal else ""}>{d}</option>' for d in deal_contents)
+    options = '<option value="__prime__">--- Prime Comparison ---</option>\n'
+    options += '<option value="__nonprime__">--- Non-Prime Comparison ---</option>\n'
+    options += '<option disabled>──────────────────</option>\n'
+    options += "\n".join(f'<option value="{d}" {"selected" if d == first_deal else ""}>{d}</option>' for d in deal_contents)
     deal_selector = f'<div class="deal-select"><select id="dealSelect" onchange="switchDeal(this.value)">{options}</select></div>'
 
     # Build per-deal content divs
     all_deal_html = ""
+    # Add comparison sections first (hidden by default)
+    all_deal_html += f'<div id="deal-__prime__" class="deal-block" style="display:none">\n{prime_html}\n</div>\n'
+    all_deal_html += f'<div id="deal-__nonprime__" class="deal-block" style="display:none">\n{nonprime_html}\n</div>\n'
+    # Add individual deal sections
     for deal, (metrics, tabs) in deal_contents.items():
         display = "block" if deal == first_deal else "none"
         all_deal_html += f'<div id="deal-{deal}" class="deal-block" style="display:{display}">\n{metrics}\n{tabs}\n</div>\n'
@@ -461,6 +562,7 @@ table{{width:100%;border-collapse:collapse;font-size:.7rem;background:white;bord
 th{{background:#f5f5f5;padding:5px 6px;text-align:left;border-bottom:2px solid #ddd;white-space:nowrap}}
 td{{padding:4px 6px;border-bottom:1px solid #eee;white-space:nowrap}}
 tr:last-child td{{font-weight:700;border-top:2px solid #ddd}}
+table.compare tr:last-child td{{font-weight:normal;border-top:none}}
 h3{{font-size:.85rem;color:#333;margin:10px 0 4px;padding:0 4px}}
 footer{{text-align:center;padding:12px;color:#999;font-size:.65rem}}
 @media(max-width:600px){{.metrics{{grid-template-columns:repeat(2,1fr)}}.mv{{font-size:.95rem}}.tab{{font-size:.65rem;padding:4px 6px}}}}
