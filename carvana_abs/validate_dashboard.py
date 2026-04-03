@@ -86,16 +86,15 @@ def validate():
     else:
         info.append("Waterfall residual: NO")
 
-    # Check rate curves (WAC / Cost of Debt)
-    # Count deals that have each type of rate chart
-    wac_cod_count = html.count("Collateral WAC vs Cost of Debt")
-    wac_only_count = html.count("Weighted Average Coupon (Collateral)")
-    cod_only_count = html.count("Weighted Average Cost of Debt")
-    no_rate_deals = len([d for d in deal_blocks
-                         if d not in ("__prime__", "__nonprime__")]) - wac_cod_count - wac_only_count - cod_only_count
-    info.append(f"Rate charts: WAC+CoD={wac_cod_count}, WAC-only={wac_only_count}, CoD-only={cod_only_count}, none={max(0,no_rate_deals)}")
-    if no_rate_deals > 0:
-        warnings.append(f"{no_rate_deals} deal(s) have NO rate chart (missing both WAC and Cost of Debt data)")
+    # Check rate curves (consumer rate / cost of debt) — now separate charts
+    individual_deals = [d for d in deal_blocks if d not in ("__prime__", "__nonprime__")]
+    consumer_rate_count = html.count("Avg Consumer Rate")
+    cod_count = html.count("Avg Trust Cost of Debt")
+    info.append(f"Rate charts: Consumer Rate={consumer_rate_count}, Trust CoD={cod_count} (of {len(individual_deals)} deals)")
+    if consumer_rate_count < len(individual_deals):
+        warnings.append(f"{len(individual_deals) - consumer_rate_count} deal(s) missing Consumer Rate chart")
+    if cod_count < len(individual_deals):
+        warnings.append(f"{len(individual_deals) - cod_count} deal(s) missing Trust Cost of Debt chart")
 
     # Check comparison tabs
     if "deal-__prime__" in html:

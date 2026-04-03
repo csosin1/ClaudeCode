@@ -184,29 +184,25 @@ def generate_deal_content(deal):
         cod = cod[cod["aggregate_note_balance"] > 0].copy()
         if not cod.empty:
             cod["cost_of_debt"] = cod["total_note_interest"] / cod["aggregate_note_balance"] * 12
-    # 3) Render rate chart(s) — title reflects what data is actually present
-    rate_traces = []
-    has_wac = not wac.empty
-    has_cod = not cod.empty
-    if has_wac:
-        rate_traces.append({"x": wac["period"].tolist(), "y": wac["weighted_avg_apr"].tolist(),
-                            "type": "scatter", "name": "Collateral WAC", "line": {"color": "#1976D2"}})
-    if has_cod:
-        rate_traces.append({"x": cod["period"].tolist(), "y": cod["cost_of_debt"].tolist(),
-                            "type": "scatter", "name": "Cost of Debt", "line": {"color": "#D32F2F", "dash": "dash"}})
-    if rate_traces:
-        if has_wac and has_cod:
-            rate_title = "Collateral WAC vs Cost of Debt"
-        elif has_wac:
-            rate_title = "Weighted Average Coupon (Collateral)"
-        else:
-            rate_title = "Weighted Average Cost of Debt"
-        h += chart(rate_traces, {"title": rate_title,
-                   "yaxis": {"tickformat": ".2%"}, "hovermode": "x unified",
-                   "xaxis": {"range": [x[0], x[-1]], "tickangle": -45, "automargin": True},
-                   "legend": {"orientation": "h", "y": -0.2}})
+    # 3) Render separate charts for consumer rate and cost of debt
+    if not wac.empty:
+        h += chart([{"x": wac["period"].tolist(), "y": wac["weighted_avg_apr"].tolist(),
+                     "type": "scatter", "line": {"color": "#1976D2"}}],
+                   {"title": "Avg Consumer Rate", "yaxis": {"tickformat": ".2%"}, "hovermode": "x unified",
+                    "xaxis": {"range": [x[0], x[-1]], "tickangle": -45, "automargin": True}})
     else:
-        logger.warning(f"[{deal}] No WAC or Cost of Debt data available")
+        logger.warning(f"[{deal}] No consumer rate (WAC) data available")
+    if not cod.empty:
+        cod_min, cod_max = cod["cost_of_debt"].min(), cod["cost_of_debt"].max()
+        logger.info(f"[{deal}] CoD range: {cod_min:.4%} - {cod_max:.4%} (n={len(cod)})")
+        if cod_max > 0.15 or cod_min < 0.001:
+            logger.warning(f"[{deal}] CoD values look suspicious — check total_note_interest extraction")
+        h += chart([{"x": cod["period"].tolist(), "y": cod["cost_of_debt"].tolist(),
+                     "type": "scatter", "line": {"color": "#D32F2F"}}],
+                   {"title": "Avg Trust Cost of Debt", "yaxis": {"tickformat": ".2%"}, "hovermode": "x unified",
+                    "xaxis": {"range": [x[0], x[-1]], "tickangle": -45, "automargin": True}})
+    else:
+        logger.warning(f"[{deal}] No cost of debt data available")
     sections["Pool Summary"] = h
 
     # ── DELINQUENCIES ──
@@ -497,8 +493,12 @@ def generate_comparison_content(deals, title):
         last_cod = q("SELECT total_note_interest, aggregate_note_balance FROM pool_performance WHERE deal=? AND total_note_interest IS NOT NULL AND aggregate_note_balance > 0 ORDER BY distribution_date DESC LIMIT 1", (deal,))
         if not last_cod.empty:
             curr_cod = last_cod.iloc[0]["total_note_interest"] / last_cod.iloc[0]["aggregate_note_balance"] * 12
-        logger.info(f"  [{deal}] Compare: init_wac={init_wac is not None}, curr_wac={curr_wac is not None}, "
-                    f"init_cod={init_cod is not None}, curr_cod={curr_cod is not None}")
+        # Sanity check: CoD should be 0.5%-15% annualized for auto ABS
+        for label, val in [("init_cod", init_cod), ("curr_cod", curr_cod)]:
+            if val is not None and (val < 0.005 or val > 0.15):
+                logger.warning(f"  [{deal}] {label}={val:.4%} looks suspicious (expected 0.5-15%)")
+        logger.info(f"  [{deal}] Compare: init_wac={init_wac}, curr_wac={curr_wac}, "
+                    f"init_cod={init_cod}, curr_cod={curr_cod}")
 
         # Pool factor from monthly_summary (more reliable than pool_performance)
         latest_ms = q("SELECT total_balance FROM monthly_summary WHERE deal=? ORDER BY reporting_period_end DESC LIMIT 1", (deal,))
@@ -519,10 +519,10 @@ def generate_comparison_content(deals, title):
         rows.append({
             "Deal": deal,
             "Avg FICO": f"{avg_fico:.0f}" if avg_fico else "-",
-            "Init WAC": f"{init_wac:.2%}" if init_wac is not None else None,
-            "Curr WAC": f"{curr_wac:.2%}" if curr_wac is not None else None,
-            "Init CoD": f"{init_cod:.2%}" if init_cod is not None else None,
-            "Curr CoD": f"{curr_cod:.2%}" if curr_cod is not None else None,
+            "Initial Avg Consumer Rate": f"{init_wac:.2%}" if init_wac is not None else None,
+            "Current Avg Consumer Rate": f"{curr_wac:.2%}" if curr_wac is not None else None,
+            "Initial Avg Trust Cost of Debt": f"{init_cod:.2%}" if init_cod is not None else None,
+            "Current Avg Trust Cost of Debt": f"{curr_cod:.2%}" if curr_cod is not None else None,
             "Init Balance": fm(init_bal),
             "Pool Factor": f"{pool_factor:.1%}" if pool_factor is not None else "-",
             "Cum Loss": f"{cum_loss_rate:.2%}" if cum_loss_rate is not None else "-",
@@ -532,7 +532,8 @@ def generate_comparison_content(deals, title):
     if rows:
         summary_df = pd.DataFrame(rows)
         # Drop columns where ALL values are None (no deal has data for that metric)
-        for col in ["Init WAC", "Curr WAC", "Init CoD", "Curr CoD"]:
+        for col in ["Initial Avg Consumer Rate", "Current Avg Consumer Rate",
+                     "Initial Avg Trust Cost of Debt", "Current Avg Trust Cost of Debt"]:
             if col in summary_df.columns and summary_df[col].isna().all():
                 summary_df = summary_df.drop(columns=[col])
                 logger.warning(f"[{title}] Dropped column '{col}' — no data for any deal")

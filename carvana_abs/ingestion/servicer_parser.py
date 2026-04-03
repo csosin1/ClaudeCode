@@ -209,11 +209,14 @@ def parse_servicer_certificate(html_content: str) -> dict:
 
     # Extract total note interest (sum of all class interest distributable amounts)
     # Pattern: "Class X Interest Distributable Amount XXXX"
-    note_interest_total = 0
-    for m in re.finditer(r'[Cc]lass\s+\S+\s+[Ii]nterest\s+[Dd]istributable\s+[Aa]mount\s+([\d,]+\.?\d*)', all_text):
-        val = _clean_number(m.group(1))
+    # Deduplicate by class name — servicer certs often repeat amounts in multiple sections
+    note_interest_by_class = {}
+    for m in re.finditer(r'[Cc]lass\s+(\S+)\s+[Ii]nterest\s+[Dd]istributable\s+[Aa]mount\s+([\d,]+\.?\d*)', all_text):
+        cls_name = m.group(1).upper()
+        val = _clean_number(m.group(2))
         if val and val > 0:
-            note_interest_total += val
+            note_interest_by_class[cls_name] = val  # Last match per class wins
+    note_interest_total = sum(note_interest_by_class.values())
     if note_interest_total > 0:
         best_result["total_note_interest"] = note_interest_total
 
