@@ -1,6 +1,5 @@
 #!/bin/bash
-# Auto-deploy: checks GitHub every 5 min, deploys if there are changes.
-# Runs as a systemd timer — no manual intervention needed.
+# Auto-deploy: checks GitHub every 30s, deploys if there are changes.
 cd /opt/abs-dashboard
 
 # Fetch latest from GitHub
@@ -12,39 +11,34 @@ REMOTE=$(git rev-parse origin/claude/carvana-loan-dashboard-4QMPM)
 
 if [ "$LOCAL" != "$REMOTE" ]; then
     echo "$(date): New changes detected, deploying..."
-    git pull origin claude/carvana-loan-dashboard-4QMPM
+    git reset --hard origin/claude/carvana-loan-dashboard-4QMPM
 
-    # Run any one-time deploy scripts
-    if [ -f /opt/abs-dashboard/deploy/update_nginx.sh ]; then
-        bash /opt/abs-dashboard/deploy/update_nginx.sh
+    # Check if a reingest is needed (flag file in repo signals this)
+    if [ -f /opt/abs-dashboard/deploy/REINGEST_VERSION ]; then
+        NEED_VERSION=$(cat /opt/abs-dashboard/deploy/REINGEST_VERSION)
+        HAVE_VERSION=$(cat /opt/.reingest_done 2>/dev/null || echo "none")
+        if [ "$NEED_VERSION" != "$HAVE_VERSION" ]; then
+            echo "$(date): Reingest needed (v$NEED_VERSION)..."
+            /opt/abs-venv/bin/python /opt/abs-dashboard/carvana_abs/reingest_pool.py >> /var/log/auto-deploy.log 2>&1 || true
+            /opt/abs-venv/bin/python /opt/abs-dashboard/carvana_abs/rebuild_summaries.py >> /var/log/auto-deploy.log 2>&1 || true
+            echo "$NEED_VERSION" > /opt/.reingest_done
+        fi
     fi
 
-    # Re-ingest pool data if reingest flag exists (one-time after parser fix)
-    if [ -f /opt/abs-dashboard/carvana_abs/reingest_pool.py ] && [ ! -f /opt/.pool_reingested_v5 ]; then
-        echo "$(date): Re-ingesting pool data with waterfall parser..."
-        /opt/abs-venv/bin/python /opt/abs-dashboard/carvana_abs/reingest_pool.py 2>&1 || true
-        touch /opt/.pool_reingested_v5
-    fi
+    # Always export dashboard DB and regenerate preview on code changes
+    /opt/abs-venv/bin/python /opt/abs-dashboard/carvana_abs/export_dashboard_db.py >> /var/log/auto-deploy.log 2>&1 || true
+    /opt/abs-venv/bin/python /opt/abs-dashboard/carvana_abs/generate_preview.py >> /var/log/auto-deploy.log 2>&1 || true
 
-    # Rebuild summary tables if schema changed
-    if [ -f /opt/abs-dashboard/carvana_abs/rebuild_summaries.py ]; then
-        /opt/abs-venv/bin/python /opt/abs-dashboard/carvana_abs/rebuild_summaries.py 2>&1 || true
-    fi
-
-    # Export small dashboard DB from the full DB
-    if [ -f /opt/abs-dashboard/carvana_abs/export_dashboard_db.py ]; then
-        /opt/abs-venv/bin/python /opt/abs-dashboard/carvana_abs/export_dashboard_db.py 2>&1 || true
-    fi
-
-    # Generate preview (not live) — user must approve to promote
-    if [ -f /opt/abs-dashboard/carvana_abs/generate_preview.py ]; then
-        /opt/abs-venv/bin/python /opt/abs-dashboard/carvana_abs/generate_preview.py 2>&1 || true
-    fi
-
-    # Set up preview nginx if not done yet
+    # Run any one-time setup scripts
     if [ -f /opt/abs-dashboard/deploy/setup_preview.sh ] && [ ! -f /opt/.preview_setup ]; then
         bash /opt/abs-dashboard/deploy/setup_preview.sh
         touch /opt/.preview_setup
+    fi
+
+    # Auto-promote if PROMOTE flag exists
+    if [ -f /opt/abs-dashboard/deploy/PROMOTE ]; then
+        /opt/abs-venv/bin/python /opt/abs-dashboard/carvana_abs/generate_preview.py promote >> /var/log/auto-deploy.log 2>&1 || true
+        echo "$(date): Promoted preview to live."
     fi
 
     echo "$(date): Deploy complete. Preview updated."
