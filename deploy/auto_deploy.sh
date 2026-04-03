@@ -33,7 +33,12 @@ if [ "$LOCAL" != "$REMOTE" ]; then
     /opt/abs-venv/bin/python /opt/abs-dashboard/carvana_abs/validate_dashboard.py >> /var/log/auto-deploy.log 2>&1
     /opt/abs-venv/bin/python /opt/abs-dashboard/carvana_abs/deploy_status.py >> /var/log/auto-deploy.log 2>&1 || true
 
-    # status.json is written to preview/ dir which nginx already serves
+    # Write status and push to GitHub so it can be read remotely
+    /opt/abs-venv/bin/python /opt/abs-dashboard/carvana_abs/deploy_status.py > /opt/abs-dashboard/deploy/LAST_STATUS.json 2>&1 || true
+    cd /opt/abs-dashboard
+    git add deploy/LAST_STATUS.json 2>/dev/null
+    git commit -m "Auto-deploy status update" --allow-empty 2>/dev/null || true
+    git push origin claude/carvana-loan-dashboard-4QMPM 2>/dev/null || true
 
     # Run any one-time setup scripts
     if [ -f /opt/abs-dashboard/deploy/setup_preview.sh ] && [ ! -f /opt/.preview_setup ]; then
