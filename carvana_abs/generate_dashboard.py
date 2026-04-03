@@ -184,6 +184,11 @@ def generate_deal_content(deal):
         cod = cod[cod["aggregate_note_balance"] > 0].copy()
         if not cod.empty:
             cod["cost_of_debt"] = cod["total_note_interest"] / cod["aggregate_note_balance"] * 12
+            # Sanity filter: auto ABS trust cost of debt should be 0.5-15%
+            bad = (cod["cost_of_debt"] > 0.15) | (cod["cost_of_debt"] < 0.005)
+            if bad.any():
+                logger.warning(f"[{deal}] Filtered {bad.sum()}/{len(cod)} CoD values outside 0.5-15% range")
+                cod = cod[~bad]
     # 3) Render separate charts for consumer rate and cost of debt
     if not wac.empty:
         h += chart([{"x": wac["period"].tolist(), "y": wac["weighted_avg_apr"].tolist(),
@@ -493,10 +498,15 @@ def generate_comparison_content(deals, title):
         last_cod = q("SELECT total_note_interest, aggregate_note_balance FROM pool_performance WHERE deal=? AND total_note_interest IS NOT NULL AND aggregate_note_balance > 0 ORDER BY distribution_date DESC LIMIT 1", (deal,))
         if not last_cod.empty:
             curr_cod = last_cod.iloc[0]["total_note_interest"] / last_cod.iloc[0]["aggregate_note_balance"] * 12
-        # Sanity check: CoD should be 0.5%-15% annualized for auto ABS
-        for label, val in [("init_cod", init_cod), ("curr_cod", curr_cod)]:
+        # Sanity filter: CoD should be 0.5%-15% annualized for auto ABS
+        for label in ["init_cod", "curr_cod"]:
+            val = locals()[label]
             if val is not None and (val < 0.005 or val > 0.15):
-                logger.warning(f"  [{deal}] {label}={val:.4%} looks suspicious (expected 0.5-15%)")
+                logger.warning(f"  [{deal}] {label}={val:.4%} outside 0.5-15% — filtering out")
+                if label == "init_cod":
+                    init_cod = None
+                else:
+                    curr_cod = None
         logger.info(f"  [{deal}] Compare: init_wac={init_wac}, curr_wac={curr_wac}, "
                     f"init_cod={init_cod}, curr_cod={curr_cod}")
 

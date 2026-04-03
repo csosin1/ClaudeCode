@@ -215,10 +215,15 @@ def parse_servicer_certificate(html_content: str) -> dict:
         cls_name = m.group(1).upper()
         val = _clean_number(m.group(2))
         if val and val > 0:
+            # Sanity: monthly interest per class should be < $5M for auto ABS
+            if val > 5_000_000:
+                logger.warning(f"  note_interest: Class {cls_name} = ${val:,.2f} — too large, likely a balance not interest. Skipping.")
+                continue
             note_interest_by_class[cls_name] = val  # Last match per class wins
     note_interest_total = sum(note_interest_by_class.values())
     if note_interest_total > 0:
         best_result["total_note_interest"] = note_interest_total
+        logger.debug(f"  note_interest: {note_interest_by_class} total=${note_interest_total:,.2f}")
 
     # Extract Regular PDA (principal distribution amount)
     m = re.search(r'[Rr]egular\s+PDA\s+(?:\(other\s+than\s+[^)]*\)\s+)?([\d,]+\.?\d*)', all_text)
