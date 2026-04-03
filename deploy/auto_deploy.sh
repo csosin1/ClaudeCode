@@ -41,6 +41,9 @@ if [ "$LOCAL" != "$REMOTE" ]; then
         echo "$(date): Promoted preview to live."
     fi
 
+    # Update the running copy of this script
+    cp /opt/abs-dashboard/deploy/auto_deploy.sh /opt/auto_deploy.sh 2>/dev/null || true
+
     echo "$(date): Deploy complete. Preview updated."
 else
     echo "$(date): No changes."
