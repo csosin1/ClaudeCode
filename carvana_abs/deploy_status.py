@@ -8,7 +8,8 @@ import sys
 import sqlite3
 from datetime import datetime
 
-STATUS_DIR = "/opt/abs-dashboard/carvana_abs/static_site/status"
+# Write to preview dir which nginx already serves
+STATUS_DIR = "/opt/abs-dashboard/carvana_abs/static_site/preview"
 os.makedirs(STATUS_DIR, exist_ok=True)
 
 DB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "db")
@@ -97,6 +98,7 @@ def main():
     except:
         pass
 
+    os.makedirs(STATUS_DIR, exist_ok=True)
     out = os.path.join(STATUS_DIR, "status.json")
     with open(out, "w") as f:
         json.dump(status, f, indent=2)

@@ -33,13 +33,7 @@ if [ "$LOCAL" != "$REMOTE" ]; then
     /opt/abs-venv/bin/python /opt/abs-dashboard/carvana_abs/validate_dashboard.py >> /var/log/auto-deploy.log 2>&1
     /opt/abs-venv/bin/python /opt/abs-dashboard/carvana_abs/deploy_status.py >> /var/log/auto-deploy.log 2>&1 || true
 
-    # Set up status endpoint in nginx if not done
-    if [ ! -f /opt/.status_nginx_done ]; then
-        # Add status location to nginx config
-        sed -i '/location \/games\//i\    location /status/ { alias /opt/abs-dashboard/carvana_abs/static_site/status/; add_header Access-Control-Allow-Origin "*"; }' /etc/nginx/sites-available/abs-dashboard 2>/dev/null
-        nginx -t 2>/dev/null && systemctl reload nginx 2>/dev/null
-        touch /opt/.status_nginx_done
-    fi
+    # status.json is written to preview/ dir which nginx already serves
 
     # Run any one-time setup scripts
     if [ -f /opt/abs-dashboard/deploy/setup_preview.sh ] && [ ! -f /opt/.preview_setup ]; then
