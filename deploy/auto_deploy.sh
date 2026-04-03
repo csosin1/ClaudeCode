@@ -40,7 +40,9 @@ if [ "$LOCAL" != "$REMOTE" ]; then
     cd /opt/abs-dashboard
     git add deploy/LAST_STATUS.json deploy/LAST_VALIDATION.txt deploy/LAST_DATA_CHECK.txt 2>/dev/null
     git commit -m "Auto-deploy status update" --allow-empty 2>/dev/null || true
-    git push origin claude/carvana-loan-dashboard-4QMPM 2>/dev/null || true
+    # Pull-rebase before push to avoid non-fast-forward rejection
+    git pull --rebase origin claude/carvana-loan-dashboard-4QMPM 2>/dev/null || true
+    git push origin claude/carvana-loan-dashboard-4QMPM 2>>/var/log/auto-deploy.log || echo "$(date): git push failed" >> /var/log/auto-deploy.log
 
     # Run any one-time setup scripts
     if [ -f /opt/abs-dashboard/deploy/setup_preview.sh ] && [ ! -f /opt/.preview_setup ]; then
