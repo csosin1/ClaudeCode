@@ -116,6 +116,14 @@ def generate_deal_content(deal):
     lp = lp.sort_values("period").reset_index(drop=True)
 
     pool = q("SELECT * FROM pool_performance WHERE deal=? ORDER BY distribution_date", (deal,))
+    # Log data availability for debugging
+    has_pool = not pool.empty
+    has_wac_pp = has_pool and "weighted_avg_apr" in pool.columns and pool["weighted_avg_apr"].notna().any()
+    has_wac_ms = "weighted_avg_coupon" in lp.columns and lp["weighted_avg_coupon"].notna().any()
+    has_note_int = has_pool and "total_note_interest" in pool.columns and pool["total_note_interest"].notna().any()
+    has_note_bal = has_pool and "aggregate_note_balance" in pool.columns and (pool["aggregate_note_balance"].fillna(0) > 0).any()
+    logger.info(f"[{deal}] Data: pool_perf={has_pool}, wac_pp={has_wac_pp}, wac_ms={has_wac_ms}, "
+                f"note_interest={has_note_int}, note_balance={has_note_bal}")
     if not pool.empty:
         pool["period"] = pool["distribution_date"].apply(nd)
         pool = pool.sort_values("period").reset_index(drop=True)
@@ -176,19 +184,29 @@ def generate_deal_content(deal):
         cod = cod[cod["aggregate_note_balance"] > 0].copy()
         if not cod.empty:
             cod["cost_of_debt"] = cod["total_note_interest"] / cod["aggregate_note_balance"] * 12
-    # 3) Render dual-curve chart
+    # 3) Render rate chart(s) — title reflects what data is actually present
     rate_traces = []
-    if not wac.empty:
+    has_wac = not wac.empty
+    has_cod = not cod.empty
+    if has_wac:
         rate_traces.append({"x": wac["period"].tolist(), "y": wac["weighted_avg_apr"].tolist(),
                             "type": "scatter", "name": "Collateral WAC", "line": {"color": "#1976D2"}})
-    if not cod.empty:
+    if has_cod:
         rate_traces.append({"x": cod["period"].tolist(), "y": cod["cost_of_debt"].tolist(),
                             "type": "scatter", "name": "Cost of Debt", "line": {"color": "#D32F2F", "dash": "dash"}})
     if rate_traces:
-        h += chart(rate_traces, {"title": "Collateral WAC vs Cost of Debt",
+        if has_wac and has_cod:
+            rate_title = "Collateral WAC vs Cost of Debt"
+        elif has_wac:
+            rate_title = "Weighted Average Coupon (Collateral)"
+        else:
+            rate_title = "Weighted Average Cost of Debt"
+        h += chart(rate_traces, {"title": rate_title,
                    "yaxis": {"tickformat": ".2%"}, "hovermode": "x unified",
                    "xaxis": {"range": [x[0], x[-1]], "tickangle": -45, "automargin": True},
                    "legend": {"orientation": "h", "y": -0.2}})
+    else:
+        logger.warning(f"[{deal}] No WAC or Cost of Debt data available")
     sections["Pool Summary"] = h
 
     # ── DELINQUENCIES ──
@@ -479,6 +497,8 @@ def generate_comparison_content(deals, title):
         last_cod = q("SELECT total_note_interest, aggregate_note_balance FROM pool_performance WHERE deal=? AND total_note_interest IS NOT NULL AND aggregate_note_balance > 0 ORDER BY distribution_date DESC LIMIT 1", (deal,))
         if not last_cod.empty:
             curr_cod = last_cod.iloc[0]["total_note_interest"] / last_cod.iloc[0]["aggregate_note_balance"] * 12
+        logger.info(f"  [{deal}] Compare: init_wac={init_wac is not None}, curr_wac={curr_wac is not None}, "
+                    f"init_cod={init_cod is not None}, curr_cod={curr_cod is not None}")
 
         # Pool factor from monthly_summary (more reliable than pool_performance)
         latest_ms = q("SELECT total_balance FROM monthly_summary WHERE deal=? ORDER BY reporting_period_end DESC LIMIT 1", (deal,))
@@ -499,10 +519,10 @@ def generate_comparison_content(deals, title):
         rows.append({
             "Deal": deal,
             "Avg FICO": f"{avg_fico:.0f}" if avg_fico else "-",
-            "Init WAC": f"{init_wac:.2%}" if init_wac is not None else "-",
-            "Curr WAC": f"{curr_wac:.2%}" if curr_wac is not None else "-",
-            "Init CoD": f"{init_cod:.2%}" if init_cod is not None else "-",
-            "Curr CoD": f"{curr_cod:.2%}" if curr_cod is not None else "-",
+            "Init WAC": f"{init_wac:.2%}" if init_wac is not None else None,
+            "Curr WAC": f"{curr_wac:.2%}" if curr_wac is not None else None,
+            "Init CoD": f"{init_cod:.2%}" if init_cod is not None else None,
+            "Curr CoD": f"{curr_cod:.2%}" if curr_cod is not None else None,
             "Init Balance": fm(init_bal),
             "Pool Factor": f"{pool_factor:.1%}" if pool_factor is not None else "-",
             "Cum Loss": f"{cum_loss_rate:.2%}" if cum_loss_rate is not None else "-",
@@ -511,6 +531,13 @@ def generate_comparison_content(deals, title):
 
     if rows:
         summary_df = pd.DataFrame(rows)
+        # Drop columns where ALL values are None (no deal has data for that metric)
+        for col in ["Init WAC", "Curr WAC", "Init CoD", "Curr CoD"]:
+            if col in summary_df.columns and summary_df[col].isna().all():
+                summary_df = summary_df.drop(columns=[col])
+                logger.warning(f"[{title}] Dropped column '{col}' — no data for any deal")
+            elif col in summary_df.columns:
+                summary_df[col] = summary_df[col].fillna("-")
         h += f"<h3>{title} — Summary</h3>" + table_html(summary_df, cls="compare")
 
     # ── Cumulative Loss Curve (by deal age in months) ──

@@ -30,13 +30,14 @@ if [ "$LOCAL" != "$REMOTE" ]; then
     /opt/abs-venv/bin/python /opt/abs-dashboard/carvana_abs/generate_preview.py >> /var/log/auto-deploy.log 2>&1 || true
 
     # Validate the generated HTML and write status
-    /opt/abs-venv/bin/python /opt/abs-dashboard/carvana_abs/validate_dashboard.py >> /var/log/auto-deploy.log 2>&1
+    /opt/abs-venv/bin/python /opt/abs-dashboard/carvana_abs/validate_dashboard.py > /opt/abs-dashboard/deploy/LAST_VALIDATION.txt 2>&1
+    cat /opt/abs-dashboard/deploy/LAST_VALIDATION.txt >> /var/log/auto-deploy.log
     /opt/abs-venv/bin/python /opt/abs-dashboard/carvana_abs/deploy_status.py >> /var/log/auto-deploy.log 2>&1 || true
 
     # Write status and push to GitHub so it can be read remotely
     /opt/abs-venv/bin/python /opt/abs-dashboard/carvana_abs/deploy_status.py > /opt/abs-dashboard/deploy/LAST_STATUS.json 2>&1 || true
     cd /opt/abs-dashboard
-    git add deploy/LAST_STATUS.json 2>/dev/null
+    git add deploy/LAST_STATUS.json deploy/LAST_VALIDATION.txt 2>/dev/null
     git commit -m "Auto-deploy status update" --allow-empty 2>/dev/null || true
     git push origin claude/carvana-loan-dashboard-4QMPM 2>/dev/null || true
 

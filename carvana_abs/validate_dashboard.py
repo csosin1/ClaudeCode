@@ -86,6 +86,38 @@ def validate():
     else:
         info.append("Waterfall residual: NO")
 
+    # Check rate curves (WAC / Cost of Debt)
+    # Count deals that have each type of rate chart
+    wac_cod_count = html.count("Collateral WAC vs Cost of Debt")
+    wac_only_count = html.count("Weighted Average Coupon (Collateral)")
+    cod_only_count = html.count("Weighted Average Cost of Debt")
+    no_rate_deals = len([d for d in deal_blocks
+                         if d not in ("__prime__", "__nonprime__")]) - wac_cod_count - wac_only_count - cod_only_count
+    info.append(f"Rate charts: WAC+CoD={wac_cod_count}, WAC-only={wac_only_count}, CoD-only={cod_only_count}, none={max(0,no_rate_deals)}")
+    if no_rate_deals > 0:
+        warnings.append(f"{no_rate_deals} deal(s) have NO rate chart (missing both WAC and Cost of Debt data)")
+
+    # Check comparison tabs
+    if "deal-__prime__" in html:
+        info.append("Prime comparison: YES")
+    else:
+        warnings.append("Prime comparison section missing")
+    if "deal-__nonprime__" in html:
+        info.append("Non-Prime comparison: YES")
+    else:
+        warnings.append("Non-Prime comparison section missing")
+
+    # Check comparison summary tables for excessive dashes
+    for section_id, label in [("deal-__prime__", "Prime"), ("deal-__nonprime__", "Non-Prime")]:
+        start = html.find(f'id="{section_id}"')
+        if start >= 0:
+            end = html.find('</div>', start + 1000)  # Find end of section
+            section = html[start:end+6] if end > start else ""
+            dash_count = section.count("<td>-</td>")
+            cell_count = section.count("<td>")
+            if cell_count > 0 and dash_count / cell_count > 0.4:
+                warnings.append(f"{label} comparison table: {dash_count}/{cell_count} cells are '-' ({dash_count/cell_count:.0%})")
+
     # Check for mobile CSS
     if "@media" in html:
         info.append("Mobile responsive: YES")
