@@ -29,6 +29,9 @@ if [ "$LOCAL" != "$REMOTE" ]; then
     /opt/abs-venv/bin/python /opt/abs-dashboard/carvana_abs/export_dashboard_db.py >> /var/log/auto-deploy.log 2>&1 || true
     /opt/abs-venv/bin/python /opt/abs-dashboard/carvana_abs/generate_preview.py >> /var/log/auto-deploy.log 2>&1 || true
 
+    # Validate the generated HTML
+    /opt/abs-venv/bin/python /opt/abs-dashboard/carvana_abs/validate_dashboard.py >> /var/log/auto-deploy.log 2>&1
+
     # Run any one-time setup scripts
     if [ -f /opt/abs-dashboard/deploy/setup_preview.sh ] && [ ! -f /opt/.preview_setup ]; then
         bash /opt/abs-dashboard/deploy/setup_preview.sh
