@@ -22,8 +22,27 @@ logger = logging.getLogger(__name__)
 
 
 def main():
+    # Ensure schema is up to date (adds new columns if missing)
+    from carvana_abs.db.schema import init_db
+    init_db(DB_PATH)
+
     conn = get_connection(DB_PATH)
     cursor = conn.cursor()
+
+    # Check if new waterfall columns exist; if not, recreate the table
+    cursor.execute("PRAGMA table_info(pool_performance)")
+    existing_cols = {row["name"] for row in cursor.fetchall()}
+    if "residual_cash" not in existing_cols:
+        logger.info("Adding waterfall columns to pool_performance...")
+        for col in ["residual_cash", "total_deposited", "available_funds",
+                     "actual_servicing_fee", "total_note_interest", "regular_pda"]:
+            if col not in existing_cols:
+                try:
+                    cursor.execute(f"ALTER TABLE pool_performance ADD COLUMN {col} REAL")
+                except Exception:
+                    pass
+        conn.commit()
+        logger.info("Waterfall columns added.")
 
     for deal in get_active_deals():
         # Reset pool ingestion flags so we re-parse
