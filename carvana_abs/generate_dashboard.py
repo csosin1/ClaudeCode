@@ -180,7 +180,7 @@ def generate_deal_content(deal):
     # 2) Cost of Debt: weighted avg of note coupon rates × note balances
     cod = pd.DataFrame()
     try:
-        notes_df = q("SELECT class, coupon_rate FROM notes WHERE deal=? AND coupon_rate IS NOT NULL", (deal,))
+        notes_df = q("SELECT class, coupon_rate, original_balance FROM notes WHERE deal=? AND coupon_rate IS NOT NULL", (deal,))
     except Exception:
         notes_df = pd.DataFrame()  # notes table may not exist yet
     if not notes_df.empty and not pool.empty:
@@ -189,6 +189,10 @@ def generate_deal_content(deal):
         bal_cols = {"A1": "note_balance_a1", "A2": "note_balance_a2", "A3": "note_balance_a3",
                     "A4": "note_balance_a4", "B": "note_balance_b", "C": "note_balance_c",
                     "D": "note_balance_d", "N": "note_balance_n"}
+        # Forward-fill note balance columns so sparse data becomes a time series
+        for col in bal_cols.values():
+            if col in pool.columns:
+                pool[col] = pool[col].ffill()
         # For each period, compute weighted avg rate across note classes
         cod_rows = []
         for _, row in pool.iterrows():
@@ -215,6 +219,14 @@ def generate_deal_content(deal):
                 if bad.any():
                     logger.warning(f"[{deal}] Filtered {bad.sum()}/{len(cod_fb)} CoD fallback values > 15%")
                 cod = cod_fb[~bad][["period", "cost_of_debt"]] if bad.any() else cod_fb[["period", "cost_of_debt"]]
+    if cod.empty and not notes_df.empty and not pool.empty:
+        # Last resort: use fixed weighted avg from notes initial balances as flat line
+        if "original_balance" in notes_df.columns:
+            w_sum = (notes_df["coupon_rate"] * notes_df["original_balance"].fillna(0)).sum()
+            t_bal = notes_df["original_balance"].fillna(0).sum()
+            if t_bal > 0:
+                flat_rate = w_sum / t_bal
+                cod = pd.DataFrame({"period": pool["period"], "cost_of_debt": flat_rate})
     # 3) Render separate charts for consumer rate and cost of debt
     if not wac.empty:
         h += chart([{"x": wac["period"].tolist(), "y": wac["weighted_avg_apr"].tolist(),
@@ -720,7 +732,7 @@ def generate_model_content():
             logger.error(f"Inline model run failed: {e}")
 
     if mr is None or mr.empty:
-        return "<p>Default model not yet computed. Ensure scikit-learn is installed and run default_model.py.</p>"
+        return "<p>Default model not yet computed. Run default_model.py.</p>"
 
     results = json.loads(mr.iloc[0]["value"])
     ds = results["dataset"]
@@ -818,7 +830,7 @@ def generate_model_content():
             {"x": seg["labels"], "y": seg["actual_rate"], "type": "bar",
              "name": "Actual", "marker": {"color": "#D32F2F"}},
             {"x": seg["labels"], "y": seg["predicted_rate"], "type": "bar",
-             "name": "Predicted (RF)", "marker": {"color": "#1976D2"}},
+             "name": "Predicted", "marker": {"color": "#1976D2"}},
         ], {"title": seg_title, "barmode": "group",
             "yaxis": {"tickformat": ".1%"}, "hovermode": "x unified",
             "legend": {"orientation": "h", "y": -0.2}})
