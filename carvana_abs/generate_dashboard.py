@@ -179,7 +179,10 @@ def generate_deal_content(deal):
             wac = wac_ms
     # 2) Cost of Debt: weighted avg of note coupon rates × note balances
     cod = pd.DataFrame()
-    notes_df = q("SELECT class, coupon_rate FROM notes WHERE deal=? AND coupon_rate IS NOT NULL", (deal,))
+    try:
+        notes_df = q("SELECT class, coupon_rate FROM notes WHERE deal=? AND coupon_rate IS NOT NULL", (deal,))
+    except Exception:
+        notes_df = pd.DataFrame()  # notes table may not exist yet
     if not notes_df.empty and not pool.empty:
         # Build a rate lookup: class -> coupon_rate
         rate_lookup = dict(zip(notes_df["class"], notes_df["coupon_rate"]))
@@ -570,7 +573,10 @@ def generate_comparison_content(deals, title):
         # ── Cost of Debt (from notes table: weighted avg coupon rate) ──
         init_cod = None
         curr_cod = None
-        notes_df = q("SELECT class, coupon_rate FROM notes WHERE deal=? AND coupon_rate IS NOT NULL", (deal,))
+        try:
+            notes_df = q("SELECT class, coupon_rate FROM notes WHERE deal=? AND coupon_rate IS NOT NULL", (deal,))
+        except Exception:
+            notes_df = pd.DataFrame()  # notes table may not exist yet
         if not notes_df.empty:
             rate_lookup = dict(zip(notes_df["class"], notes_df["coupon_rate"]))
             bal_cols = {"A1": "note_balance_a1", "A2": "note_balance_a2", "A3": "note_balance_a3",
@@ -589,6 +595,21 @@ def generate_comparison_content(deals, title):
                                 t_bal += bal
                     if t_bal > 0:
                         val = w_sum / t_bal
+                        if label == "init":
+                            init_cod = val
+                        else:
+                            curr_cod = val
+        # Fallback: total_note_interest / aggregate_note_balance * 12
+        if init_cod is None or curr_cod is None:
+            for label, order in [("init", "ASC"), ("curr", "DESC")]:
+                if (label == "init" and init_cod is not None) or (label == "curr" and curr_cod is not None):
+                    continue
+                fb = q(f"""SELECT total_note_interest, aggregate_note_balance
+                    FROM pool_performance WHERE deal=? AND total_note_interest IS NOT NULL
+                    AND aggregate_note_balance > 0 ORDER BY distribution_date {order} LIMIT 1""", (deal,))
+                if not fb.empty:
+                    val = fb.iloc[0]["total_note_interest"] / fb.iloc[0]["aggregate_note_balance"] * 12
+                    if 0.005 <= val <= 0.15:
                         if label == "init":
                             init_cod = val
                         else:
