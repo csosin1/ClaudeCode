@@ -239,8 +239,8 @@ def engineer_features(df):
     df["orig_month"] = df["orig_dt"].dt.month
     df["orig_year"] = df["orig_dt"].dt.year
 
-    # Feature columns
-    feature_cols = ["fico", "ltv", "pti", "rate", "term", "amount", "orig_month", "orig_year"]
+    # Feature columns — only use reliably populated fields (date parsing may fail on real data)
+    feature_cols = ["fico", "ltv", "pti", "rate", "term", "amount"]
     return df, feature_cols
 
 

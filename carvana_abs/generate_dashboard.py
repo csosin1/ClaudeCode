@@ -185,56 +185,61 @@ def generate_deal_content(deal):
         try:
             notes_df = q("SELECT class, coupon_rate FROM notes WHERE deal=? AND coupon_rate IS NOT NULL", (deal,))
         except Exception:
-            notes_df = pd.DataFrame()  # notes table may not exist yet
-    if not notes_df.empty and not pool.empty:
-        # Build a rate lookup: class -> coupon_rate
+            notes_df = pd.DataFrame()
+
+    # Method 1 (best): total_note_interest / aggregate_note_balance * 12
+    if not pool.empty and "total_note_interest" in pool.columns and "aggregate_note_balance" in pool.columns:
+        cod_fb = pool.dropna(subset=["total_note_interest", "aggregate_note_balance"]).copy()
+        cod_fb = cod_fb[cod_fb["aggregate_note_balance"] > 0].copy()
+        if not cod_fb.empty:
+            cod_fb["cost_of_debt"] = cod_fb["total_note_interest"] / cod_fb["aggregate_note_balance"] * 12
+            bad = cod_fb["cost_of_debt"] > 0.15
+            if bad.any():
+                logger.warning(f"[{deal}] Filtered {bad.sum()}/{len(cod_fb)} CoD values > 15%")
+            cod = cod_fb[~bad][["period", "cost_of_debt"]] if bad.any() else cod_fb[["period", "cost_of_debt"]]
+
+    # Method 2: weighted notes × note_balance columns (if method 1 gave < 3 points)
+    if len(cod) < 3 and not notes_df.empty and not pool.empty:
         rate_lookup = dict(zip(notes_df["class"], notes_df["coupon_rate"]))
+        # Map note classes to balance columns, normalizing names (e.g. "A-1" -> "A1")
         bal_cols = {"A1": "note_balance_a1", "A2": "note_balance_a2", "A3": "note_balance_a3",
                     "A4": "note_balance_a4", "B": "note_balance_b", "C": "note_balance_c",
                     "D": "note_balance_d", "N": "note_balance_n"}
-        # Forward-fill note balance columns so sparse data becomes a time series
+        # Normalize note class names: "A-1" -> "A1", "Class A" -> "A", etc.
+        norm_rate_lookup = {}
+        for cls, rate in rate_lookup.items():
+            norm = cls.upper().replace("-", "").replace(" ", "").replace("CLASS", "")
+            norm_rate_lookup[norm] = rate
         for col in bal_cols.values():
             if col in pool.columns:
                 pool[col] = pool[col].ffill()
-        # For each period, compute weighted avg rate across note classes
         cod_rows = []
         for _, row in pool.iterrows():
             weighted_sum = 0
             total_bal = 0
             for cls, col in bal_cols.items():
-                if col in pool.columns and cls in rate_lookup:
+                if col in pool.columns and cls in norm_rate_lookup:
                     bal = row.get(col)
                     if bal and bal > 0:
-                        weighted_sum += rate_lookup[cls] * bal
+                        weighted_sum += norm_rate_lookup[cls] * bal
                         total_bal += bal
             if total_bal > 0:
                 cod_rows.append({"period": row["period"], "cost_of_debt": weighted_sum / total_bal})
-        if cod_rows:
+        if len(cod_rows) > len(cod):
             cod = pd.DataFrame(cod_rows)
-    if cod.empty:
-        # Fallback: total_note_interest / aggregate_note_balance * 12 (with sanity filter)
-        if not pool.empty and "total_note_interest" in pool.columns and "aggregate_note_balance" in pool.columns:
-            cod_fb = pool.dropna(subset=["total_note_interest", "aggregate_note_balance"]).copy()
-            cod_fb = cod_fb[cod_fb["aggregate_note_balance"] > 0].copy()
-            if not cod_fb.empty:
-                cod_fb["cost_of_debt"] = cod_fb["total_note_interest"] / cod_fb["aggregate_note_balance"] * 12
-                bad = cod_fb["cost_of_debt"] > 0.15  # Only reject impossibly high values
-                if bad.any():
-                    logger.warning(f"[{deal}] Filtered {bad.sum()}/{len(cod_fb)} CoD fallback values > 15%")
-                cod = cod_fb[~bad][["period", "cost_of_debt"]] if bad.any() else cod_fb[["period", "cost_of_debt"]]
-    if cod.empty and not notes_df.empty and not pool.empty:
-        # Last resort: use fixed weighted avg from notes as flat line
+
+    # Method 3 (last resort): flat line from notes table
+    if len(cod) < 3 and not notes_df.empty and not pool.empty:
         flat_rate = None
         if "original_balance" in notes_df.columns and notes_df["original_balance"].notna().any():
             ob = notes_df["original_balance"].fillna(0)
             if ob.sum() > 0:
-                flat_rate = (notes_df["coupon_rate"] * ob).sum() / ob.sum()
+                flat_rate = float((notes_df["coupon_rate"] * ob).sum() / ob.sum())
         if flat_rate is None:
-            # Simple average of coupon rates if no balance data
-            flat_rate = notes_df["coupon_rate"].mean()
+            flat_rate = float(notes_df["coupon_rate"].mean())
         if flat_rate and flat_rate > 0:
             cod = pd.DataFrame({"period": pool["period"], "cost_of_debt": flat_rate})
-            logger.info(f"[{deal}] Using flat-line CoD fallback: {flat_rate:.4%}")
+            logger.info(f"[{deal}] Using flat-line CoD: {flat_rate:.4%}")
     # 3) Render separate charts for consumer rate and cost of debt
     if not wac.empty:
         h += chart([{"x": wac["period"].tolist(), "y": wac["weighted_avg_apr"].tolist(),
@@ -246,20 +251,6 @@ def generate_deal_content(deal):
     if not cod.empty:
         cod_min, cod_max = cod["cost_of_debt"].min(), cod["cost_of_debt"].max()
         logger.info(f"[{deal}] CoD range: {cod_min:.4%} - {cod_max:.4%} (n={len(cod)})")
-        if cod_max > 0.15 or cod_min < 0.001:
-            logger.warning(f"[{deal}] CoD values look suspicious — check total_note_interest extraction")
-        # Debug: if only 1 point, add diagnostics as chart annotation
-        if len(cod) <= 2:
-            _nb_cols = [c for c in pool.columns if "note_balance" in c]
-            _nb_nonnull = {c: int(pool[c].notna().sum()) for c in _nb_cols}
-            _tni = int(pool["total_note_interest"].notna().sum()) if "total_note_interest" in pool.columns else 0
-            _anb = int((pool["aggregate_note_balance"].fillna(0) > 0).sum()) if "aggregate_note_balance" in pool.columns else 0
-            _notes_n = len(notes_df) if not notes_df.empty else 0
-            _notes_ob = "original_balance" in notes_df.columns and notes_df["original_balance"].notna().any() if not notes_df.empty else False
-            logger.warning(f"[{deal}] CoD only {len(cod)} points! note_bal_nonnull={_nb_nonnull}, "
-                           f"total_note_interest_nonnull={_tni}, agg_note_bal_gt0={_anb}, "
-                           f"notes_count={_notes_n}, notes_has_orig_bal={_notes_ob}")
-            h += f'<p style="color:red;font-size:12px">CoD debug [{deal}]: {len(cod)} pts, note_bal={_nb_nonnull}, tni={_tni}, anb={_anb}, notes={_notes_n}, orig_bal={_notes_ob}</p>'
         h += chart([{"x": cod["period"].tolist(), "y": cod["cost_of_debt"].tolist(),
                      "type": "scatter", "line": {"color": "#D32F2F"}}],
                    {"title": "Avg Trust Cost of Debt", "yaxis": {"tickformat": ".2%"}, "hovermode": "x unified",
@@ -728,50 +719,35 @@ def generate_comparison_content(deals, title):
 def generate_model_content():
     """Generate HTML for the Default Model analysis section."""
     mr = None
-    _debug_info = []  # Collect debug info to show in HTML if model fails
     try:
         mr = q("SELECT value FROM model_results WHERE key='default_model'")
-        _debug_info.append(f"Pre-computed results: {'found' if not mr.empty else 'empty'}")
-    except Exception as e:
-        _debug_info.append(f"Pre-computed results query failed: {e}")
+    except Exception:
+        pass
 
     # If no pre-computed results, try to run the model inline
     if mr is None or mr.empty:
-        _debug_info.append("Running model inline...")
+        logger.info("No pre-computed model results found, running model inline...")
         try:
             import importlib.util
             model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "default_model.py")
-            _debug_info.append(f"Model path: {model_path}, exists: {os.path.exists(model_path)}")
             spec = importlib.util.spec_from_file_location("default_model", model_path)
             dm = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(dm)
             dm.DASHBOARD_DB = ACTIVE_DB
             dm.OUTPUT_JSON = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "deploy", "LAST_MODEL_RESULTS.json")
-            _debug_info.append(f"ACTIVE_DB: {ACTIVE_DB}, exists: {os.path.exists(ACTIVE_DB)}")
             df = dm.load_data(ACTIVE_DB)
-            _debug_info.append(f"Loaded {len(df)} loans, columns: {list(df.columns)}")
+            logger.info(f"Inline model: loaded {len(df)} loans")
             if len(df) > 0:
-                _debug_info.append(f"Non-null counts: {df[['fico','ltv','pti','rate','term','amount']].notna().sum().to_dict()}")
                 df, feature_cols = dm.engineer_features(df)
-                model_df = df.dropna(subset=feature_cols + ["defaulted"])
-                _debug_info.append(f"After dropna: {len(model_df)} rows, defaults: {int(model_df['defaulted'].sum())}")
                 results = dm.train_models(df, feature_cols)
                 if results:
                     dm.save_results(results, ACTIVE_DB, dm.OUTPUT_JSON)
                     mr = q("SELECT value FROM model_results WHERE key='default_model'")
-                    _debug_info.append("SUCCESS")
-                else:
-                    _debug_info.append("train_models returned None (insufficient data?)")
-            else:
-                _debug_info.append("No loans loaded from DB")
         except Exception as e:
-            import traceback
-            _debug_info.append(f"EXCEPTION: {e}")
-            _debug_info.append(traceback.format_exc())
+            logger.error(f"Inline model failed: {e}")
 
     if mr is None or mr.empty:
-        debug_html = "<br>".join(f"<code>{line}</code>" for line in _debug_info)
-        return f"<h3>Default Model — Debug Info</h3><div style='background:#fff3cd;padding:12px;border-radius:6px;font-size:13px'>{debug_html}</div>"
+        return "<p>Default model could not be computed.</p>"
 
     results = json.loads(mr.iloc[0]["value"])
     ds = results["dataset"]
