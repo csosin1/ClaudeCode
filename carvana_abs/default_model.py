@@ -19,6 +19,12 @@ import sys
 import numpy as np
 import pandas as pd
 
+try:
+    import sklearn
+    HAS_SKLEARN = True
+except ImportError:
+    HAS_SKLEARN = False
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from carvana_abs.config import DB_PATH
 
@@ -279,6 +285,10 @@ def save_results(results, db_path, json_path):
 
 
 def main():
+    if not HAS_SKLEARN:
+        logger.error("scikit-learn is not installed. Run: pip install scikit-learn")
+        return
+
     db = DASHBOARD_DB if os.path.exists(DASHBOARD_DB) else DB_PATH
     if not os.path.exists(db):
         logger.error(f"No database found at {db}")
