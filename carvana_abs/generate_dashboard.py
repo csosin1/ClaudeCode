@@ -248,6 +248,18 @@ def generate_deal_content(deal):
         logger.info(f"[{deal}] CoD range: {cod_min:.4%} - {cod_max:.4%} (n={len(cod)})")
         if cod_max > 0.15 or cod_min < 0.001:
             logger.warning(f"[{deal}] CoD values look suspicious — check total_note_interest extraction")
+        # Debug: if only 1 point, add diagnostics as chart annotation
+        if len(cod) <= 2:
+            _nb_cols = [c for c in pool.columns if "note_balance" in c]
+            _nb_nonnull = {c: int(pool[c].notna().sum()) for c in _nb_cols}
+            _tni = int(pool["total_note_interest"].notna().sum()) if "total_note_interest" in pool.columns else 0
+            _anb = int((pool["aggregate_note_balance"].fillna(0) > 0).sum()) if "aggregate_note_balance" in pool.columns else 0
+            _notes_n = len(notes_df) if not notes_df.empty else 0
+            _notes_ob = "original_balance" in notes_df.columns and notes_df["original_balance"].notna().any() if not notes_df.empty else False
+            logger.warning(f"[{deal}] CoD only {len(cod)} points! note_bal_nonnull={_nb_nonnull}, "
+                           f"total_note_interest_nonnull={_tni}, agg_note_bal_gt0={_anb}, "
+                           f"notes_count={_notes_n}, notes_has_orig_bal={_notes_ob}")
+            h += f'<p style="color:red;font-size:12px">CoD debug [{deal}]: {len(cod)} pts, note_bal={_nb_nonnull}, tni={_tni}, anb={_anb}, notes={_notes_n}, orig_bal={_notes_ob}</p>'
         h += chart([{"x": cod["period"].tolist(), "y": cod["cost_of_debt"].tolist(),
                      "type": "scatter", "line": {"color": "#D32F2F"}}],
                    {"title": "Avg Trust Cost of Debt", "yaxis": {"tickformat": ".2%"}, "hovermode": "x unified",
@@ -716,40 +728,50 @@ def generate_comparison_content(deals, title):
 def generate_model_content():
     """Generate HTML for the Default Model analysis section."""
     mr = None
+    _debug_info = []  # Collect debug info to show in HTML if model fails
     try:
         mr = q("SELECT value FROM model_results WHERE key='default_model'")
-    except Exception:
-        pass
+        _debug_info.append(f"Pre-computed results: {'found' if not mr.empty else 'empty'}")
+    except Exception as e:
+        _debug_info.append(f"Pre-computed results query failed: {e}")
 
     # If no pre-computed results, try to run the model inline
     if mr is None or mr.empty:
-        logger.info("No pre-computed model results found, running model inline...")
+        _debug_info.append("Running model inline...")
         try:
-            # Use absolute path import that works regardless of cwd
             import importlib.util
             model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "default_model.py")
+            _debug_info.append(f"Model path: {model_path}, exists: {os.path.exists(model_path)}")
             spec = importlib.util.spec_from_file_location("default_model", model_path)
             dm = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(dm)
             dm.DASHBOARD_DB = ACTIVE_DB
             dm.OUTPUT_JSON = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "deploy", "LAST_MODEL_RESULTS.json")
+            _debug_info.append(f"ACTIVE_DB: {ACTIVE_DB}, exists: {os.path.exists(ACTIVE_DB)}")
             df = dm.load_data(ACTIVE_DB)
-            logger.info(f"Inline model: loaded {len(df)} loans")
+            _debug_info.append(f"Loaded {len(df)} loans, columns: {list(df.columns)}")
             if len(df) > 0:
+                _debug_info.append(f"Non-null counts: {df[['fico','ltv','pti','rate','term','amount']].notna().sum().to_dict()}")
                 df, feature_cols = dm.engineer_features(df)
+                model_df = df.dropna(subset=feature_cols + ["defaulted"])
+                _debug_info.append(f"After dropna: {len(model_df)} rows, defaults: {int(model_df['defaulted'].sum())}")
                 results = dm.train_models(df, feature_cols)
                 if results:
                     dm.save_results(results, ACTIVE_DB, dm.OUTPUT_JSON)
                     mr = q("SELECT value FROM model_results WHERE key='default_model'")
-                    logger.info("Inline model: success!")
+                    _debug_info.append("SUCCESS")
                 else:
-                    logger.error("Inline model: train_models returned None")
+                    _debug_info.append("train_models returned None (insufficient data?)")
+            else:
+                _debug_info.append("No loans loaded from DB")
         except Exception as e:
             import traceback
-            logger.error(f"Inline model run failed: {e}\n{traceback.format_exc()}")
+            _debug_info.append(f"EXCEPTION: {e}")
+            _debug_info.append(traceback.format_exc())
 
     if mr is None or mr.empty:
-        return "<p>Default model not yet computed. Run default_model.py.</p>"
+        debug_html = "<br>".join(f"<code>{line}</code>" for line in _debug_info)
+        return f"<h3>Default Model — Debug Info</h3><div style='background:#fff3cd;padding:12px;border-radius:6px;font-size:13px'>{debug_html}</div>"
 
     results = json.loads(mr.iloc[0]["value"])
     ds = results["dataset"]
