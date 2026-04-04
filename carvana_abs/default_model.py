@@ -56,27 +56,18 @@ def load_data(db_path):
 
 def engineer_features(df):
     """Create model features from raw data."""
-    # Parse origination date
-    from datetime import datetime
-    def parse_date(d):
-        if not d:
-            return None
-        for fmt in ["%m-%d-%Y", "%m/%d/%Y", "%Y-%m-%d", "%m-%d-%y"]:
-            try:
-                return datetime.strptime(str(d).strip(), fmt)
-            except ValueError:
-                continue
-        return None
+    # Parse origination date — try multiple formats via pd.to_datetime (vectorized)
+    orig = df["origination_date"].astype(str).str.strip()
+    for fmt in ["%m-%d-%Y", "%m/%d/%Y", "%Y-%m-%d", "%m-%d-%y"]:
+        parsed = pd.to_datetime(orig, format=fmt, errors="coerce")
+        mask = df["orig_dt"].isna() if "orig_dt" in df.columns else pd.Series(True, index=df.index)
+        if "orig_dt" not in df.columns:
+            df["orig_dt"] = parsed
+        else:
+            df.loc[mask, "orig_dt"] = parsed[mask]
 
-    df["orig_dt"] = df["origination_date"].apply(parse_date)
-    df["orig_month"] = df["orig_dt"].apply(lambda d: d.month if d else None)
-    df["orig_year"] = df["orig_dt"].apply(lambda d: d.year if d else None)
-
-    # Monthly payment estimate
-    df["est_payment"] = df.apply(
-        lambda r: (r["amount"] * r["rate"] / 12) / (1 - (1 + r["rate"] / 12) ** -r["term"])
-        if r["rate"] and r["rate"] > 0 and r["term"] and r["term"] > 0 and r["amount"] and r["amount"] > 0
-        else None, axis=1)
+    df["orig_month"] = df["orig_dt"].dt.month
+    df["orig_year"] = df["orig_dt"].dt.year
 
     # Feature columns
     feature_cols = ["fico", "ltv", "pti", "rate", "term", "amount", "orig_month", "orig_year"]
@@ -150,7 +141,7 @@ def train_models(df, feature_cols):
     logger.info(f"Logistic Regression: AUC={results['models']['logistic_regression']['auc_roc']}")
 
     # --- Random Forest ---
-    rf = RandomForestClassifier(n_estimators=200, max_depth=10, min_samples_leaf=50,
+    rf = RandomForestClassifier(n_estimators=100, max_depth=8, min_samples_leaf=50,
                                 random_state=42, n_jobs=-1)
     rf.fit(X_train, y_train)
     rf_probs = rf.predict_proba(X_test)[:, 1]
