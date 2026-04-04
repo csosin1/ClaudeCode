@@ -182,7 +182,10 @@ def generate_deal_content(deal):
     try:
         notes_df = q("SELECT class, coupon_rate, original_balance FROM notes WHERE deal=? AND coupon_rate IS NOT NULL", (deal,))
     except Exception:
-        notes_df = pd.DataFrame()  # notes table may not exist yet
+        try:
+            notes_df = q("SELECT class, coupon_rate FROM notes WHERE deal=? AND coupon_rate IS NOT NULL", (deal,))
+        except Exception:
+            notes_df = pd.DataFrame()  # notes table may not exist yet
     if not notes_df.empty and not pool.empty:
         # Build a rate lookup: class -> coupon_rate
         rate_lookup = dict(zip(notes_df["class"], notes_df["coupon_rate"]))
@@ -220,13 +223,18 @@ def generate_deal_content(deal):
                     logger.warning(f"[{deal}] Filtered {bad.sum()}/{len(cod_fb)} CoD fallback values > 15%")
                 cod = cod_fb[~bad][["period", "cost_of_debt"]] if bad.any() else cod_fb[["period", "cost_of_debt"]]
     if cod.empty and not notes_df.empty and not pool.empty:
-        # Last resort: use fixed weighted avg from notes initial balances as flat line
-        if "original_balance" in notes_df.columns:
-            w_sum = (notes_df["coupon_rate"] * notes_df["original_balance"].fillna(0)).sum()
-            t_bal = notes_df["original_balance"].fillna(0).sum()
-            if t_bal > 0:
-                flat_rate = w_sum / t_bal
-                cod = pd.DataFrame({"period": pool["period"], "cost_of_debt": flat_rate})
+        # Last resort: use fixed weighted avg from notes as flat line
+        flat_rate = None
+        if "original_balance" in notes_df.columns and notes_df["original_balance"].notna().any():
+            ob = notes_df["original_balance"].fillna(0)
+            if ob.sum() > 0:
+                flat_rate = (notes_df["coupon_rate"] * ob).sum() / ob.sum()
+        if flat_rate is None:
+            # Simple average of coupon rates if no balance data
+            flat_rate = notes_df["coupon_rate"].mean()
+        if flat_rate and flat_rate > 0:
+            cod = pd.DataFrame({"period": pool["period"], "cost_of_debt": flat_rate})
+            logger.info(f"[{deal}] Using flat-line CoD fallback: {flat_rate:.4%}")
     # 3) Render separate charts for consumer rate and cost of debt
     if not wac.empty:
         h += chart([{"x": wac["period"].tolist(), "y": wac["weighted_avg_apr"].tolist(),
@@ -717,19 +725,28 @@ def generate_model_content():
     if mr is None or mr.empty:
         logger.info("No pre-computed model results found, running model inline...")
         try:
-            from carvana_abs.default_model import load_data, engineer_features, train_models, save_results
-            import carvana_abs.default_model as dm
+            # Use absolute path import that works regardless of cwd
+            import importlib.util
+            model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "default_model.py")
+            spec = importlib.util.spec_from_file_location("default_model", model_path)
+            dm = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(dm)
             dm.DASHBOARD_DB = ACTIVE_DB
             dm.OUTPUT_JSON = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "deploy", "LAST_MODEL_RESULTS.json")
-            df = load_data(ACTIVE_DB)
+            df = dm.load_data(ACTIVE_DB)
+            logger.info(f"Inline model: loaded {len(df)} loans")
             if len(df) > 0:
-                df, feature_cols = engineer_features(df)
-                results = train_models(df, feature_cols)
+                df, feature_cols = dm.engineer_features(df)
+                results = dm.train_models(df, feature_cols)
                 if results:
-                    save_results(results, ACTIVE_DB, dm.OUTPUT_JSON)
+                    dm.save_results(results, ACTIVE_DB, dm.OUTPUT_JSON)
                     mr = q("SELECT value FROM model_results WHERE key='default_model'")
+                    logger.info("Inline model: success!")
+                else:
+                    logger.error("Inline model: train_models returned None")
         except Exception as e:
-            logger.error(f"Inline model run failed: {e}")
+            import traceback
+            logger.error(f"Inline model run failed: {e}\n{traceback.format_exc()}")
 
     if mr is None or mr.empty:
         return "<p>Default model not yet computed. Run default_model.py.</p>"

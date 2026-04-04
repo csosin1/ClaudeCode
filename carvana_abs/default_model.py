@@ -21,12 +21,17 @@ import sys
 import numpy as np
 import pandas as pd
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from carvana_abs.config import DB_PATH
+_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+_PROJECT_DIR = os.path.dirname(_THIS_DIR)
+sys.path.insert(0, _PROJECT_DIR)
+try:
+    from carvana_abs.config import DB_PATH
+except ImportError:
+    # Fallback if import fails (e.g. when loaded via importlib)
+    DB_PATH = os.path.join(_THIS_DIR, "db", "carvana_abs.db")
 
 DASHBOARD_DB = os.path.join(os.path.dirname(DB_PATH), "dashboard.db")
-OUTPUT_JSON = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                           "deploy", "LAST_MODEL_RESULTS.json")
+OUTPUT_JSON = os.path.join(_PROJECT_DIR, "deploy", "LAST_MODEL_RESULTS.json")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
