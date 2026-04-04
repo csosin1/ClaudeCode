@@ -187,10 +187,20 @@ def parse_servicer_certificate(html_content: str) -> dict:
     all_text = re.sub(r'\(\s*(\d+)\s*\)', r'(\1)', all_text)
     all_text = re.sub(r'(\d)\s+%', r'\1%', all_text)
 
-    # Extract residual cash: "18 To holders of the certificates, any remaining amounts XXXX"
-    m = re.search(r'(?:18|18\.)\s+[Tt]o\s+holders?\s+of\s+the\s+certificates?,?\s+any\s+remaining\s+amounts?\s+([\d,]+\.?\d*)', all_text)
-    if m:
-        best_result["residual_cash"] = _clean_number(m.group(1))
+    # Extract residual cash: various formats across prime and non-prime deals
+    # Prime: "18 To holders of the certificates, any remaining amounts XXXX"
+    # Non-prime: "To the holders of the Certificates, any remaining amounts XXXX"
+    # Also try: "residual" or "remaining amounts" near a dollar amount
+    residual_patterns = [
+        r'(?:\d+\.?\s+)?[Tt]o\s+(?:the\s+)?holders?\s+of\s+the\s+[Cc]ertificates?,?\s+any\s+remaining\s+amounts?\s+([\d,]+\.?\d*)',
+        r'[Rr]esidual\s+(?:[Cc]ash\s+)?(?:[Dd]istribution\s+)?(?:[Aa]mount\s+)?([\d,]+\.?\d*)',
+        r'[Rr]emaining\s+[Aa]mounts?\s+(?:to\s+)?(?:the\s+)?(?:[Cc]ertificate)?(?:holders?)?\s*[:\s]?\s*([\d,]+\.?\d*)',
+    ]
+    for pattern in residual_patterns:
+        m = re.search(pattern, all_text)
+        if m and _clean_number(m.group(1)):
+            best_result["residual_cash"] = _clean_number(m.group(1))
+            break
 
     # Extract total deposited to collection account
     m = re.search(r'[Tt]otal\s+[Dd]eposited\s+to\s+[Cc]ollection\s+[Aa]ccount\s+([\d,]+\.?\d*)', all_text)
