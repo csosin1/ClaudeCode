@@ -31,6 +31,19 @@ def main():
         logger.info("Adding weighted_avg_coupon column to monthly_summary...")
         cursor.execute("ALTER TABLE monthly_summary ADD COLUMN weighted_avg_coupon REAL")
         conn.commit()
+
+    # Ensure notes table exists
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='notes'")
+    if not cursor.fetchone():
+        logger.info("Creating notes table...")
+        cursor.execute("""CREATE TABLE IF NOT EXISTS notes (
+            deal TEXT NOT NULL, class TEXT NOT NULL,
+            original_balance REAL, coupon_rate REAL, rate_type TEXT,
+            spread REAL, benchmark TEXT, rating_moodys TEXT,
+            rating_sp TEXT, rating_kbra TEXT,
+            expected_maturity TEXT, legal_maturity TEXT,
+            PRIMARY KEY (deal, class))""")
+        conn.commit()
     conn.close()
 
     for deal in get_active_deals():

@@ -177,18 +177,41 @@ def generate_deal_content(deal):
         if not wac_ms.empty:
             wac_ms = wac_ms.rename(columns={"weighted_avg_coupon": "weighted_avg_apr"})
             wac = wac_ms
-    # 2) Cost of Debt: total_note_interest / aggregate_note_balance * 12
+    # 2) Cost of Debt: weighted avg of note coupon rates × note balances
     cod = pd.DataFrame()
-    if not pool.empty and "total_note_interest" in pool.columns and "aggregate_note_balance" in pool.columns:
-        cod = pool.dropna(subset=["total_note_interest", "aggregate_note_balance"]).copy()
-        cod = cod[cod["aggregate_note_balance"] > 0].copy()
-        if not cod.empty:
-            cod["cost_of_debt"] = cod["total_note_interest"] / cod["aggregate_note_balance"] * 12
-            # Sanity filter: auto ABS trust cost of debt should be 0.5-15%
-            bad = (cod["cost_of_debt"] > 0.15) | (cod["cost_of_debt"] < 0.005)
-            if bad.any():
-                logger.warning(f"[{deal}] Filtered {bad.sum()}/{len(cod)} CoD values outside 0.5-15% range")
-                cod = cod[~bad]
+    notes_df = q("SELECT class, coupon_rate FROM notes WHERE deal=? AND coupon_rate IS NOT NULL", (deal,))
+    if not notes_df.empty and not pool.empty:
+        # Build a rate lookup: class -> coupon_rate
+        rate_lookup = dict(zip(notes_df["class"], notes_df["coupon_rate"]))
+        bal_cols = {"A1": "note_balance_a1", "A2": "note_balance_a2", "A3": "note_balance_a3",
+                    "A4": "note_balance_a4", "B": "note_balance_b", "C": "note_balance_c",
+                    "D": "note_balance_d", "N": "note_balance_n"}
+        # For each period, compute weighted avg rate across note classes
+        cod_rows = []
+        for _, row in pool.iterrows():
+            weighted_sum = 0
+            total_bal = 0
+            for cls, col in bal_cols.items():
+                if col in pool.columns and cls in rate_lookup:
+                    bal = row.get(col)
+                    if bal and bal > 0:
+                        weighted_sum += rate_lookup[cls] * bal
+                        total_bal += bal
+            if total_bal > 0:
+                cod_rows.append({"period": row["period"], "cost_of_debt": weighted_sum / total_bal})
+        if cod_rows:
+            cod = pd.DataFrame(cod_rows)
+    if cod.empty:
+        # Fallback: total_note_interest / aggregate_note_balance * 12 (with sanity filter)
+        if not pool.empty and "total_note_interest" in pool.columns and "aggregate_note_balance" in pool.columns:
+            cod_fb = pool.dropna(subset=["total_note_interest", "aggregate_note_balance"]).copy()
+            cod_fb = cod_fb[cod_fb["aggregate_note_balance"] > 0].copy()
+            if not cod_fb.empty:
+                cod_fb["cost_of_debt"] = cod_fb["total_note_interest"] / cod_fb["aggregate_note_balance"] * 12
+                bad = (cod_fb["cost_of_debt"] > 0.15) | (cod_fb["cost_of_debt"] < 0.005)
+                if bad.any():
+                    logger.warning(f"[{deal}] Filtered {bad.sum()}/{len(cod_fb)} CoD fallback values outside 0.5-15%")
+                cod = cod_fb[~bad][["period", "cost_of_debt"]] if bad.any() else cod_fb[["period", "cost_of_debt"]]
     # 3) Render separate charts for consumer rate and cost of debt
     if not wac.empty:
         h += chart([{"x": wac["period"].tolist(), "y": wac["weighted_avg_apr"].tolist(),
@@ -489,24 +512,32 @@ def generate_comparison_content(deals, title):
                 if curr_wac is None and wac_ms.iloc[-1]["weighted_avg_coupon"]:
                     curr_wac = wac_ms.iloc[-1]["weighted_avg_coupon"]
 
-        # ── Cost of Debt (init + current) ──
+        # ── Cost of Debt (from notes table: weighted avg coupon rate) ──
         init_cod = None
         curr_cod = None
-        first_cod = q("SELECT total_note_interest, aggregate_note_balance FROM pool_performance WHERE deal=? AND total_note_interest IS NOT NULL AND aggregate_note_balance > 0 ORDER BY distribution_date LIMIT 1", (deal,))
-        if not first_cod.empty:
-            init_cod = first_cod.iloc[0]["total_note_interest"] / first_cod.iloc[0]["aggregate_note_balance"] * 12
-        last_cod = q("SELECT total_note_interest, aggregate_note_balance FROM pool_performance WHERE deal=? AND total_note_interest IS NOT NULL AND aggregate_note_balance > 0 ORDER BY distribution_date DESC LIMIT 1", (deal,))
-        if not last_cod.empty:
-            curr_cod = last_cod.iloc[0]["total_note_interest"] / last_cod.iloc[0]["aggregate_note_balance"] * 12
-        # Sanity filter: CoD should be 0.5%-15% annualized for auto ABS
-        for label in ["init_cod", "curr_cod"]:
-            val = locals()[label]
-            if val is not None and (val < 0.005 or val > 0.15):
-                logger.warning(f"  [{deal}] {label}={val:.4%} outside 0.5-15% — filtering out")
-                if label == "init_cod":
-                    init_cod = None
-                else:
-                    curr_cod = None
+        notes_df = q("SELECT class, coupon_rate FROM notes WHERE deal=? AND coupon_rate IS NOT NULL", (deal,))
+        if not notes_df.empty:
+            rate_lookup = dict(zip(notes_df["class"], notes_df["coupon_rate"]))
+            bal_cols = {"A1": "note_balance_a1", "A2": "note_balance_a2", "A3": "note_balance_a3",
+                        "A4": "note_balance_a4", "B": "note_balance_b", "C": "note_balance_c",
+                        "D": "note_balance_d", "N": "note_balance_n"}
+            for label, order in [("init", "ASC"), ("curr", "DESC")]:
+                pp = q(f"SELECT * FROM pool_performance WHERE deal=? ORDER BY distribution_date {order} LIMIT 1", (deal,))
+                if not pp.empty:
+                    row = pp.iloc[0]
+                    w_sum, t_bal = 0, 0
+                    for cls, col in bal_cols.items():
+                        if col in pp.columns and cls in rate_lookup:
+                            bal = row.get(col)
+                            if bal and bal > 0:
+                                w_sum += rate_lookup[cls] * bal
+                                t_bal += bal
+                    if t_bal > 0:
+                        val = w_sum / t_bal
+                        if label == "init":
+                            init_cod = val
+                        else:
+                            curr_cod = val
         logger.info(f"  [{deal}] Compare: init_wac={init_wac}, curr_wac={curr_wac}, "
                     f"init_cod={init_cod}, curr_cod={curr_cod}")
 

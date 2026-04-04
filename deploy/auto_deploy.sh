@@ -29,8 +29,8 @@ if [ "$LOCAL" != "$REMOTE" ]; then
     /opt/abs-venv/bin/python /opt/abs-dashboard/carvana_abs/export_dashboard_db.py >> /var/log/auto-deploy.log 2>&1 || true
     /opt/abs-venv/bin/python /opt/abs-dashboard/carvana_abs/generate_preview.py >> /var/log/auto-deploy.log 2>&1 || true
 
-    # Run data check and validate the generated HTML
-    /opt/abs-venv/bin/python /opt/abs-dashboard/carvana_abs/check_data.py >> /var/log/auto-deploy.log 2>&1 || true
+    # Run data validation and check the generated HTML
+    /opt/abs-venv/bin/python /opt/abs-dashboard/carvana_abs/validate_data.py >> /var/log/auto-deploy.log 2>&1 || true
     /opt/abs-venv/bin/python /opt/abs-dashboard/carvana_abs/validate_dashboard.py > /opt/abs-dashboard/deploy/LAST_VALIDATION.txt 2>&1
     cat /opt/abs-dashboard/deploy/LAST_VALIDATION.txt >> /var/log/auto-deploy.log
     /opt/abs-venv/bin/python /opt/abs-dashboard/carvana_abs/deploy_status.py >> /var/log/auto-deploy.log 2>&1 || true

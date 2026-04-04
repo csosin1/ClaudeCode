@@ -319,6 +319,21 @@ def _parse_from_numbered_text(text: str) -> dict:
         if field_num in fields:
             data[col_name] = _parse_numbered_value(fields[field_num]["raw"])["value"]
 
+    # --- Note Rates (typically 6 fields before balance: 14,20→14, 26→20 wait...)
+    # Standard ABS servicer cert layout per class:
+    #   Rate, Interest Distributable, Interest Paid, Shortfall, Balance Before, Principal, Balance After
+    # So rate field = balance field - 6
+    note_rate_map = {
+        14: "note_rate_a1", 20: "note_rate_a2", 26: "note_rate_a3",
+        32: "note_rate_a4", 38: "note_rate_b", 44: "note_rate_c",
+        50: "note_rate_d", 55: "note_rate_n",
+    }
+    for field_num, col_name in note_rate_map.items():
+        if field_num in fields:
+            pct = _parse_numbered_value(fields[field_num]["raw"])["pct"]
+            if pct and 0.1 < pct < 30:  # Sanity: rate should be 0.1% to 30%
+                data[col_name] = pct / 100.0  # Store as decimal
+
     # Aggregate note balance (field 76 or sum)
     if 76 in fields:
         data["aggregate_note_balance"] = _parse_numbered_value(fields[76]["raw"])["value"]
@@ -452,6 +467,24 @@ def _parse_from_tables(tables) -> dict:
         if val is not None:
             data[note_key] = val
 
+    # Note rates (from table text)
+    for rate_key, pattern in [
+        ("note_rate_a1", r"class\s+a-?1\b.*(?:note\s+)?(?:interest\s+)?rate"),
+        ("note_rate_a2", r"class\s+a-?2\b.*(?:note\s+)?(?:interest\s+)?rate"),
+        ("note_rate_a3", r"class\s+a-?3\b.*(?:note\s+)?(?:interest\s+)?rate"),
+        ("note_rate_a4", r"class\s+a-?4\b.*(?:note\s+)?(?:interest\s+)?rate"),
+        ("note_rate_b", r"class\s+b\b.*(?:note\s+)?(?:interest\s+)?rate"),
+        ("note_rate_c", r"class\s+c\b.*(?:note\s+)?(?:interest\s+)?rate"),
+        ("note_rate_d", r"class\s+d\b.*(?:note\s+)?(?:interest\s+)?rate"),
+        ("note_rate_n", r"class\s+n\b.*(?:note\s+)?(?:interest\s+)?rate"),
+    ]:
+        val = _clean_number(find_val(pattern))
+        if val is not None:
+            if val > 1:  # Percentage, convert to decimal
+                val = val / 100.0
+            if 0.001 < val < 0.30:  # Sanity: 0.1% to 30%
+                data[rate_key] = val
+
     # WAC, WAM
     data["weighted_avg_apr"] = _clean_number(find_val(r"weighted\s+average\s+apr"))
     if data.get("weighted_avg_apr") and data["weighted_avg_apr"] > 1:
@@ -556,6 +589,30 @@ def store_pool_data(html_content: str, accession_number: str,
 
         cursor.execute("UPDATE filings SET ingested_pool = 1 WHERE accession_number = ?",
                         (accession_number,))
+
+        # Populate/update notes table with coupon rates from this cert
+        note_class_map = {
+            "A1": "note_rate_a1", "A2": "note_rate_a2", "A3": "note_rate_a3",
+            "A4": "note_rate_a4", "B": "note_rate_b", "C": "note_rate_c",
+            "D": "note_rate_d", "N": "note_rate_n",
+        }
+        balance_map = {
+            "A1": "note_balance_a1", "A2": "note_balance_a2", "A3": "note_balance_a3",
+            "A4": "note_balance_a4", "B": "note_balance_b", "C": "note_balance_c",
+            "D": "note_balance_d", "N": "note_balance_n",
+        }
+        for cls, rate_key in note_class_map.items():
+            rate = data.get(rate_key)
+            if rate:
+                # Ensure notes table exists (may not on first run)
+                try:
+                    cursor.execute("""
+                        INSERT OR REPLACE INTO notes (deal, class, coupon_rate, rate_type)
+                        VALUES (?, ?, ?, 'FIXED')
+                    """, (deal, cls, rate))
+                except Exception:
+                    pass  # Table may not exist yet on older DBs
+
         conn.commit()
         logger.info(f"Stored pool performance data for {deal} / {data['distribution_date']}")
         return True
