@@ -695,12 +695,32 @@ def generate_comparison_content(deals, title):
 
 def generate_model_content():
     """Generate HTML for the Default Model analysis section."""
+    mr = None
     try:
         mr = q("SELECT value FROM model_results WHERE key='default_model'")
     except Exception:
-        return "<p>Default model not yet computed. Run default_model.py first.</p>"
-    if mr.empty:
-        return "<p>Default model not yet computed. Run default_model.py first.</p>"
+        pass
+
+    # If no pre-computed results, try to run the model inline
+    if mr is None or mr.empty:
+        logger.info("No pre-computed model results found, running model inline...")
+        try:
+            from carvana_abs.default_model import load_data, engineer_features, train_models, save_results
+            import carvana_abs.default_model as dm
+            dm.DASHBOARD_DB = ACTIVE_DB
+            dm.OUTPUT_JSON = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "deploy", "LAST_MODEL_RESULTS.json")
+            df = load_data(ACTIVE_DB)
+            if len(df) > 0:
+                df, feature_cols = engineer_features(df)
+                results = train_models(df, feature_cols)
+                if results:
+                    save_results(results, ACTIVE_DB, dm.OUTPUT_JSON)
+                    mr = q("SELECT value FROM model_results WHERE key='default_model'")
+        except Exception as e:
+            logger.error(f"Inline model run failed: {e}")
+
+    if mr is None or mr.empty:
+        return "<p>Default model not yet computed. Ensure scikit-learn is installed and run default_model.py.</p>"
 
     results = json.loads(mr.iloc[0]["value"])
     ds = results["dataset"]
