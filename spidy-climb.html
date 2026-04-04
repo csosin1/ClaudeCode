@@ -109,6 +109,15 @@
     font-weight: bold;
     text-shadow: 0 0 8px rgba(0,0,0,0.8);
   }
+  #livesDisplay.flash {
+    animation: livesFlash 0.6s ease;
+  }
+  @keyframes livesFlash {
+    0%, 100% { color: #fff; }
+    25% { color: #ff4081; text-shadow: 0 0 15px #ff4081; }
+    50% { color: #fff; text-shadow: 0 0 20px #fff; }
+    75% { color: #ff4081; text-shadow: 0 0 15px #ff4081; }
+  }
   #levelBanner {
     position: absolute;
     top: 50%;
@@ -135,15 +144,16 @@
   </div>
   <div id="levelBanner"></div>
   <div id="startScreen">
-    <h1>🕷️ SPIDY CLIMB 🕷️</h1>
+    <h1>SPIDY CLIMB</h1>
     <div class="subtitle">Sawyer's Super Spider Adventure!</div>
     <div class="instructions">
-      <span>⬆️ Up Arrow</span> - Climb Up<br>
-      <span>⬇️ Down Arrow</span> - Climb Down<br>
-      <span>⬅️ Left Arrow</span> - Move Left<br>
-      <span>➡️ Right Arrow</span> - Move Right<br><br>
-      Dodge villains & obstacles!<br>
-      Collect webs for bonus points! 🕸️
+      <span>Up Arrow</span> - Climb Up<br>
+      <span>Down Arrow</span> - Climb Down<br>
+      <span>Left Arrow</span> - Move Left<br>
+      <span>Right Arrow</span> - Move Right<br><br>
+      Dodge villains &amp; obstacles!<br>
+      Collect webs for bonus points!<br>
+      Collect hearts to restore lives!
     </div>
     <button class="btn" onclick="startGame()">SWING IN!</button>
   </div>
@@ -155,7 +165,6 @@
     <button class="btn" onclick="startGame()">TRY AGAIN!</button>
   </div>
 </div>
-
 <script>
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
@@ -164,7 +173,7 @@ canvas.width = W;
 canvas.height = H;
 
 // Game state
-let spidy, obstacles, collectibles, particles, buildings;
+let spidy, obstacles, collectibles, particles, buildings, floatingTexts;
 let score, level, lives, highScore, gameRunning, frameCount;
 let keys = {};
 let levelBannerTimer = 0;
@@ -172,42 +181,52 @@ let invincibleTimer = 0;
 let scrollSpeed, baseScrollSpeed;
 
 const deathMessages = [
-  "Sawyer! Even Spider-Man falls off buildings sometimes... but usually on PURPOSE! 😂",
-  "Hey Sawyer, was that a spider or a splat-er? 🕷️💥",
-  "Sawyer's spidy-sense was on a coffee break! ☕🕷️",
-  "Whoa Sawyer! That villain didn't even break a sweat! You got this next time! 💪",
-  "Sawyer, that building was clearly greased... totally not your fault! 😉",
-  "Plot twist: Sawyer's Spidy forgot his sticky gloves at home! 🧤",
-  "Sawyer! Quick, tell everyone that was just a practice round! 🤫",
-  "Even superheroes need a warm-up, right Sawyer? Let's call that one a warm-up! 🔥",
-  "Sawyer's Spidy just set the world record for... fastest fall! 🏆😂",
-  "Oops! Sawyer, your Spidy was too busy being awesome and forgot to dodge! 😎",
-  "Breaking News: Sawyer's Spidy discovers gravity is REAL! 📰",
-  "Don't worry Sawyer, that villain cheated! I saw it! (I didn't see it) 👀",
-  "Sawyer! Your web-shooters must have been out of web-juice! 🧃🕸️",
-  "Legend says Sawyer's Spidy will return stronger... like RIGHT NOW! ⚡",
-  "Hey Sawyer, that obstacle came out of NOWHERE! ...ok it was there the whole time 😅",
+  "Sawyer! Even Spider-Man falls off buildings sometimes... but usually on PURPOSE!",
+  "Hey Sawyer, was that a spider or a splat-er?",
+  "Sawyer's spidy-sense was on a coffee break!",
+  "Whoa Sawyer! That villain didn't even break a sweat! You got this next time!",
+  "Sawyer, that building was clearly greased... totally not your fault!",
+  "Plot twist: Sawyer's Spidy forgot his sticky gloves at home!",
+  "Sawyer! Quick, tell everyone that was just a practice round!",
+  "Even superheroes need a warm-up, right Sawyer? Let's call that one a warm-up!",
+  "Sawyer's Spidy just set the world record for... fastest fall!",
+  "Oops! Sawyer, your Spidy was too busy being awesome and forgot to dodge!",
+  "Breaking News: Sawyer's Spidy discovers gravity is REAL!",
+  "Don't worry Sawyer, that villain cheated! I saw it! (I didn't see it)",
+  "Sawyer! Your web-shooters must have been out of web-juice!",
+  "Legend says Sawyer's Spidy will return stronger... like RIGHT NOW!",
+  "Hey Sawyer, that obstacle came out of NOWHERE! ...ok it was there the whole time",
 ];
 
 const villainTypes = [
-  { name: 'Goblin', color: '#4caf50', emoji: '👺', speed: 1.5 },
-  { name: 'Venom', color: '#212121', emoji: '👾', speed: 2 },
-  { name: 'Doc Ock', color: '#ff9800', emoji: '🐙', speed: 1.2 },
-  { name: 'Electro', color: '#ffeb3b', emoji: '⚡', speed: 2.5 },
-  { name: 'Rhino', color: '#9e9e9e', emoji: '🦏', speed: 3 },
+  { name: 'Goblin', bodyColor: '#22cc44', accentColor: '#116622', shape: 'diamond', speed: 1.5 },
+  { name: 'Venom', bodyColor: '#222222', accentColor: '#bb33ff', shape: 'circle', speed: 2 },
+  { name: 'Doc Ock', bodyColor: '#ff8800', accentColor: '#cc5500', shape: 'octagon', speed: 1.2 },
+  { name: 'Electro', bodyColor: '#ffee00', accentColor: '#00ccff', shape: 'star', speed: 2.5 },
+  { name: 'Rhino', bodyColor: '#aaaaaa', accentColor: '#666666', shape: 'square', speed: 3 },
 ];
 
+// Building layout: two tall buildings flanking the screen, full coverage
+// Left building and right building with an alley gap that has a back wall
+const BLDG_LEFT_W = 180;   // left building width
+const BLDG_RIGHT_W = 180;  // right building width
+const ALLEY_X = BLDG_LEFT_W;
+const ALLEY_W = W - BLDG_LEFT_W - BLDG_RIGHT_W; // the gap
+
 function initBuildings() {
-  buildings = [];
-  for (let i = 0; i < 8; i++) {
-    buildings.push({
-      x: Math.random() * W,
-      y: i * 100 - 100,
-      w: 60 + Math.random() * 80,
-      h: 600,
-      color: `hsl(${220 + Math.random() * 30}, ${20 + Math.random() * 20}%, ${15 + Math.random() * 15}%)`,
-      windows: Math.random() > 0.3,
-    });
+  buildings = {
+    leftColor: 'hsl(225, 25%, 18%)',
+    rightColor: 'hsl(215, 22%, 20%)',
+    alleyColor: 'hsl(230, 30%, 12%)',
+    windowRows: [],
+  };
+  // Pre-generate window light states
+  for (let row = 0; row < 80; row++) {
+    let cols = [];
+    for (let col = 0; col < 20; col++) {
+      cols.push(Math.random() > 0.35);
+    }
+    buildings.windowRows.push(cols);
   }
 }
 
@@ -215,8 +234,8 @@ function resetGame() {
   spidy = {
     x: W / 2,
     y: H - 100,
-    w: 30,
-    h: 30,
+    w: 28,
+    h: 40,
     vx: 0,
     vy: 0,
     speed: 4,
@@ -225,6 +244,7 @@ function resetGame() {
   obstacles = [];
   collectibles = [];
   particles = [];
+  floatingTexts = [];
   score = 0;
   level = 1;
   lives = 3;
@@ -251,12 +271,16 @@ function showLevelBanner(text) {
   levelBannerTimer = 90;
 }
 
+function addFloatingText(x, y, text, color) {
+  floatingTexts.push({ x, y, text, color, life: 60, maxLife: 60 });
+}
+
 function spawnObstacle() {
   const lvl = Math.min(level, 10);
   const roll = Math.random();
 
   if (roll < 0.4) {
-    // Static obstacle (girder, satellite dish, etc.)
+    // Static obstacle (girder, pipe, etc.)
     const side = Math.random() < 0.5 ? 0 : 1;
     obstacles.push({
       type: 'static',
@@ -265,7 +289,7 @@ function spawnObstacle() {
       w: 50 + Math.random() * 40,
       h: 15 + Math.random() * 10,
       color: '#78909c',
-      emoji: ['🏗️', '📡', '🪟', '🧱'][Math.floor(Math.random() * 4)],
+      label: ['GIRDER', 'PIPE', 'VENT', 'BRICK'][Math.floor(Math.random() * 4)],
     });
   } else if (roll < 0.75) {
     // Moving villain
@@ -275,11 +299,12 @@ function spawnObstacle() {
       type: 'villain',
       x: side ? -30 : W + 30,
       y: -30 - Math.random() * 100,
-      w: 35,
-      h: 35,
+      w: 45,
+      h: 45,
       vx: (side ? 1 : -1) * vType.speed * (0.8 + Math.random() * 0.4 + lvl * 0.1),
-      color: vType.color,
-      emoji: vType.emoji,
+      bodyColor: vType.bodyColor,
+      accentColor: vType.accentColor,
+      shape: vType.shape,
       name: vType.name,
     });
   } else {
@@ -292,7 +317,7 @@ function spawnObstacle() {
       h: 25,
       vy: 1.5 + lvl * 0.3,
       color: '#e53935',
-      emoji: ['💣', '🪨', '🔥'][Math.floor(Math.random() * 3)],
+      label: ['BOMB', 'ROCK', 'FIRE'][Math.floor(Math.random() * 3)],
     });
   }
 }
@@ -322,6 +347,8 @@ function addParticles(x, y, color, count) {
   }
 }
 
+// ============ DRAWING FUNCTIONS ============
+
 function drawSpidy() {
   const { x, y, w, h } = spidy;
   const blinking = invincibleTimer > 0 && Math.floor(frameCount / 4) % 2;
@@ -330,140 +357,424 @@ function drawSpidy() {
   ctx.save();
   ctx.translate(x, y);
 
-  // Body (red suit)
-  ctx.fillStyle = '#e53935';
-  ctx.beginPath();
-  ctx.ellipse(0, 0, w / 2, h / 2, 0, 0, Math.PI * 2);
-  ctx.fill();
+  const wave = Math.sin(frameCount * 0.15) * 4;
 
-  // Web pattern on suit
-  ctx.strokeStyle = '#1a1a1a';
-  ctx.lineWidth = 1;
-  // Horizontal lines
-  for (let i = -2; i <= 2; i++) {
-    ctx.beginPath();
-    ctx.moveTo(-w / 2, i * 5);
-    ctx.lineTo(w / 2, i * 5);
-    ctx.stroke();
-  }
-  // Diagonal lines
-  for (let i = -2; i <= 2; i++) {
-    ctx.beginPath();
-    ctx.moveTo(0, -h / 2);
-    ctx.lineTo(i * 8, h / 2);
-    ctx.stroke();
-  }
-
-  // Eyes (big white spider eyes)
-  ctx.fillStyle = '#fff';
-  // Left eye
-  ctx.beginPath();
-  ctx.ellipse(-6, -4, 6, 8, -0.2, 0, Math.PI * 2);
-  ctx.fill();
-  // Right eye
-  ctx.beginPath();
-  ctx.ellipse(6, -4, 6, 8, 0.2, 0, Math.PI * 2);
-  ctx.fill();
-
-  // Eye outlines
-  ctx.strokeStyle = '#000';
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.ellipse(-6, -4, 6, 8, -0.2, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.ellipse(6, -4, 6, 8, 0.2, 0, Math.PI * 2);
-  ctx.stroke();
-
-  // Arms/legs (animated)
-  ctx.strokeStyle = '#e53935';
-  ctx.lineWidth = 3;
-  const wave = Math.sin(frameCount * 0.15) * 5;
-  // Left arm
-  ctx.beginPath();
-  ctx.moveTo(-w/2 + 2, -3);
-  ctx.lineTo(-w/2 - 8, -12 + wave);
-  ctx.stroke();
-  // Right arm
-  ctx.beginPath();
-  ctx.moveTo(w/2 - 2, -3);
-  ctx.lineTo(w/2 + 8, -12 - wave);
-  ctx.stroke();
+  // -- LEGS (blue, behind body) --
+  ctx.strokeStyle = '#1565c0';
+  ctx.lineWidth = 4;
+  ctx.lineCap = 'round';
   // Left leg
   ctx.beginPath();
-  ctx.moveTo(-w/2 + 5, h/2 - 5);
-  ctx.lineTo(-w/2 - 3, h/2 + 8 - wave);
+  ctx.moveTo(-5, h/2 - 8);
+  ctx.lineTo(-10, h/2 - 2);
+  ctx.lineTo(-8, h/2 + 6 - wave);
   ctx.stroke();
   // Right leg
   ctx.beginPath();
-  ctx.moveTo(w/2 - 5, h/2 - 5);
-  ctx.lineTo(w/2 + 3, h/2 + 8 + wave);
+  ctx.moveTo(5, h/2 - 8);
+  ctx.lineTo(10, h/2 - 2);
+  ctx.lineTo(8, h/2 + 6 + wave);
+  ctx.stroke();
+
+  // -- ARMS (blue, behind body) --
+  // Left arm
+  ctx.beginPath();
+  ctx.moveTo(-w/2 + 2, -4);
+  ctx.lineTo(-w/2 - 6, -10 + wave);
+  ctx.lineTo(-w/2 - 10, -16 + wave);
+  ctx.stroke();
+  // Right arm
+  ctx.beginPath();
+  ctx.moveTo(w/2 - 2, -4);
+  ctx.lineTo(w/2 + 6, -10 - wave);
+  ctx.lineTo(w/2 + 10, -16 - wave);
+  ctx.stroke();
+
+  // -- BODY (torso) --
+  // Blue sides
+  ctx.fillStyle = '#1565c0';
+  ctx.beginPath();
+  ctx.moveTo(-w/2, -10);
+  ctx.lineTo(-w/2 - 3, 0);
+  ctx.lineTo(-w/2, 10);
+  ctx.lineTo(-4, 12);
+  ctx.lineTo(-4, -12);
+  ctx.closePath();
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(w/2, -10);
+  ctx.lineTo(w/2 + 3, 0);
+  ctx.lineTo(w/2, 10);
+  ctx.lineTo(4, 12);
+  ctx.lineTo(4, -12);
+  ctx.closePath();
+  ctx.fill();
+
+  // Red center torso
+  ctx.fillStyle = '#e53935';
+  ctx.beginPath();
+  ctx.moveTo(-6, -12);
+  ctx.lineTo(6, -12);
+  ctx.lineTo(8, 12);
+  ctx.lineTo(-8, 12);
+  ctx.closePath();
+  ctx.fill();
+
+  // Web pattern on red torso
+  ctx.strokeStyle = '#1a1a1a';
+  ctx.lineWidth = 0.7;
+  for (let i = -2; i <= 2; i++) {
+    ctx.beginPath();
+    ctx.moveTo(-8, i * 5);
+    ctx.lineTo(8, i * 5);
+    ctx.stroke();
+  }
+  for (let i = -1; i <= 1; i++) {
+    ctx.beginPath();
+    ctx.moveTo(0, -12);
+    ctx.lineTo(i * 6, 12);
+    ctx.stroke();
+  }
+
+  // -- HEAD --
+  // Red head base
+  ctx.fillStyle = '#e53935';
+  ctx.beginPath();
+  ctx.arc(0, -16, 10, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Web pattern on head
+  ctx.strokeStyle = '#1a1a1a';
+  ctx.lineWidth = 0.6;
+  // Horizontal arcs on head
+  for (let i = -1; i <= 1; i++) {
+    ctx.beginPath();
+    ctx.arc(0, -16, 10, Math.PI * 0.1, Math.PI * 0.9);
+    ctx.stroke();
+  }
+  // Radial lines from center of face
+  for (let a = 0; a < Math.PI * 2; a += Math.PI / 4) {
+    ctx.beginPath();
+    ctx.moveTo(0, -16);
+    ctx.lineTo(Math.cos(a) * 10, -16 + Math.sin(a) * 10);
+    ctx.stroke();
+  }
+
+  // -- EYES (big white angular Spider-Man eyes) --
+  ctx.fillStyle = '#ffffff';
+  ctx.strokeStyle = '#000000';
+  ctx.lineWidth = 1.8;
+
+  // Left eye - angular/pointed shape
+  ctx.beginPath();
+  ctx.moveTo(-8, -19);
+  ctx.lineTo(-3, -21);
+  ctx.lineTo(-1, -17);
+  ctx.lineTo(-3, -13);
+  ctx.lineTo(-8, -15);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  // Right eye - angular/pointed shape (mirrored)
+  ctx.beginPath();
+  ctx.moveTo(8, -19);
+  ctx.lineTo(3, -21);
+  ctx.lineTo(1, -17);
+  ctx.lineTo(3, -13);
+  ctx.lineTo(8, -15);
+  ctx.closePath();
+  ctx.fill();
   ctx.stroke();
 
   ctx.restore();
 }
 
 function drawBuildings() {
-  buildings.forEach(b => {
-    ctx.fillStyle = b.color;
-    ctx.fillRect(b.x, b.y, b.w, b.h);
+  const b = buildings;
+  const scrollY = (frameCount * scrollSpeed * 0.5) % 20;
 
-    if (b.windows) {
-      const winSize = 8;
-      const gap = 18;
-      ctx.fillStyle = 'rgba(255, 235, 59, 0.3)';
-      for (let wy = b.y + 15; wy < b.y + b.h; wy += gap) {
-        for (let wx = b.x + 10; wx < b.x + b.w - 10; wx += gap) {
-          if (wy > 0 && wy < H) {
-            ctx.fillRect(wx, wy, winSize, winSize);
-          }
+  // Left building
+  ctx.fillStyle = b.leftColor;
+  ctx.fillRect(0, 0, BLDG_LEFT_W, H);
+
+  // Right building
+  ctx.fillStyle = b.rightColor;
+  ctx.fillRect(W - BLDG_RIGHT_W, 0, BLDG_RIGHT_W, H);
+
+  // Alley back wall (darker)
+  ctx.fillStyle = b.alleyColor;
+  ctx.fillRect(BLDG_LEFT_W, 0, ALLEY_W, H);
+
+  // Building edges - subtle highlights
+  ctx.fillStyle = 'rgba(255,255,255,0.06)';
+  ctx.fillRect(BLDG_LEFT_W - 3, 0, 3, H);
+  ctx.fillRect(W - BLDG_RIGHT_W, 0, 3, H);
+
+  // Dark edge lines
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.fillRect(BLDG_LEFT_W - 1, 0, 1, H);
+  ctx.fillRect(W - BLDG_RIGHT_W, 0, 1, H);
+
+  // Windows on left building
+  const winSize = 8;
+  const winGapX = 22;
+  const winGapY = 20;
+  for (let wy = 0; wy < H + 20; wy++) {
+    const row = Math.floor((wy + scrollY) / winGapY);
+    if ((wy + scrollY) % winGapY < winSize && row >= 0) {
+      const rowData = b.windowRows[((row % b.windowRows.length) + b.windowRows.length) % b.windowRows.length];
+      for (let col = 0; col < 7; col++) {
+        if (rowData[col]) {
+          const wx = 12 + col * winGapX;
+          ctx.fillStyle = 'rgba(255, 235, 59, 0.25)';
+          ctx.fillRect(wx, wy, winSize, winSize);
         }
       }
     }
+  }
 
-    // Building edge highlight
-    ctx.fillStyle = 'rgba(255,255,255,0.05)';
-    ctx.fillRect(b.x, b.y, 3, b.h);
-  });
+  // Windows on right building
+  for (let wy = 0; wy < H + 20; wy++) {
+    const row = Math.floor((wy + scrollY) / winGapY);
+    if ((wy + scrollY) % winGapY < winSize && row >= 0) {
+      const rowData = b.windowRows[((row % b.windowRows.length) + b.windowRows.length) % b.windowRows.length];
+      for (let col = 0; col < 7; col++) {
+        if (rowData[col + 10]) {
+          const wx = (W - BLDG_RIGHT_W) + 12 + col * winGapX;
+          ctx.fillStyle = 'rgba(255, 235, 59, 0.25)';
+          ctx.fillRect(wx, wy, winSize, winSize);
+        }
+      }
+    }
+  }
+
+  // Alley details - pipes on walls
+  ctx.fillStyle = 'rgba(100, 100, 120, 0.3)';
+  ctx.fillRect(BLDG_LEFT_W + 5, 0, 3, H);
+  ctx.fillRect(W - BLDG_RIGHT_W - 8, 0, 3, H);
 }
 
 function drawStars() {
+  // Stars only visible in the alley gap (sky peeking through from above)
+  // Actually keep stars subtle everywhere for ambiance
   ctx.fillStyle = '#fff';
   for (let i = 0; i < 50; i++) {
     const sx = (i * 97 + frameCount * 0.02 * (i % 3 + 1)) % W;
     const sy = (i * 151) % H;
     const size = (i % 3 === 0) ? 2 : 1;
-    const alpha = 0.3 + 0.3 * Math.sin(frameCount * 0.03 + i);
-    ctx.globalAlpha = alpha;
+    const alpha = 0.15 + 0.15 * Math.sin(frameCount * 0.03 + i);
+    // Only show in alley area at reduced opacity
+    if (sx > BLDG_LEFT_W && sx < W - BLDG_RIGHT_W) {
+      ctx.globalAlpha = alpha * 2;
+    } else {
+      ctx.globalAlpha = alpha * 0.3;
+    }
     ctx.fillRect(sx, sy, size, size);
   }
   ctx.globalAlpha = 1;
 }
 
+function drawVillainShape(o) {
+  const cx = o.x;
+  const cy = o.y;
+  const sz = o.w / 2;
+
+  // Glow outline
+  ctx.shadowColor = o.accentColor;
+  ctx.shadowBlur = 12;
+
+  // Colored outline ring
+  ctx.strokeStyle = o.accentColor;
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.arc(cx, cy, sz + 4, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+
+  // Fill the main body shape
+  ctx.fillStyle = o.bodyColor;
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = 2;
+
+  if (o.shape === 'diamond') {
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - sz);
+    ctx.lineTo(cx + sz, cy);
+    ctx.lineTo(cx, cy + sz);
+    ctx.lineTo(cx - sz, cy);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    // Face
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(cx - 6, cy - 5, 5, 5);
+    ctx.fillRect(cx + 1, cy - 5, 5, 5);
+    ctx.fillStyle = '#000';
+    ctx.fillRect(cx - 5, cy - 4, 3, 3);
+    ctx.fillRect(cx + 2, cy - 4, 3, 3);
+    // Mouth
+    ctx.fillStyle = '#000';
+    ctx.fillRect(cx - 5, cy + 3, 10, 2);
+  } else if (o.shape === 'circle') {
+    ctx.beginPath();
+    ctx.arc(cx, cy, sz, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    // Venom eyes (white angular)
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.moveTo(cx - 10, cy - 6);
+    ctx.lineTo(cx - 3, cy - 10);
+    ctx.lineTo(cx - 1, cy - 2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(cx + 10, cy - 6);
+    ctx.lineTo(cx + 3, cy - 10);
+    ctx.lineTo(cx + 1, cy - 2);
+    ctx.closePath();
+    ctx.fill();
+    // Teeth
+    ctx.fillStyle = '#fff';
+    for (let t = -8; t <= 8; t += 4) {
+      ctx.beginPath();
+      ctx.moveTo(cx + t, cy + 6);
+      ctx.lineTo(cx + t + 2, cy + 10);
+      ctx.lineTo(cx + t + 4, cy + 6);
+      ctx.closePath();
+      ctx.fill();
+    }
+  } else if (o.shape === 'octagon') {
+    const a = sz * 0.4;
+    ctx.beginPath();
+    ctx.moveTo(cx - a, cy - sz);
+    ctx.lineTo(cx + a, cy - sz);
+    ctx.lineTo(cx + sz, cy - a);
+    ctx.lineTo(cx + sz, cy + a);
+    ctx.lineTo(cx + a, cy + sz);
+    ctx.lineTo(cx - a, cy + sz);
+    ctx.lineTo(cx - sz, cy + a);
+    ctx.lineTo(cx - sz, cy - a);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    // Goggles
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(cx - 6, cy - 3, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(cx + 6, cy - 3, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#000';
+    ctx.beginPath();
+    ctx.arc(cx - 6, cy - 3, 3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(cx + 6, cy - 3, 3, 0, Math.PI * 2);
+    ctx.fill();
+    // Tentacle lines
+    ctx.strokeStyle = o.accentColor;
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 4; i++) {
+      const angle = (i / 4) * Math.PI + Math.PI * 0.75 + Math.sin(frameCount * 0.1 + i) * 0.2;
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(angle) * sz * 0.7, cy + Math.sin(angle) * sz * 0.7);
+      ctx.lineTo(cx + Math.cos(angle) * (sz + 12), cy + Math.sin(angle) * (sz + 12));
+      ctx.stroke();
+    }
+  } else if (o.shape === 'star') {
+    ctx.beginPath();
+    for (let i = 0; i < 10; i++) {
+      const angle = (i / 10) * Math.PI * 2 - Math.PI / 2;
+      const r = i % 2 === 0 ? sz : sz * 0.5;
+      ctx.lineTo(cx + Math.cos(angle) * r, cy + Math.sin(angle) * r);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    // Lightning bolt eyes
+    ctx.fillStyle = '#00ccff';
+    ctx.fillRect(cx - 7, cy - 5, 4, 6);
+    ctx.fillRect(cx + 3, cy - 5, 4, 6);
+  } else { // square (Rhino)
+    ctx.fillRect(cx - sz, cy - sz, sz * 2, sz * 2);
+    ctx.strokeRect(cx - sz, cy - sz, sz * 2, sz * 2);
+    // Horn
+    ctx.fillStyle = '#888';
+    ctx.beginPath();
+    ctx.moveTo(cx - 3, cy - sz);
+    ctx.lineTo(cx, cy - sz - 10);
+    ctx.lineTo(cx + 3, cy - sz);
+    ctx.closePath();
+    ctx.fill();
+    // Eyes
+    ctx.fillStyle = '#ff0000';
+    ctx.fillRect(cx - 8, cy - 5, 6, 5);
+    ctx.fillRect(cx + 2, cy - 5, 6, 5);
+  }
+
+  // Name label below
+  ctx.font = 'bold 11px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#fff';
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = 3;
+  ctx.strokeText(o.name, cx, cy + sz + 14);
+  ctx.fillText(o.name, cx, cy + sz + 14);
+  ctx.textAlign = 'left';
+}
+
 function drawObstacles() {
   obstacles.forEach(o => {
     if (o.type === 'static') {
+      // Solid colored girder/obstacle
       ctx.fillStyle = o.color;
       ctx.fillRect(o.x, o.y, o.w, o.h);
-      ctx.fillStyle = 'rgba(255,255,255,0.1)';
+      // Highlight
+      ctx.fillStyle = 'rgba(255,255,255,0.15)';
       ctx.fillRect(o.x, o.y, o.w, 3);
-      ctx.font = '18px serif';
-      ctx.fillText(o.emoji, o.x + o.w / 2 - 9, o.y - 3);
+      // Shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.3)';
+      ctx.fillRect(o.x, o.y + o.h - 2, o.w, 2);
+      // Label
+      ctx.font = 'bold 9px Arial';
+      ctx.fillStyle = '#ccc';
+      ctx.textAlign = 'center';
+      ctx.fillText(o.label, o.x + o.w / 2, o.y + o.h / 2 + 3);
+      ctx.textAlign = 'left';
     } else if (o.type === 'villain') {
-      // Villain glow
-      ctx.shadowColor = o.color;
-      ctx.shadowBlur = 15;
-      ctx.font = '30px serif';
-      ctx.fillText(o.emoji, o.x - 15, o.y + 10);
-      ctx.shadowBlur = 0;
+      drawVillainShape(o);
     } else if (o.type === 'dropping') {
-      ctx.font = '22px serif';
-      ctx.fillText(o.emoji, o.x - 11, o.y + 8);
-      // Warning line
-      ctx.strokeStyle = 'rgba(255, 0, 0, 0.2)';
-      ctx.setLineDash([4, 4]);
+      // Solid dropping obstacle
+      ctx.fillStyle = o.color;
       ctx.beginPath();
-      ctx.moveTo(o.x, o.y + 20);
+      ctx.arc(o.x, o.y, o.w / 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      // Inner detail
+      ctx.fillStyle = '#ff8a80';
+      ctx.beginPath();
+      ctx.arc(o.x - 3, o.y - 3, o.w / 5, 0, Math.PI * 2);
+      ctx.fill();
+      // Label
+      ctx.font = 'bold 9px Arial';
+      ctx.fillStyle = '#fff';
+      ctx.textAlign = 'center';
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = 2;
+      ctx.strokeText(o.label, o.x, o.y + 4);
+      ctx.fillText(o.label, o.x, o.y + 4);
+      ctx.textAlign = 'left';
+      // Warning line
+      ctx.strokeStyle = 'rgba(255, 0, 0, 0.15)';
+      ctx.setLineDash([4, 4]);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(o.x, o.y + o.w / 2);
       ctx.lineTo(o.x, H);
       ctx.stroke();
       ctx.setLineDash([]);
@@ -474,15 +785,60 @@ function drawObstacles() {
 function drawCollectibles() {
   collectibles.forEach(c => {
     const bob = Math.sin(frameCount * 0.08 + c.bobOffset) * 3;
-    ctx.font = '18px serif';
+    const cy = c.y + bob;
+
     if (c.type === 'web') {
-      ctx.fillText('🕸️', c.x - 9, c.y + 9 + bob);
+      // Draw a web collectible as a white web shape
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 1.5;
+      ctx.fillStyle = 'rgba(255,255,255,0.15)';
+      const r = 10;
+      // Outer circle
+      ctx.beginPath();
+      ctx.arc(c.x, cy, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      // Inner circles
+      ctx.beginPath();
+      ctx.arc(c.x, cy, r * 0.6, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(c.x, cy, r * 0.3, 0, Math.PI * 2);
+      ctx.stroke();
+      // Radial lines
+      for (let a = 0; a < Math.PI * 2; a += Math.PI / 3) {
+        ctx.beginPath();
+        ctx.moveTo(c.x, cy);
+        ctx.lineTo(c.x + Math.cos(a) * r, cy + Math.sin(a) * r);
+        ctx.stroke();
+      }
     } else {
-      ctx.fillText('❤️', c.x - 9, c.y + 9 + bob);
+      // Heart collectible - draw a solid heart shape
+      ctx.fillStyle = '#ff4081';
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 1.5;
+      const s = 10;
+      ctx.beginPath();
+      ctx.moveTo(c.x, cy + s * 0.4);
+      ctx.bezierCurveTo(c.x, cy - s * 0.2, c.x - s, cy - s * 0.6, c.x - s, cy);
+      ctx.bezierCurveTo(c.x - s, cy + s * 0.4, c.x, cy + s * 0.8, c.x, cy + s);
+      ctx.bezierCurveTo(c.x, cy + s * 0.8, c.x + s, cy + s * 0.4, c.x + s, cy);
+      ctx.bezierCurveTo(c.x + s, cy - s * 0.6, c.x, cy - s * 0.2, c.x, cy + s * 0.4);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      // Glow
+      ctx.shadowColor = '#ff4081';
+      ctx.shadowBlur = 8;
+      ctx.fill();
+      ctx.shadowBlur = 0;
     }
+
     // Sparkle
-    ctx.fillStyle = `rgba(255, 255, 255, ${0.3 + 0.3 * Math.sin(frameCount * 0.1 + c.bobOffset)})`;
-    ctx.fillRect(c.x - 1 + Math.sin(frameCount * 0.15) * 5, c.y - 5 + bob, 2, 2);
+    const sparkAlpha = 0.3 + 0.3 * Math.sin(frameCount * 0.1 + c.bobOffset);
+    ctx.fillStyle = `rgba(255, 255, 255, ${sparkAlpha})`;
+    ctx.fillRect(c.x - 1 + Math.sin(frameCount * 0.15) * 5, cy - 8, 2, 2);
   });
 }
 
@@ -491,6 +847,23 @@ function drawParticles() {
     ctx.globalAlpha = p.life / p.maxLife;
     ctx.fillStyle = p.color;
     ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+  });
+  ctx.globalAlpha = 1;
+}
+
+function drawFloatingTexts() {
+  floatingTexts.forEach(ft => {
+    const alpha = ft.life / ft.maxLife;
+    ctx.globalAlpha = alpha;
+    ctx.font = 'bold 18px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = ft.color;
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 3;
+    const yOff = (1 - alpha) * -30;
+    ctx.strokeText(ft.text, ft.x, ft.y + yOff);
+    ctx.fillText(ft.text, ft.x, ft.y + yOff);
+    ctx.textAlign = 'left';
   });
   ctx.globalAlpha = 1;
 }
@@ -512,6 +885,8 @@ function drawWebStrings() {
   }
 }
 
+// ============ COLLISION ============
+
 function rectCollide(a, b) {
   return a.x - a.w/2 < b.x + b.w/2 &&
          a.x + a.w/2 > b.x - b.w/2 &&
@@ -526,6 +901,8 @@ function obstacleHitbox(o) {
   return { x: o.x, y: o.y, w: o.w, h: o.h };
 }
 
+// ============ UPDATE ============
+
 function update() {
   frameCount++;
 
@@ -533,7 +910,7 @@ function update() {
   const newLevel = Math.floor(score / 500) + 1;
   if (newLevel > level) {
     level = newLevel;
-    showLevelBanner(`LEVEL ${level}!`);
+    showLevelBanner('LEVEL ' + level + '!');
     baseScrollSpeed = 1 + (level - 1) * 0.3;
   }
   scrollSpeed = baseScrollSpeed;
@@ -545,22 +922,12 @@ function update() {
   if (keys['ArrowLeft']) spidy.x -= spd;
   if (keys['ArrowRight']) spidy.x += spd;
 
-  // Keep in bounds
-  spidy.x = Math.max(spidy.w / 2, Math.min(W - spidy.w / 2, spidy.x));
-  spidy.y = Math.max(spidy.h / 2, Math.min(H - spidy.h / 2, spidy.y));
+  // Keep in bounds - FIXED: constrain to canvas edges
+  spidy.x = Math.max(spidy.w / 2 + 2, Math.min(W - spidy.w / 2 - 2, spidy.x));
+  spidy.y = Math.max(spidy.h / 2 + 2, Math.min(H - spidy.h / 2 - 2, spidy.y));
 
   // Scroll everything down
   score += Math.ceil(scrollSpeed);
-
-  // Scroll buildings
-  buildings.forEach(b => {
-    b.y += scrollSpeed;
-    if (b.y > H + 100) {
-      b.y = -500 - Math.random() * 200;
-      b.x = Math.random() * W;
-      b.w = 60 + Math.random() * 80;
-    }
-  });
 
   // Spawn obstacles
   const spawnRate = Math.max(25, 70 - level * 5);
@@ -572,7 +939,7 @@ function update() {
     o.y = (o.y || 0) + scrollSpeed;
     if (o.type === 'villain') {
       o.x += o.vx || 0;
-      // Bounce villains
+      // Bounce villains off screen edges
       if (o.x < -50 || o.x > W + 50) {
         o.vx = -(o.vx || 0);
       }
@@ -613,9 +980,23 @@ function update() {
       if (c.type === 'web') {
         score += 100;
         addParticles(c.x, c.y, '#ffffff', 8);
+        addFloatingText(c.x, c.y, '+100', '#ffffff');
       } else if (c.type === 'heart') {
-        lives = Math.min(lives + 1, 5);
-        addParticles(c.x, c.y, '#ff4081', 10);
+        if (lives < 5) {
+          lives = Math.min(lives + 1, 5);
+          addParticles(c.x, c.y, '#ff4081', 12);
+          addFloatingText(c.x, c.y, '+1 UP!', '#ff4081');
+          // Flash the lives display
+          const livesEl = document.getElementById('livesDisplay');
+          livesEl.classList.remove('flash');
+          void livesEl.offsetWidth; // force reflow to restart animation
+          livesEl.classList.add('flash');
+        } else {
+          // Already at max lives, give bonus score instead
+          score += 200;
+          addParticles(c.x, c.y, '#ff4081', 8);
+          addFloatingText(c.x, c.y, '+200', '#ff4081');
+        }
       }
       collectibles.splice(i, 1);
     }
@@ -635,6 +1016,10 @@ function update() {
   });
   particles = particles.filter(p => p.life > 0);
 
+  // Update floating texts
+  floatingTexts.forEach(ft => { ft.life--; });
+  floatingTexts = floatingTexts.filter(ft => ft.life > 0);
+
   // Level banner fade
   if (levelBannerTimer > 0) {
     levelBannerTimer--;
@@ -644,10 +1029,14 @@ function update() {
   }
 
   // Update HUD
-  document.getElementById('scoreDisplay').textContent = `Score: ${score}`;
-  document.getElementById('levelDisplay').textContent = `Level: ${level}`;
-  document.getElementById('livesDisplay').textContent = 'Lives: ' + '❤️'.repeat(lives);
+  document.getElementById('scoreDisplay').textContent = 'Score: ' + score;
+  document.getElementById('levelDisplay').textContent = 'Level: ' + level;
+  let heartsStr = '';
+  for (let i = 0; i < lives; i++) heartsStr += '\u2764\ufe0f';
+  document.getElementById('livesDisplay').textContent = 'Lives: ' + heartsStr;
 }
+
+// ============ DRAW ============
 
 function draw() {
   ctx.clearRect(0, 0, W, H);
@@ -660,14 +1049,17 @@ function draw() {
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, W, H);
 
-  drawStars();
   drawBuildings();
+  drawStars();
   drawWebStrings();
   drawObstacles();
   drawCollectibles();
   drawParticles();
+  drawFloatingTexts();
   drawSpidy();
 }
+
+// ============ GAME LOOP ============
 
 function gameLoop() {
   if (!gameRunning) return;
@@ -684,13 +1076,14 @@ function gameOver() {
 
   const msg = deathMessages[Math.floor(Math.random() * deathMessages.length)];
   document.getElementById('deathMessage').textContent = msg;
-  document.getElementById('deathScore').textContent = `Score: ${score}`;
+  document.getElementById('deathScore').textContent = 'Score: ' + score;
   document.getElementById('deathHighScore').textContent =
-    score >= highScore ? '🎉 NEW HIGH SCORE! 🎉' : `High Score: ${highScore}`;
+    score >= highScore ? 'NEW HIGH SCORE!' : 'High Score: ' + highScore;
   document.getElementById('deathScreen').style.display = 'flex';
 }
 
-// Controls
+// ============ CONTROLS ============
+
 document.addEventListener('keydown', e => {
   if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) {
     e.preventDefault();
