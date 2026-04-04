@@ -693,6 +693,140 @@ def generate_comparison_content(deals, title):
     return h
 
 
+def generate_model_content():
+    """Generate HTML for the Default Model analysis section."""
+    try:
+        mr = q("SELECT value FROM model_results WHERE key='default_model'")
+    except Exception:
+        return "<p>Default model not yet computed. Run default_model.py first.</p>"
+    if mr.empty:
+        return "<p>Default model not yet computed. Run default_model.py first.</p>"
+
+    results = json.loads(mr.iloc[0]["value"])
+    ds = results["dataset"]
+    h = ""
+
+    # ── Dataset Summary ──
+    h += f"""<div class="metrics">
+<div class="metric"><div class="mv">{ds['total_loans']:,}</div><div class="ml">Total Loans</div></div>
+<div class="metric"><div class="mv">{ds['defaults']:,}</div><div class="ml">Defaults</div></div>
+<div class="metric"><div class="mv">{ds['default_rate']:.2%}</div><div class="ml">Default Rate</div></div>
+<div class="metric"><div class="mv">{ds['train_size']:,}</div><div class="ml">Train Set</div></div>
+<div class="metric"><div class="mv">{ds['test_size']:,}</div><div class="ml">Test Set</div></div>
+</div>"""
+
+    # ── Model Comparison Table ──
+    rows = []
+    for name, m in results["models"].items():
+        rows.append({
+            "Model": name.replace("_", " ").title(),
+            "Accuracy": f"{m['accuracy']:.1%}",
+            "AUC-ROC": f"{m['auc_roc']:.3f}",
+            "Precision": f"{m['precision']:.1%}",
+            "Recall": f"{m['recall']:.1%}",
+            "F1 Score": f"{m['f1']:.1%}",
+        })
+    h += "<h3>Model Performance</h3>" + table_html(pd.DataFrame(rows), cls="compare")
+
+    # ── ROC Curves ──
+    roc_traces = []
+    colors = {"logistic_regression": "#1976D2", "random_forest": "#D32F2F"}
+    for name, m in results["models"].items():
+        roc = m["roc_curve"]
+        roc_traces.append({
+            "x": roc["fpr"], "y": roc["tpr"],
+            "type": "scatter", "mode": "lines",
+            "name": f"{name.replace('_',' ').title()} (AUC={m['auc_roc']:.3f})",
+            "line": {"color": colors.get(name, "#388E3C")},
+        })
+    roc_traces.append({
+        "x": [0, 1], "y": [0, 1], "type": "scatter", "mode": "lines",
+        "name": "Random (AUC=0.5)", "line": {"color": "#999", "dash": "dash"},
+    })
+    h += chart(roc_traces, {
+        "title": "ROC Curve",
+        "xaxis": {"title": "False Positive Rate"},
+        "yaxis": {"title": "True Positive Rate"},
+        "legend": {"orientation": "h", "y": -0.2},
+    })
+
+    # ── Feature Importance (Random Forest) ──
+    rf = results["models"].get("random_forest", {})
+    if "feature_importance" in rf:
+        fi = rf["feature_importance"]
+        sorted_fi = sorted(fi.items(), key=lambda x: x[1], reverse=True)
+        h += chart([{
+            "x": [kv[0] for kv in sorted_fi],
+            "y": [kv[1] for kv in sorted_fi],
+            "type": "bar", "marker": {"color": "#1976D2"},
+        }], {"title": "Feature Importance (Random Forest)", "yaxis": {"tickformat": ".1%"}})
+
+    # ── Logistic Regression Coefficients ──
+    lr = results["models"].get("logistic_regression", {})
+    if "coefficients" in lr:
+        coefs = lr["coefficients"]
+        sorted_c = sorted(coefs.items(), key=lambda x: abs(x[1]), reverse=True)
+        colors_c = ["#D32F2F" if v < 0 else "#388E3C" for _, v in sorted_c]
+        h += chart([{
+            "x": [kv[0] for kv in sorted_c],
+            "y": [kv[1] for kv in sorted_c],
+            "type": "bar", "marker": {"color": colors_c},
+        }], {"title": "Logistic Regression Coefficients (standardized)",
+             "yaxis": {"title": "Coefficient"}})
+
+    # ── Confusion Matrices ──
+    for name, m in results["models"].items():
+        cm = m["confusion_matrix"]
+        cm_df = pd.DataFrame({
+            "": ["Actual No Default", "Actual Default"],
+            "Predicted No Default": [f"{cm[0][0]:,}", f"{cm[1][0]:,}"],
+            "Predicted Default": [f"{cm[0][1]:,}", f"{cm[1][1]:,}"],
+        })
+        h += f"<h3>Confusion Matrix — {name.replace('_',' ').title()}</h3>" + table_html(cm_df, cls="compare")
+
+    # ── Segment Analysis: Predicted vs Actual ──
+    segs = results.get("segments", {})
+
+    for seg_key, seg_title in [("by_fico", "Default Rate by FICO Score"),
+                                ("by_vintage", "Default Rate by Origination Year"),
+                                ("by_ltv", "Default Rate by LTV"),
+                                ("by_rate", "Default Rate by Interest Rate")]:
+        seg = segs.get(seg_key)
+        if not seg:
+            continue
+        h += chart([
+            {"x": seg["labels"], "y": seg["actual_rate"], "type": "bar",
+             "name": "Actual", "marker": {"color": "#D32F2F"}},
+            {"x": seg["labels"], "y": seg["predicted_rate"], "type": "bar",
+             "name": "Predicted (RF)", "marker": {"color": "#1976D2"}},
+        ], {"title": seg_title, "barmode": "group",
+            "yaxis": {"tickformat": ".1%"}, "hovermode": "x unified",
+            "legend": {"orientation": "h", "y": -0.2}})
+        # Table
+        tbl_rows = []
+        for i, label in enumerate(seg["labels"]):
+            row = {"Segment": label, "Loans": f"{seg['loans'][i]:,}",
+                   "Actual Default": f"{seg['actual_rate'][i]:.2%}",
+                   "Predicted Default": f"{seg['predicted_rate'][i]:.2%}"}
+            tbl_rows.append(row)
+        h += table_html(pd.DataFrame(tbl_rows), cls="compare")
+
+    # ── Loss Severity ──
+    sev = segs.get("loss_severity")
+    if sev:
+        h += f"""<h3>Loss Severity (Defaulted Loans Only)</h3>
+<div class="metrics">
+<div class="metric"><div class="mv">{sev['total_defaulted']:,}</div><div class="ml">Defaulted Loans</div></div>
+<div class="metric"><div class="mv">{fm(sev['avg_chargeoff'])}</div><div class="ml">Avg Chargeoff</div></div>
+<div class="metric"><div class="mv">{fm(sev['avg_recovery'])}</div><div class="ml">Avg Recovery</div></div>
+<div class="metric"><div class="mv">{fm(sev['avg_net_loss'])}</div><div class="ml">Avg Net Loss</div></div>
+<div class="metric"><div class="mv">{sev['recovery_rate']:.1%}</div><div class="ml">Recovery Rate</div></div>
+<div class="metric"><div class="mv">{fm(sev['median_chargeoff'])}</div><div class="ml">Median Chargeoff</div></div>
+</div>"""
+
+    return h
+
+
 def main():
     global _chart_id
     _chart_id = 0
@@ -716,9 +850,14 @@ def main():
     nonprime_html = generate_comparison_content(
         [d for d in NONPRIME_DEALS if d in deal_contents], "Non-Prime Deals")
 
+    # Generate default model analysis
+    logger.info("Generating Default Model analysis...")
+    model_html = generate_model_content()
+
     # Build deal selector dropdown with comparison entries at top
     first_deal = list(deal_contents.keys())[0]
-    options = '<option value="__prime__">--- Prime Comparison ---</option>\n'
+    options = '<option value="__model__">--- Default Model ---</option>\n'
+    options += '<option value="__prime__">--- Prime Comparison ---</option>\n'
     options += '<option value="__nonprime__">--- Non-Prime Comparison ---</option>\n'
     options += '<option disabled>──────────────────</option>\n'
     options += "\n".join(f'<option value="{d}" {"selected" if d == first_deal else ""}>{d}</option>' for d in deal_contents)
@@ -726,7 +865,8 @@ def main():
 
     # Build per-deal content divs
     all_deal_html = ""
-    # Add comparison sections first (hidden by default)
+    # Add model and comparison sections first (hidden by default)
+    all_deal_html += f'<div id="deal-__model__" class="deal-block" style="display:none">\n{model_html}\n</div>\n'
     all_deal_html += f'<div id="deal-__prime__" class="deal-block" style="display:none">\n{prime_html}\n</div>\n'
     all_deal_html += f'<div id="deal-__nonprime__" class="deal-block" style="display:none">\n{nonprime_html}\n</div>\n'
     # Add individual deal sections

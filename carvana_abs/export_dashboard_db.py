@@ -28,6 +28,7 @@ TABLES_TO_EXPORT = [
     "loan_loss_summary",    # ~50K rows
     "loans",                # ~250K rows (for Loan Explorer only)
     "notes",                # ~130 rows (static tranche attributes)
+    "model_results",        # ~1 row (JSON blob from default_model.py)
 ]
 
 
