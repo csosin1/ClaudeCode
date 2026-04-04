@@ -215,6 +215,23 @@ def init_db(db_path: str = DB_PATH) -> None:
             first_recovery_period TEXT,
             PRIMARY KEY (deal, asset_number)
         );
+
+        -- Static note/tranche attributes (from prospectus)
+        CREATE TABLE IF NOT EXISTS notes (
+            deal TEXT NOT NULL,
+            class TEXT NOT NULL,            -- 'A1','A2','A3','A4','B','C','D','N'
+            original_balance REAL,
+            coupon_rate REAL,               -- annualized, decimal (0.045 = 4.5%)
+            rate_type TEXT,                 -- 'FIXED' or 'FLOATING'
+            spread REAL,                    -- spread over benchmark if floating (decimal)
+            benchmark TEXT,                 -- 'SOFR', 'PRIME', etc.
+            rating_moodys TEXT,
+            rating_sp TEXT,
+            rating_kbra TEXT,
+            expected_maturity TEXT,
+            legal_maturity TEXT,
+            PRIMARY KEY (deal, class)
+        );
     """)
 
     conn.commit()
