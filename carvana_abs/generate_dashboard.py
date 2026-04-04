@@ -211,9 +211,9 @@ def generate_deal_content(deal):
             cod_fb = cod_fb[cod_fb["aggregate_note_balance"] > 0].copy()
             if not cod_fb.empty:
                 cod_fb["cost_of_debt"] = cod_fb["total_note_interest"] / cod_fb["aggregate_note_balance"] * 12
-                bad = (cod_fb["cost_of_debt"] > 0.15) | (cod_fb["cost_of_debt"] < 0.005)
+                bad = cod_fb["cost_of_debt"] > 0.15  # Only reject impossibly high values
                 if bad.any():
-                    logger.warning(f"[{deal}] Filtered {bad.sum()}/{len(cod_fb)} CoD fallback values outside 0.5-15%")
+                    logger.warning(f"[{deal}] Filtered {bad.sum()}/{len(cod_fb)} CoD fallback values > 15%")
                 cod = cod_fb[~bad][["period", "cost_of_debt"]] if bad.any() else cod_fb[["period", "cost_of_debt"]]
     # 3) Render separate charts for consumer rate and cost of debt
     if not wac.empty:
@@ -609,7 +609,7 @@ def generate_comparison_content(deals, title):
                     AND aggregate_note_balance > 0 ORDER BY distribution_date {order} LIMIT 1""", (deal,))
                 if not fb.empty:
                     val = fb.iloc[0]["total_note_interest"] / fb.iloc[0]["aggregate_note_balance"] * 12
-                    if 0.005 <= val <= 0.15:
+                    if val <= 0.15:  # Only reject impossibly high values
                         if label == "init":
                             init_cod = val
                         else:
