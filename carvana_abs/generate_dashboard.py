@@ -435,6 +435,61 @@ def generate_deal_content(deal):
             centers = [(edges[i]+edges[i+1])/2 for i in range(len(counts))]
             h += chart([{"x": centers, "y": counts.tolist(), "type": "bar", "marker": {"color": "#1976D2"}}],
                        {"title": "Months to First Recovery", "hovermode": "x unified"})
+
+        # Recovery rate by credit score
+        rec_fico = rec[rec["obligor_credit_score"].notna()].copy()
+        if not rec_fico.empty:
+            rec_fico["bkt"] = pd.cut(rec_fico["obligor_credit_score"],
+                bins=[0,580,620,660,700,740,780,820,900],
+                labels=["<580","580-619","620-659","660-699","700-739","740-779","780-819","820+"], right=False)
+            b = rec_fico.groupby("bkt", observed=True).agg(
+                loans=("asset_number","count"),
+                chargeoffs=("total_chargeoff","sum"),
+                recoveries=("total_recovery", lambda x: x.fillna(0).sum()),
+            ).reset_index()
+            b["rec_rate"] = b["recoveries"] / b["chargeoffs"].replace(0, float("nan"))
+            # Bar chart
+            h += chart([
+                {"x": b["bkt"].tolist(), "y": [round(v,4) if pd.notna(v) else 0 for v in b["rec_rate"]], "type": "bar", "marker": {"color": "#4CAF50"}},
+            ], {"title": "Recovery Rate by Credit Score", "yaxis": {"tickformat": ".1%"}, "hovermode": "x unified"})
+            # Table
+            tbl = pd.DataFrame({
+                "Score": b["bkt"],
+                "Charged-Off Loans": b["loans"].apply(lambda x: f"{x:,}"),
+                "Total Chargeoffs": b["chargeoffs"].apply(fm),
+                "Total Recovered": b["recoveries"].apply(fm),
+                "Recovery Rate": b["rec_rate"].apply(lambda x: f"{x:.1%}" if pd.notna(x) else "-"),
+            })
+            h += table_html(tbl)
+
+        # Recovery rate by interest rate
+        rec_rate_data = q("""SELECT s.asset_number, s.total_chargeoff, s.total_recovery,
+                             l.original_interest_rate
+                          FROM loan_loss_summary s
+                          LEFT JOIN loans l ON s.deal=l.deal AND s.asset_number=l.asset_number
+                          WHERE s.deal=? AND s.total_chargeoff > 0
+                          AND l.original_interest_rate IS NOT NULL""", (deal,))
+        if not rec_rate_data.empty:
+            rec_rate_data["bkt"] = pd.cut(rec_rate_data["original_interest_rate"],
+                bins=[0,0.04,0.06,0.08,0.10,0.12,0.15,0.20,1.0],
+                labels=["<4%","4-5.99%","6-7.99%","8-9.99%","10-11.99%","12-14.99%","15-19.99%","20%+"], right=False)
+            b = rec_rate_data.groupby("bkt", observed=True).agg(
+                loans=("asset_number","count"),
+                chargeoffs=("total_chargeoff","sum"),
+                recoveries=("total_recovery", lambda x: x.fillna(0).sum()),
+            ).reset_index()
+            b["rec_rate"] = b["recoveries"] / b["chargeoffs"].replace(0, float("nan"))
+            h += chart([
+                {"x": b["bkt"].tolist(), "y": [round(v,4) if pd.notna(v) else 0 for v in b["rec_rate"]], "type": "bar", "marker": {"color": "#388E3C"}},
+            ], {"title": "Recovery Rate by Interest Rate", "yaxis": {"tickformat": ".1%"}, "hovermode": "x unified"})
+            tbl = pd.DataFrame({
+                "Rate": b["bkt"],
+                "Charged-Off Loans": b["loans"].apply(lambda x: f"{x:,}"),
+                "Total Chargeoffs": b["chargeoffs"].apply(fm),
+                "Total Recovered": b["recoveries"].apply(fm),
+                "Recovery Rate": b["rec_rate"].apply(lambda x: f"{x:.1%}" if pd.notna(x) else "-"),
+            })
+            h += table_html(tbl)
     sections["Recovery"] = h
 
     # ── NOTES & OC ──
