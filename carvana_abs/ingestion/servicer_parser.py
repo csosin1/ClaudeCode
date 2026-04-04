@@ -227,9 +227,9 @@ def parse_servicer_certificate(html_content: str) -> dict:
         if val and val > 0:
             # Sanity: monthly interest per class should be < $5M for auto ABS
             if val > 5_000_000:
-                logger.warning(f"  note_interest: Class {cls_name} = ${val:,.2f} — too large, likely a balance not interest. Skipping.")
-                continue
-            note_interest_by_class[cls_name] = val  # Last match per class wins
+                continue  # Likely a note balance, not interest
+            if cls_name not in note_interest_by_class:
+                note_interest_by_class[cls_name] = val  # First match per class wins
     note_interest_total = sum(note_interest_by_class.values())
     if note_interest_total > 0:
         best_result["total_note_interest"] = note_interest_total
