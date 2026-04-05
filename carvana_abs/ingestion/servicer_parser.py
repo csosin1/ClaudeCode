@@ -373,15 +373,16 @@ def _parse_from_numbered_text(text: str) -> dict:
         data["total_note_interest"] = note_interest_total
         logger.debug(f"  Note interest from rate table: ${note_interest_total:,.2f}")
 
-    # Aggregate note balance (field 76 or sum)
-    if 76 in fields:
+    # Aggregate note balance: prefer sum of individual note balances (stable across vintages)
+    # Field 76 is unreliable — it shifts between deal vintages (sometimes reserve amount)
+    bal_sum = sum(data.get(col, 0) or 0 for col in
+                  ["note_balance_a1", "note_balance_a2", "note_balance_a3", "note_balance_a4",
+                   "note_balance_b", "note_balance_c", "note_balance_d", "note_balance_n"])
+    if bal_sum > 0:
+        data["aggregate_note_balance"] = bal_sum
+    elif 76 in fields:
+        # Fallback to field 76 only if individual balances unavailable
         data["aggregate_note_balance"] = _parse_numbered_value(fields[76]["raw"])["value"]
-    if "aggregate_note_balance" not in data or not data["aggregate_note_balance"]:
-        bal_sum = sum(data.get(col, 0) or 0 for col in
-                      ["note_balance_a1", "note_balance_a2", "note_balance_a3", "note_balance_a4",
-                       "note_balance_b", "note_balance_c", "note_balance_d", "note_balance_n"])
-        if bal_sum > 0:
-            data["aggregate_note_balance"] = bal_sum
 
     # --- Overcollateralization & Reserve (fields 63, 65, 78, 81) ---
     if 63 in fields:
