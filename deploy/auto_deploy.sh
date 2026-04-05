@@ -48,20 +48,8 @@ if [ "$LOCAL" != "$REMOTE" ]; then
 
     # Write status and push to GitHub so it can be read remotely
     /opt/abs-venv/bin/python /opt/abs-dashboard/carvana_abs/deploy_status.py > /opt/abs-dashboard/deploy/LAST_STATUS.json 2>&1 || true
-    # Run data diagnostic if script exists
-    if [ -f /opt/abs-dashboard/carvana_abs/diagnose_data.py ]; then
-        /opt/abs-venv/bin/python /opt/abs-dashboard/carvana_abs/diagnose_data.py > /opt/abs-dashboard/deploy/LAST_DIAGNOSTIC.txt 2>&1 || true
-    fi
-    # Dump cert fields for debugging (one-time)
-    if [ -f /opt/abs-dashboard/carvana_abs/dump_cert_quick.py ] && [ ! -f /opt/.cert_quick_dumped ]; then
-        /opt/abs-venv/bin/python /opt/abs-dashboard/carvana_abs/dump_cert_quick.py > /opt/abs-dashboard/deploy/LAST_CERT_FIELDS.txt 2>&1 || true
-        touch /opt/.cert_quick_dumped
-        # Force push this file specifically
-        cd /opt/abs-dashboard
-        git add -f deploy/LAST_CERT_FIELDS.txt 2>/dev/null || true
-    fi
     cd /opt/abs-dashboard
-    git add deploy/LAST_STATUS.json deploy/LAST_VALIDATION.txt deploy/LAST_DATA_CHECK.txt deploy/LAST_DIAGNOSTIC.txt deploy/LAST_CERT_FIELDS.txt 2>/dev/null
+    git add deploy/LAST_STATUS.json deploy/LAST_VALIDATION.txt deploy/LAST_DATA_CHECK.txt 2>/dev/null
     git commit -m "Auto-deploy status update" --allow-empty 2>/dev/null || true
     # Pull-rebase before push to avoid non-fast-forward rejection
     git pull --rebase origin claude/carvana-loan-dashboard-4QMPM 2>/dev/null || true
