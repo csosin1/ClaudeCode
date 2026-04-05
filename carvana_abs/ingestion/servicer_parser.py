@@ -217,6 +217,21 @@ def parse_servicer_certificate(html_content: str) -> dict:
     if m and _clean_number(m.group(1)):
         best_result["actual_servicing_fee"] = _clean_number(m.group(1))
 
+    # Extract aggregate note balance via regex (more reliable than field numbers which shift)
+    # Pattern: "Aggregate Note Balance after all distributions ... NUMBER"
+    agg_patterns = [
+        r'[Aa]ggregate\s+[Nn]ote\s+[Bb]alance\s+after\s+all\s+distributions\s+(?:\{[^}]*\}\s+)?(?:\(\d+\)\s+)?([\d,]+\.?\d*)',
+        r'[Aa]ggregate\s+[Nn]ote\s+[Bb]alance\s+after\s+all\s+distributions\s+([\d,]+\.?\d*)',
+    ]
+    for pattern in agg_patterns:
+        m = re.search(pattern, all_text)
+        if m and _clean_number(m.group(1)):
+            val = _clean_number(m.group(1))
+            if val > 0:
+                best_result["aggregate_note_balance"] = val
+                logger.debug(f"  aggregate_note_balance from regex: ${val:,.2f}")
+                break
+
     # Extract total note interest (sum of all class interest distributable amounts)
     # Pattern: "Class X Interest Distributable Amount XXXX"
     # Deduplicate by class name — servicer certs often repeat amounts in multiple sections
