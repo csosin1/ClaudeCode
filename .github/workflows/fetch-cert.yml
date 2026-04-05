@@ -17,15 +17,80 @@ jobs:
         with:
           ref: claude/carvana-loan-dashboard-4QMPM
 
-      - name: Download and extract cert
+      - name: Download certs from multiple deals
         run: |
-          curl -s -A "Clifford Sosin clifford.sosin@casinvestmentpartners.com" \
-            -o cert.htm \
-            "https://www.sec.gov/Archives/edgar/data/1801738/000180173825000053/crvna2020-p1servicerrepo.htm"
-          echo "Downloaded $(wc -c < cert.htm) bytes"
+          UA="Clifford Sosin clifford.sosin@casinvestmentpartners.com"
 
+          # Get a 2022-P1 cert URL from the DB on the server
+          # Since we can't query the DB, fetch the filing index from SEC
+          # 2022-P1 CIK is 0001903766 (from config.py)
+          # Just fetch the most recent 10-D filing page
+          curl -s -A "$UA" -o 2022p1_submissions.json \
+            "https://data.sec.gov/submissions/CIK0001903766.json"
+
+          # Extract a servicer cert URL from the submissions
           python3 << 'PYEOF'
+          import json, re, sys
+
+          with open("2022p1_submissions.json") as f:
+              data = json.load(f)
+
+          # Find recent 10-D filings
+          recent = data.get("filings", {}).get("recent", {})
+          forms = recent.get("form", [])
+          accessions = recent.get("accessionNumber", [])
+          dates = recent.get("filingDate", [])
+
+          for i, form in enumerate(forms):
+              if form == "10-D":
+                  print(f"Found 10-D: {accessions[i]} filed {dates[i]}")
+                  # Format accession for URL
+                  acc = accessions[i].replace("-", "")
+                  cik = "1903766"
+                  print(f"Index: https://www.sec.gov/Archives/edgar/data/{cik}/{acc}/index.json")
+                  with open("acc_2022p1.txt", "w") as f:
+                      f.write(f"{cik}\n{acc}\n{accessions[i]}\n{dates[i]}")
+                  break
+          PYEOF
+
+          if [ -f acc_2022p1.txt ]; then
+            CIK=$(sed -n '1p' acc_2022p1.txt)
+            ACC=$(sed -n '2p' acc_2022p1.txt)
+            echo "Fetching filing index for $ACC"
+            curl -s -A "$UA" -o filing_index.json \
+              "https://www.sec.gov/Archives/edgar/data/$CIK/$ACC/index.json"
+
+            # Find the servicer report exhibit
+            python3 << 'PYEOF2'
+          import json
+
+          with open("filing_index.json") as f:
+              data = json.load(f)
+
+          items = data.get("directory", {}).get("item", [])
+          for item in items:
+              name = item.get("name", "")
+              # Look for servicer report (usually ex-99.1 or similar)
+              if "servicer" in name.lower() or "ex99" in name.lower() or "ex-99" in name.lower():
+                  print(f"Found: {name}")
+                  with open("cert_url.txt", "w") as f:
+                      f.write(name)
+                  break
+          PYEOF2
+
+            if [ -f cert_url.txt ]; then
+              CERT_NAME=$(cat cert_url.txt)
+              CERT_URL="https://www.sec.gov/Archives/edgar/data/$CIK/$ACC/$CERT_NAME"
+              echo "Downloading cert: $CERT_URL"
+              curl -s -A "$UA" -o cert_2022p1.htm "$CERT_URL"
+              echo "Downloaded $(wc -c < cert_2022p1.htm) bytes"
+            fi
+          fi
+
+          # Extract text from all downloaded certs
+          python3 << 'PYEOF3'
           from html.parser import HTMLParser
+          import os
 
           class T(HTMLParser):
               def __init__(self):
@@ -36,23 +101,24 @@ jobs:
                   if d:
                       self.t.append(d)
 
-          with open("cert.htm") as f:
-              html = f.read()
-          p = T()
-          p.feed(html)
-
-          with open("deploy/certs_fields.txt", "w") as out:
-              out.write(f"Raw HTML size: {len(html)} bytes\n")
-              out.write(f"Text segments: {len(p.t)}\n\n")
-              # Write all text segments (the full cert content)
-              for i, seg in enumerate(p.t):
-                  out.write(f"{seg}\n")
-          print(f"Wrote {len(p.t)} text segments")
-          PYEOF
+          for fname in ["cert_2022p1.htm"]:
+              if not os.path.exists(fname):
+                  continue
+              with open(fname) as f:
+                  html = f.read()
+              p = T()
+              p.feed(html)
+              outname = f"deploy/{fname.replace('.htm', '_text.txt')}"
+              with open(outname, "w") as out:
+                  out.write(f"Source: {fname} ({len(html)} bytes)\n\n")
+                  for seg in p.t:
+                      out.write(f"{seg}\n")
+              print(f"Wrote {outname}")
+          PYEOF3
 
       - name: Commit results
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add deploy/certs_fields.txt
-          git diff --cached --quiet && echo "No changes" || (git commit -m "Dump raw cert text" && git push)
+          git add deploy/cert_2022p1_text.txt 2>/dev/null || true
+          git diff --cached --quiet && echo "No changes" || (git commit -m "Add 2022-P1 cert text dump" && git push)
