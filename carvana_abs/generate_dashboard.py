@@ -601,7 +601,11 @@ def generate_comparison_content(deals, title):
         except Exception:
             notes_df = pd.DataFrame()  # notes table may not exist yet
         if not notes_df.empty:
-            rate_lookup = dict(zip(notes_df["class"], notes_df["coupon_rate"]))
+            # Normalize class names: "A-1" -> "A1", "Class A" -> "A", etc.
+            norm_rate_lookup = {}
+            for cls, rate in zip(notes_df["class"], notes_df["coupon_rate"]):
+                norm = cls.upper().replace("-", "").replace(" ", "").replace("CLASS", "")
+                norm_rate_lookup[norm] = rate
             bal_cols = {"A1": "note_balance_a1", "A2": "note_balance_a2", "A3": "note_balance_a3",
                         "A4": "note_balance_a4", "B": "note_balance_b", "C": "note_balance_c",
                         "D": "note_balance_d", "N": "note_balance_n"}
@@ -611,10 +615,10 @@ def generate_comparison_content(deals, title):
                     row = pp.iloc[0]
                     w_sum, t_bal = 0, 0
                     for cls, col in bal_cols.items():
-                        if col in pp.columns and cls in rate_lookup:
+                        if col in pp.columns and cls in norm_rate_lookup:
                             bal = row.get(col)
                             if bal and bal > 0:
-                                w_sum += rate_lookup[cls] * bal
+                                w_sum += norm_rate_lookup[cls] * bal
                                 t_bal += bal
                     if t_bal > 0:
                         val = w_sum / t_bal
