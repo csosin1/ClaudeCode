@@ -2,26 +2,37 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>Spidy Climb - Sawyer's Game!</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body {
+  html, body {
     background: #0a0a2e;
     display: flex;
     justify-content: center;
     align-items: center;
-    height: 100vh;
+    height: 100%;
+    width: 100%;
     font-family: 'Segoe UI', Arial, sans-serif;
     overflow: hidden;
+    touch-action: none;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+    position: fixed;
+    top: 0; left: 0;
   }
   #gameWrapper {
     position: relative;
     border: 3px solid #ff1744;
     border-radius: 8px;
     box-shadow: 0 0 30px rgba(255, 23, 68, 0.5), 0 0 60px rgba(255, 23, 68, 0.2);
+    max-width: 100vw;
+    max-height: 100vh;
   }
-  canvas { display: block; background: #1a1a3e; border-radius: 5px; }
+  canvas { display: block; background: #1a1a3e; border-radius: 5px; touch-action: none; }
   #startScreen, #deathScreen {
     position: absolute;
     top: 0; left: 0; width: 100%; height: 100%;
@@ -34,7 +45,7 @@
     border-radius: 5px;
   }
   #startScreen h1 {
-    font-size: 52px;
+    font-size: min(52px, 10vw);
     color: #ff1744;
     text-shadow: 0 0 20px rgba(255, 23, 68, 0.7);
     margin-bottom: 10px;
@@ -53,8 +64,8 @@
   }
   #startScreen .instructions span { color: #fff; font-weight: bold; }
   .btn {
-    padding: 15px 50px;
-    font-size: 24px;
+    padding: 18px 55px;
+    font-size: min(24px, 5vw);
     font-weight: bold;
     color: #fff;
     background: #ff1744;
@@ -73,15 +84,15 @@
   }
   #deathScreen { display: none; }
   #deathScreen h2 {
-    font-size: 42px;
+    font-size: min(42px, 9vw);
     color: #ff1744;
     text-shadow: 0 0 20px rgba(255, 23, 68, 0.7);
     margin-bottom: 10px;
   }
   #deathMessage {
-    font-size: 20px;
+    font-size: min(20px, 4.2vw);
     color: #ffd54f;
-    margin: 15px 30px;
+    margin: 15px 20px;
     text-align: center;
     line-height: 1.5;
   }
@@ -146,14 +157,7 @@
   <div id="startScreen">
     <h1>SPIDY CLIMB</h1>
     <div class="subtitle">Sawyer's Super Spider Adventure!</div>
-    <div class="instructions">
-      <span>Up Arrow</span> - Climb Up<br>
-      <span>Down Arrow</span> - Climb Down<br>
-      <span>Left Arrow</span> - Move Left<br>
-      <span>Right Arrow</span> - Move Right<br><br>
-      Dodge villains &amp; obstacles!<br>
-      Collect webs for bonus points!<br>
-      Collect hearts to restore lives!
+    <div class="instructions" id="instructionsText">
     </div>
     <button class="btn" onclick="startGame()">SWING IN!</button>
   </div>
@@ -171,6 +175,96 @@ const ctx = canvas.getContext('2d');
 const W = 480, H = 640;
 canvas.width = W;
 canvas.height = H;
+
+// ============ RESPONSIVE SCALING ============
+let canvasScale = 1;
+let canvasOffsetX = 0;
+let canvasOffsetY = 0;
+
+function resizeCanvas() {
+  const wrapper = document.getElementById('gameWrapper');
+  const maxW = window.innerWidth;
+  const maxH = window.innerHeight;
+  const ratio = W / H;
+  let displayW, displayH;
+  if (maxW / maxH < ratio) {
+    displayW = maxW;
+    displayH = maxW / ratio;
+  } else {
+    displayH = maxH;
+    displayW = maxH * ratio;
+  }
+  canvas.style.width = displayW + 'px';
+  canvas.style.height = displayH + 'px';
+  canvasScale = displayW / W;
+  const rect = canvas.getBoundingClientRect();
+  canvasOffsetX = rect.left;
+  canvasOffsetY = rect.top;
+}
+window.addEventListener('resize', resizeCanvas);
+window.addEventListener('orientationchange', () => setTimeout(resizeCanvas, 100));
+resizeCanvas();
+
+// ============ DETECT MOBILE ============
+const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || ('ontouchstart' in window);
+
+// Set instructions based on device
+const instrEl = document.getElementById('instructionsText');
+if (isMobile) {
+  instrEl.innerHTML =
+    '<span>Drag your finger</span> to move Spidy<br>' +
+    'Spidy follows your finger!<br><br>' +
+    'Dodge villains &amp; obstacles!<br>' +
+    'Collect webs for bonus points!<br>' +
+    'Collect hearts to restore lives!';
+} else {
+  instrEl.innerHTML =
+    '<span>Arrow Keys</span> to move Spidy<br><br>' +
+    'Dodge villains &amp; obstacles!<br>' +
+    'Collect webs for bonus points!<br>' +
+    'Collect hearts to restore lives!';
+}
+
+// ============ TOUCH CONTROLS ============
+let touchActive = false;
+let touchTargetX = 0;
+let touchTargetY = 0;
+
+function getTouchGamePos(touch) {
+  return {
+    x: (touch.clientX - canvasOffsetX) / canvasScale,
+    y: (touch.clientY - canvasOffsetY) / canvasScale
+  };
+}
+
+canvas.addEventListener('touchstart', function(e) {
+  e.preventDefault();
+  touchActive = true;
+  const pos = getTouchGamePos(e.touches[0]);
+  touchTargetX = pos.x;
+  touchTargetY = pos.y;
+}, { passive: false });
+
+canvas.addEventListener('touchmove', function(e) {
+  e.preventDefault();
+  if (e.touches.length > 0) {
+    const pos = getTouchGamePos(e.touches[0]);
+    touchTargetX = pos.x;
+    touchTargetY = pos.y;
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchend', function(e) {
+  e.preventDefault();
+  touchActive = false;
+}, { passive: false });
+
+canvas.addEventListener('touchcancel', function(e) {
+  touchActive = false;
+}, { passive: false });
+
+// Prevent iOS rubber-band scrolling
+document.addEventListener('touchmove', function(e) { e.preventDefault(); }, { passive: false });
 
 // Game state
 let spidy, obstacles, collectibles, particles, buildings, floatingTexts;
@@ -870,7 +964,7 @@ function drawFloatingTexts() {
 
 function drawWebStrings() {
   // Decorative web strings from spidy when moving
-  if (keys['ArrowUp'] || keys['ArrowLeft'] || keys['ArrowRight']) {
+  if (touchActive || keys['ArrowUp'] || keys['ArrowLeft'] || keys['ArrowRight']) {
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
     ctx.lineWidth = 1;
     ctx.beginPath();
@@ -915,12 +1009,24 @@ function update() {
   }
   scrollSpeed = baseScrollSpeed;
 
-  // Move spidy
+  // Move spidy - keyboard or touch
   const spd = spidy.speed;
-  if (keys['ArrowUp']) spidy.y -= spd;
-  if (keys['ArrowDown']) spidy.y += spd * 0.7;
-  if (keys['ArrowLeft']) spidy.x -= spd;
-  if (keys['ArrowRight']) spidy.x += spd;
+  if (touchActive) {
+    // Smooth follow toward finger position
+    const dx = touchTargetX - spidy.x;
+    const dy = touchTargetY - spidy.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist > 2) {
+      const moveSpeed = Math.min(spd * 1.5, dist * 0.2);
+      spidy.x += (dx / dist) * moveSpeed;
+      spidy.y += (dy / dist) * moveSpeed;
+    }
+  } else {
+    if (keys['ArrowUp']) spidy.y -= spd;
+    if (keys['ArrowDown']) spidy.y += spd * 0.7;
+    if (keys['ArrowLeft']) spidy.x -= spd;
+    if (keys['ArrowRight']) spidy.x += spd;
+  }
 
   // Keep in bounds - FIXED: constrain to canvas edges
   spidy.x = Math.max(spidy.w / 2 + 2, Math.min(W - spidy.w / 2 - 2, spidy.x));
@@ -1057,6 +1163,24 @@ function draw() {
   drawParticles();
   drawFloatingTexts();
   drawSpidy();
+
+  // Touch indicator - subtle ring where finger is
+  if (touchActive) {
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(touchTargetX, touchTargetY, 20, 0, Math.PI * 2);
+    ctx.stroke();
+    // Web line from spidy to touch
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 5]);
+    ctx.beginPath();
+    ctx.moveTo(spidy.x, spidy.y);
+    ctx.lineTo(touchTargetX, touchTargetY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
 }
 
 // ============ GAME LOOP ============
