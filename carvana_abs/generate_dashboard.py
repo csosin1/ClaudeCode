@@ -194,51 +194,72 @@ def generate_deal_content(deal):
         except Exception:
             notes_df = pd.DataFrame()
 
-    # Method 1 (best): total_note_interest / aggregate_note_balance * 12
-    if not pool.empty and "total_note_interest" in pool.columns and "aggregate_note_balance" in pool.columns:
-        cod_fb = pool.dropna(subset=["total_note_interest", "aggregate_note_balance"]).copy()
-        cod_fb = cod_fb[cod_fb["aggregate_note_balance"] > 0].copy()
-        if not cod_fb.empty:
-            cod_fb["cost_of_debt"] = cod_fb["total_note_interest"] / cod_fb["aggregate_note_balance"] * 12
-            bad = cod_fb["cost_of_debt"] > 0.15
-            if bad.any():
-                logger.warning(f"[{deal}] Filtered {bad.sum()}/{len(cod_fb)} CoD values > 15%")
-            cod = cod_fb[~bad][["period", "cost_of_debt"]] if bad.any() else cod_fb[["period", "cost_of_debt"]]
-
-    # Method 2: weighted notes × note_balance columns (if method 1 gave < 3 points)
-    if len(cod) < 3 and not notes_df.empty and not pool.empty:
-        rate_lookup = dict(zip(notes_df["class"], notes_df["coupon_rate"]))
-        # Map note classes to balance columns, normalizing names (e.g. "A-1" -> "A1")
+    # Merged Method 1+2: use actual interest data when available, weighted coupon fallback per period
+    m1_count = 0
+    m2_count = 0
+    if not pool.empty:
+        # Build normalized rate lookup from notes for Method 2 fallback
+        norm_rate_lookup = {}
+        if not notes_df.empty:
+            for cls, rate in zip(notes_df["class"], notes_df["coupon_rate"]):
+                norm = cls.upper().replace("-", "").replace(" ", "").replace("CLASS", "")
+                norm_rate_lookup[norm] = rate
         bal_cols = {"A1": "note_balance_a1", "A2": "note_balance_a2", "A3": "note_balance_a3",
                     "A4": "note_balance_a4", "B": "note_balance_b", "C": "note_balance_c",
                     "D": "note_balance_d", "N": "note_balance_n"}
-        # Normalize note class names: "A-1" -> "A1", "Class A" -> "A", etc.
-        norm_rate_lookup = {}
-        for cls, rate in rate_lookup.items():
-            norm = cls.upper().replace("-", "").replace(" ", "").replace("CLASS", "")
-            norm_rate_lookup[norm] = rate
+        # Forward-fill note balance columns
         for col in bal_cols.values():
             if col in pool.columns:
                 pool[col] = pool[col].ffill()
+
+        has_ni_col = "total_note_interest" in pool.columns
+        has_nb_col = "aggregate_note_balance" in pool.columns
         cod_rows = []
+        filtered_count = 0
         for _, row in pool.iterrows():
-            weighted_sum = 0
-            total_bal = 0
-            for cls, col in bal_cols.items():
-                if col in pool.columns and cls in norm_rate_lookup:
-                    bal = row.get(col)
-                    if bal and bal > 0:
-                        weighted_sum += norm_rate_lookup[cls] * bal
-                        total_bal += bal
-            if total_bal > 0:
-                cod_rows.append({"period": row["period"], "cost_of_debt": weighted_sum / total_bal})
-        if len(cod_rows) > len(cod):
+            # Method 1: actual interest / actual balance (best)
+            used_m1 = False
+            if has_ni_col and has_nb_col:
+                ni = row.get("total_note_interest")
+                nb = row.get("aggregate_note_balance")
+                if ni and nb and nb > 0 and pd.notna(ni) and pd.notna(nb):
+                    val = ni / nb * 12
+                    if 0 < val < 0.25:
+                        cod_rows.append({"period": row["period"], "cost_of_debt": val})
+                        m1_count += 1
+                        used_m1 = True
+                    else:
+                        filtered_count += 1
+
+            # Method 2 fallback: weighted coupon rates × note balances
+            if not used_m1 and norm_rate_lookup:
+                weighted_sum = 0
+                total_bal = 0
+                for cls, col in bal_cols.items():
+                    if col in pool.columns and cls in norm_rate_lookup:
+                        bal = row.get(col)
+                        if bal and bal > 0:
+                            weighted_sum += norm_rate_lookup[cls] * bal
+                            total_bal += bal
+                if total_bal > 0:
+                    cod_rows.append({"period": row["period"], "cost_of_debt": weighted_sum / total_bal})
+                    m2_count += 1
+
+        if filtered_count > 0:
+            logger.warning(f"[{deal}] Filtered {filtered_count} CoD values outside (0, 25%) range")
+        if cod_rows:
             cod = pd.DataFrame(cod_rows)
+            logger.info(f"[{deal}] Merged CoD: {m1_count} periods from actual interest, {m2_count} from weighted coupons")
 
     # Method 3: flat line from notes table — works even if pool_performance is empty
     cod_source = "none"
     if len(cod) >= 3:
-        cod_source = "method1_or_2"
+        if m1_count > 0 and m2_count > 0:
+            cod_source = "method1+2"
+        elif m1_count > 0:
+            cod_source = "method1"
+        else:
+            cod_source = "method2"
     if len(cod) < 3 and not notes_df.empty:
         flat_rate = None
         if "original_balance" in notes_df.columns and notes_df["original_balance"].notna().any():
@@ -649,19 +670,34 @@ def generate_comparison_content(deals, title):
             notes_df = q("SELECT class, coupon_rate FROM notes WHERE deal=? AND coupon_rate IS NOT NULL", (deal,))
         except Exception:
             notes_df = pd.DataFrame()  # notes table may not exist yet
+        # Normalize class names and set up balance column mapping
+        norm_rate_lookup = {}
         if not notes_df.empty:
-            # Normalize class names: "A-1" -> "A1", "Class A" -> "A", etc.
-            norm_rate_lookup = {}
             for cls, rate in zip(notes_df["class"], notes_df["coupon_rate"]):
                 norm = cls.upper().replace("-", "").replace(" ", "").replace("CLASS", "")
                 norm_rate_lookup[norm] = rate
-            bal_cols = {"A1": "note_balance_a1", "A2": "note_balance_a2", "A3": "note_balance_a3",
-                        "A4": "note_balance_a4", "B": "note_balance_b", "C": "note_balance_c",
-                        "D": "note_balance_d", "N": "note_balance_n"}
-            for label, order in [("init", "ASC"), ("curr", "DESC")]:
-                pp = q(f"SELECT * FROM pool_performance WHERE deal=? ORDER BY distribution_date {order} LIMIT 1", (deal,))
-                if not pp.empty:
-                    row = pp.iloc[0]
+        bal_cols = {"A1": "note_balance_a1", "A2": "note_balance_a2", "A3": "note_balance_a3",
+                    "A4": "note_balance_a4", "B": "note_balance_b", "C": "note_balance_c",
+                    "D": "note_balance_d", "N": "note_balance_n"}
+        # Primary: try actual interest ratio FIRST (more accurate), then weighted notes
+        for label, order in [("init", "ASC"), ("curr", "DESC")]:
+            pp = q(f"SELECT * FROM pool_performance WHERE deal=? ORDER BY distribution_date {order} LIMIT 1", (deal,))
+            if not pp.empty:
+                row = pp.iloc[0]
+                # Method 1: total_note_interest / aggregate_note_balance * 12
+                ni = row.get("total_note_interest") if "total_note_interest" in pp.columns else None
+                nb = row.get("aggregate_note_balance") if "aggregate_note_balance" in pp.columns else None
+                if ni and nb and nb > 0 and pd.notna(ni) and pd.notna(nb):
+                    val = ni / nb * 12
+                    if 0 < val < 0.25:
+                        if label == "init":
+                            init_cod = val
+                        else:
+                            curr_cod = val
+                        logger.debug(f"  [{deal}] Summary CoD {label}: method1 actual interest={ni}, balance={nb}, cod={val:.4%}")
+                        continue
+                # Method 2 fallback: weighted coupon rates × note balances
+                if norm_rate_lookup:
                     w_sum, t_bal = 0, 0
                     for cls, col in bal_cols.items():
                         if col in pp.columns and cls in norm_rate_lookup:
@@ -675,26 +711,10 @@ def generate_comparison_content(deals, title):
                             init_cod = val
                         else:
                             curr_cod = val
-        # Fallback: total_note_interest / aggregate_note_balance * 12
-        if init_cod is None or curr_cod is None:
-            for label, order in [("init", "ASC"), ("curr", "DESC")]:
-                if (label == "init" and init_cod is not None) or (label == "curr" and curr_cod is not None):
-                    continue
-                fb = q(f"""SELECT total_note_interest, aggregate_note_balance
-                    FROM pool_performance WHERE deal=? AND total_note_interest IS NOT NULL
-                    AND aggregate_note_balance > 0 ORDER BY distribution_date {order} LIMIT 1""", (deal,))
-                if not fb.empty:
-                    val = fb.iloc[0]["total_note_interest"] / fb.iloc[0]["aggregate_note_balance"] * 12
-                    if val <= 0.15:  # Only reject impossibly high values
-                        if label == "init":
-                            init_cod = val
-                        else:
-                            curr_cod = val
+                        logger.debug(f"  [{deal}] Summary CoD {label}: method2 weighted notes, total_bal={t_bal}, cod={val:.4%}")
         # Fallback 3: flat rate from notes table (weighted by original_balance or simple avg)
-        cod_source_summary = "weighted_notes" if (init_cod is not None) else "none"
+        cod_source_summary = "method1_or_2" if (init_cod is not None) else "none"
         if init_cod is None or curr_cod is None:
-            if cod_source_summary == "none":
-                cod_source_summary = "note_interest_ratio"
             if not notes_df.empty:
                 try:
                     notes_ob = q("SELECT class, coupon_rate, original_balance FROM notes WHERE deal=? AND coupon_rate IS NOT NULL", (deal,))
