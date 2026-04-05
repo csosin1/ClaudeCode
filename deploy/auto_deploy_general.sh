@@ -10,16 +10,19 @@ cd "$REPO_DIR" || exit 1
 
 # One-time car-offers setup (Node.js + Playwright + PM2)
 if [ ! -f /opt/.car_offers_initialized ]; then
-    echo "$(date): Initializing car-offers project..."
+    echo "$(date): Initializing car-offers project..." >> "$LOG"
 
     # System deps for Playwright Chromium
-    apt-get update -qq && apt-get install -y -qq build-essential \
+    apt-get update -qq >> "$LOG" 2>&1
+    apt-get install -y -qq build-essential \
         libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
         libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 \
-        libpango-1.0-0 libcairo2 libasound2 libxshmfence1 2>/dev/null
+        libpango-1.0-0 libcairo2 libasound2 libxshmfence1 >> "$LOG" 2>&1
+    echo "$(date): System deps installed." >> "$LOG"
 
     # Install PM2 globally
-    npm install -g pm2 2>/dev/null
+    npm install -g pm2 >> "$LOG" 2>&1
+    echo "$(date): PM2 installed." >> "$LOG"
 
     # Create project directory
     mkdir -p /opt/car-offers/data
@@ -113,20 +116,23 @@ if [ "$LOCAL" != "$REMOTE" ]; then
 
         # npm install if package.json changed
         if [ "$REPO_DIR/car-offers/package.json" -nt /opt/car-offers/.npm_installed ] || [ ! -f /opt/car-offers/.npm_installed ]; then
-            cd /opt/car-offers && npm install --production 2>/dev/null
-            npx playwright install chromium --with-deps 2>/dev/null
+            echo "$(date): Running npm install for car-offers..." >> "$LOG"
+            cd /opt/car-offers && npm install --production >> "$LOG" 2>&1
+            echo "$(date): Running playwright install chromium..." >> "$LOG"
+            npx playwright install chromium --with-deps >> "$LOG" 2>&1
             touch /opt/car-offers/.npm_installed
-            echo "$(date): car-offers npm install + Playwright install complete."
+            echo "$(date): car-offers npm install + Playwright install complete." >> "$LOG"
         fi
 
         # Start or restart with PM2
+        echo "$(date): Starting car-offers with PM2..." >> "$LOG"
         if pm2 describe car-offers > /dev/null 2>&1; then
-            pm2 restart car-offers 2>/dev/null
+            pm2 restart car-offers >> "$LOG" 2>&1
         else
-            cd /opt/car-offers && pm2 start server.js --name car-offers 2>/dev/null
-            pm2 save 2>/dev/null
+            cd /opt/car-offers && pm2 start server.js --name car-offers >> "$LOG" 2>&1
+            pm2 save >> "$LOG" 2>&1
         fi
-        echo "$(date): car-offers synced and running."
+        echo "$(date): car-offers synced and running." >> "$LOG"
     fi
 
     # Update the running copy of this script
