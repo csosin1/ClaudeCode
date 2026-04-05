@@ -91,6 +91,26 @@ Any chat can deploy static files by pushing to `main`:
 3. Your page is live at `http://159.223.127.125/games/<your-game>/`
 4. No SSH access needed. No manual steps.
 
+**Step-by-step commands (from any branch):**
+```bash
+# 1. Make sure your game HTML file is ready (single self-contained index.html)
+# 2. Switch to main, pull latest, add your game, push:
+git stash                              # save any uncommitted work
+git checkout main
+git pull origin main
+mkdir -p games/<your-game>
+cp <path-to-your-game.html> games/<your-game>/index.html
+git add games/<your-game>/index.html
+git commit -m "Deploy <your-game> to /games/<your-game>/"
+git push origin main
+git checkout -                         # go back to your feature branch
+git stash pop                          # restore uncommitted work
+# 3. Wait ~30 seconds, then verify:
+#    http://159.223.127.125/games/<your-game>/
+```
+
+**Important:** You MUST push to `main`, not your feature branch. The auto-deploy only watches `main` for games.
+
 ### Server/Deploy General Rules
 - When sharing a droplet across projects, use separate nginx routes, databases, and environment configs.
 - After pushing changes that trigger auto-deploy, wait for confirmation before sharing preview links.
