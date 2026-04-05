@@ -35,9 +35,10 @@ if [ "$LOCAL" != "$REMOTE" ]; then
     # Install any new dependencies
     /opt/abs-venv/bin/pip install -q -r /opt/abs-dashboard/carvana_abs/requirements.txt >> /var/log/auto-deploy.log 2>&1 || true
 
-    # Always export dashboard DB, run model, and regenerate preview on code changes
+    # Always export dashboard DB, run model, generate PDFs, and regenerate preview on code changes
     /opt/abs-venv/bin/python /opt/abs-dashboard/carvana_abs/export_dashboard_db.py >> /var/log/auto-deploy.log 2>&1 || true
     /opt/abs-venv/bin/python /opt/abs-dashboard/carvana_abs/default_model.py >> /var/log/auto-deploy.log 2>&1 || true
+    /opt/abs-venv/bin/python /opt/abs-dashboard/carvana_abs/generate_pdfs.py >> /var/log/auto-deploy.log 2>&1 || true
     /opt/abs-venv/bin/python /opt/abs-dashboard/carvana_abs/generate_preview.py >> /var/log/auto-deploy.log 2>&1 || true
 
     # Run data validation and check the generated HTML
