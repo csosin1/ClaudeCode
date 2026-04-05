@@ -473,12 +473,44 @@ If FAIL: [what the user would have seen]
 
 **Deleting a project:**
 
-1. Confirm with the user — name the project and what will be removed
+Deletion is destructive and irreversible. The Orchestrator must get explicit user confirmation before proceeding.
+
+Step 1 — Confirm with the user. Present a summary of everything that will be removed:
+
+```
+DELETE: [project name]
+Will remove:
+- Source files: [repo path]
+- Server files: [droplet path]
+- Server logs: /var/log/[project]/
+- nginx route: [location block]
+- Landing page card: [card title]
+- Uptime cron job
+- Logrotate config
+- RUNBOOK.md entry
+
+Type "delete [project name]" to confirm.
+```
+
+Do NOT proceed until the user confirms with the project name. "Yes" or "ok" is not enough — the user must name what they're deleting.
+
+Step 2 — Remove everything (no orphans):
+
 1. Remove the landing page card from `deploy/landing.html`
-1. Remove the nginx location block from `deploy/update_nginx.sh`
+1. Remove the nginx location block (and any trailing-slash redirects) from `deploy/update_nginx.sh`
 1. Bump `NGINX_VERSION`
 1. For static games: delete the `games/<name>/` directory from the repo — `rsync --delete` removes it from the server on next deploy
-1. For `/opt/` projects: add a cleanup block to `deploy/auto_deploy_general.sh` gated by a flag file (e.g. `rm -rf /opt/<project>/ && touch /opt/.cleaned-<project>`)
-1. Remove uptime cron and logrotate config via a gated block in `deploy/auto_deploy_general.sh`
+1. For `/opt/` projects: add a one-time cleanup block to `deploy/auto_deploy_general.sh` gated by a flag file that removes all of the following:
+   - Project directory: `rm -rf /opt/<project>/`
+   - Project logs: `rm -rf /var/log/<project>/`
+   - Logrotate config: `rm -f /etc/logrotate.d/<project>`
+   - Uptime cron: remove the cron line for this project
+   - Flag file: `touch /opt/.cleaned-<project>`
 1. Remove from `RUNBOOK.md`
 1. Push to `main`
+
+Step 3 — Verify after auto-deploy runs:
+
+1. Confirm the project URL returns 404
+1. Confirm the landing page no longer links to it
+1. Report to the user that deletion is complete
