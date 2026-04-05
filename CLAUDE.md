@@ -13,6 +13,11 @@
 - If a build/deploy/test step exists, run it automatically.
 - If you need data to verify, write a script to check it rather than asking the user to look.
 
+### Sharing Links
+- When sharing URLs with the user, always use plain clickable links — never wrap them in markdown bold (`**`), backticks, or other formatting that breaks clickability.
+- Correct: http://159.223.127.125/games/sky-barons/
+- Wrong: **http://159.223.127.125/games/sky-barons/**
+
 ### Be Direct About Limitations
 - If you can't access something due to network/auth restrictions, state it clearly on the first attempt — don't keep retrying.
 - If a deploy is taking a long time, explain why and give a realistic estimate.
