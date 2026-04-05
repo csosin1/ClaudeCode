@@ -208,6 +208,45 @@ After every completed task, Orchestrator:
 
 -----
 
+## Session Recovery — Resuming After Token Exhaustion
+
+Sessions can end mid-task if tokens run out. The Orchestrator must keep state clean enough that a **new session can resume without user explanation**.
+
+### Prevention — Commit Early, Update Often
+
+- **TASK_STATE.md is the recovery lifeline.** Update it at every stage transition (building → reviewing → deploying → qa). If the session dies, the next Orchestrator reads TASK_STATE.md and knows exactly where to pick up.
+- **Commit and push after every meaningful milestone** — after Builder completes, after Reviewer returns verdict, after deploying. Don't batch up work and push once at the end. If the session dies with uncommitted work, it's lost.
+- **Git is the checkpoint system.** Committed code survives session death. Uncommitted code doesn't. Err on the side of committing too often.
+
+### Resumption — What a New Session Must Do
+
+When an Orchestrator starts and finds `TASK_STATE.md` with status != "done":
+
+1. **Read TASK_STATE.md** — understand the task, spec, and where it stopped
+2. **Read CHANGES.md** — see what the Builder already completed
+3. **Check git log** — see what's been committed and pushed
+4. **Check the live site** — is the current deploy working or broken?
+5. **Check GitHub Actions** — did QA pass or fail on the last push?
+6. **Resume from the current stage:**
+   - `building` → Builder work may be partial. Read CHANGES.md for progress. Either continue or restart the build.
+   - `reviewing` → Builder is done. Run the Reviewer.
+   - `deploying` → Code is ready. Check if it was pushed to main. If yes, check deploy status. If no, push it.
+   - `qa` → Deploy happened. Check GitHub Actions for results. If pass, wrap up. If fail, start the fix cycle.
+   - `blocked` → Read the blocker, escalate to user.
+
+### What Stays Safe
+
+- **Rollback tags** are in git — a new session can always roll back
+- **Builder output** is committed — no need to rebuild from scratch
+- **The live site** has the last successful deploy — if the session died before deploying, nothing is broken
+- **TASK_STATE.md** tells the new session exactly what's pending
+
+### The Risk Window
+
+The dangerous moment is **after pushing to main but before reading QA results**. The deploy happens, but nobody checked if QA passed. A new session must check GitHub Actions for the most recent push to main as its first action.
+
+-----
+
 ## Be Fully Autonomous
 
 - Do everything yourself. Never ask the user to run commands, check URLs, load files, or touch a terminal.
@@ -287,6 +326,7 @@ CLAUDE.md version: 1.0
 Status:            [clarifying | speccing | building | reviewing | deploying | qa | done | blocked]
 Spec approved:     [yes / no / pending]
 Rollback tag:      [git tag, set before deploy]
+Resume hint:       [one-liner: what the next session should do if this one dies]
 
 ## Spec
 [approved spec]
