@@ -319,7 +319,11 @@ def _parse_from_numbered_text(text: str) -> dict:
         if data["delinquency_trigger_level"]:
             data["delinquency_trigger_level"] = data["delinquency_trigger_level"] / 100.0
 
-    # --- Note Balances (after monthly payment: fields 20,26,32,38,44,50,56,61) ---
+    # --- Note Balances (balance after monthly payment) ---
+    # Actual cert layout per class (7 fields each, N has 5):
+    #   A-1: 16(orig), 17(begin), 18(parity), 19(principal), 20(balance after), 21(pool factor)
+    #   A-2: 22-27, A-3: 28-33, A-4: 34-39, B: 40-45, C: 46-51, D: 52-57
+    #   N: 58(orig), 59(begin), 60(principal), 61(balance after), 62(pool factor)
     note_field_map = {
         20: "note_balance_a1", 26: "note_balance_a2", 32: "note_balance_a3",
         38: "note_balance_a4", 44: "note_balance_b", 50: "note_balance_c",
@@ -329,35 +333,45 @@ def _parse_from_numbered_text(text: str) -> dict:
         if field_num in fields:
             data[col_name] = _parse_numbered_value(fields[field_num]["raw"])["value"]
 
-    # --- Note Rates (typically 6 fields before balance: 14,20→14, 26→20 wait...)
-    # Standard ABS servicer cert layout per class:
-    #   Rate, Interest Distributable, Interest Paid, Shortfall, Balance Before, Principal, Balance After
-    # So rate field = balance field - 6
-    note_rate_map = {
-        14: "note_rate_a1", 20: "note_rate_a2", 26: "note_rate_a3",
-        32: "note_rate_a4", 38: "note_rate_b", 44: "note_rate_c",
-        50: "note_rate_d", 55: "note_rate_n",
-    }
-    for field_num, col_name in note_rate_map.items():
-        if field_num in fields:
-            pct = _parse_numbered_value(fields[field_num]["raw"])["pct"]
-            if pct and 0.1 < pct < 30:  # Sanity: rate should be 0.1% to 30%
-                data[col_name] = pct / 100.0  # Store as decimal
-
-    # --- Note Interest Distributable (rate field + 1 for each class) ---
-    note_interest_map = {
-        15: "A1", 21: "A2", 27: "A3",
-        33: "A4", 39: "B", 45: "C",
-        51: "D", 56: "N",
+    # --- Note Rates (from "Calculation of Interest Distributable Amount" table, fields 136-143) ---
+    # Each field contains: BOM Note Bal, Interest Carryover, Note Interest Rate, Days, Days Basis, Rate, Calculated Interest
+    # We extract the rate (percentage) and the calculated interest (dollar amount)
+    note_rate_fields = {
+        136: ("A1", "note_rate_a1"), 137: ("A2", "note_rate_a2"),
+        138: ("A3", "note_rate_a3"), 139: ("A4", "note_rate_a4"),
+        140: ("B", "note_rate_b"), 141: ("C", "note_rate_c"),
+        142: ("D", "note_rate_d"), 143: ("N", "note_rate_n"),
     }
     note_interest_total = 0.0
-    for field_num, cls_name in note_interest_map.items():
+    for field_num, (cls_name, rate_col) in note_rate_fields.items():
         if field_num in fields:
-            val = _parse_numbered_value(fields[field_num]["raw"])["value"]
-            if val and val > 0:
-                note_interest_total += val
+            raw = fields[field_num]["raw"]
+            # Extract percentage (note interest rate) — typically the first percentage in the field
+            pcts = re.findall(r'([\d.]+)%', raw)
+            if pcts:
+                # The note coupon rate is usually the first percentage
+                for pct_str in pcts:
+                    pct = _clean_number(pct_str)
+                    if pct and 0.01 < pct < 30:  # Reasonable annual rate range
+                        data[rate_col] = pct / 100.0
+                        break
+            # Extract calculated interest (last dollar amount in the field)
+            # Field format: "1 Class A-1 0.00 0 0.19% 28 7.78% 0.00"
+            # The last number is the calculated interest for this class
+            amounts = re.findall(r'([\d,]+\.?\d*)', raw)
+            if amounts:
+                # Last numeric value is the calculated interest
+                calc_interest = _clean_number(amounts[-1])
+                if calc_interest and calc_interest > 0:
+                    note_interest_total += calc_interest
+
+    # Also extract interest from the waterfall section via regex (more reliable)
+    # Pattern: "Class X Interest Distributable Amount XXXX" in the waterfall
+    # This is already handled by the regex parser in _parse_from_text()
+    # but we compute it here too from the rate table as a cross-check
     if note_interest_total > 0:
         data["total_note_interest"] = note_interest_total
+        logger.debug(f"  Note interest from rate table: ${note_interest_total:,.2f}")
 
     # Aggregate note balance (field 76 or sum)
     if 76 in fields:

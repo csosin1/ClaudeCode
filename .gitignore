@@ -9,3 +9,4 @@ __pycache__/
 *.pyc
 *.db
 .playwright-mcp/
+carvana_abs/filing_cache/

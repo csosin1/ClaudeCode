@@ -1,5 +1,6 @@
 """SEC EDGAR API client with rate limiting and retry logic."""
 
+import os
 import time
 import logging
 import requests
@@ -97,21 +98,60 @@ def get_filing_page(accession_number: str, cik: str) -> Optional[str]:
     return resp.text if resp else None
 
 
+CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "filing_cache")
+
+
+def _cache_path(url: str) -> str:
+    """Get local cache path for a URL."""
+    # Use the URL path as the filename, replacing slashes
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    safe_name = parsed.path.strip("/").replace("/", "_")
+    return os.path.join(CACHE_DIR, safe_name)
+
+
 def download_document(url: str) -> Optional[str]:
     """Download a document (HTML, XML, etc.) from SEC EDGAR.
 
+    Caches locally so we don't re-download on reingest.
     Returns the text content of the document.
     """
+    # Check cache first
+    cache = _cache_path(url)
+    if os.path.exists(cache):
+        logger.debug(f"Cache hit: {cache}")
+        with open(cache, "r", errors="replace") as f:
+            return f.read()
+
     logger.info(f"Downloading document: {url}")
     resp = fetch_url(url)
-    return resp.text if resp else None
+    if resp:
+        # Save to cache
+        os.makedirs(CACHE_DIR, exist_ok=True)
+        with open(cache, "w", errors="replace") as f:
+            f.write(resp.text)
+        logger.debug(f"Cached: {cache}")
+        return resp.text
+    return None
 
 
 def download_document_bytes(url: str) -> Optional[bytes]:
     """Download a document as raw bytes from SEC EDGAR.
 
+    Caches locally so we don't re-download on reingest.
     Returns the raw bytes content of the document.
     """
+    cache = _cache_path(url) + ".bin"
+    if os.path.exists(cache):
+        logger.debug(f"Cache hit: {cache}")
+        with open(cache, "rb") as f:
+            return f.read()
+
     logger.info(f"Downloading document (bytes): {url}")
     resp = fetch_url(url)
-    return resp.content if resp else None
+    if resp:
+        os.makedirs(CACHE_DIR, exist_ok=True)
+        with open(cache, "wb") as f:
+            f.write(resp.content)
+        return resp.content
+    return None
