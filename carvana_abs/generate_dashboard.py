@@ -1012,6 +1012,29 @@ def main():
     global _chart_id
     _chart_id = 0
 
+    # Download one servicer cert and save it for inspection
+    try:
+        from ingestion.edgar_client import download_document
+        cert_conn = sqlite3.connect(ACTIVE_DB)
+        cert_row = cert_conn.execute(
+            "SELECT servicer_cert_url FROM filings WHERE deal='2020-P1' AND servicer_cert_url IS NOT NULL ORDER BY filing_date DESC LIMIT 1"
+        ).fetchone()
+        cert_conn.close()
+        if cert_row:
+            cert_html = download_document(cert_row[0])
+            if cert_html:
+                cert_path = os.path.join(OUT_DIR, "cert_sample.htm")
+                with open(cert_path, "w") as f:
+                    f.write(cert_html)
+                # Also save to preview dir
+                preview_cert = os.path.join(OUT_DIR, "preview", "cert_sample.htm")
+                os.makedirs(os.path.dirname(preview_cert), exist_ok=True)
+                with open(preview_cert, "w") as f:
+                    f.write(cert_html)
+                logger.info(f"Saved sample cert to {cert_path}")
+    except Exception as e:
+        logger.warning(f"Could not save sample cert: {e}")
+
     deal_contents = {}
     for deal in DASHBOARD_DEALS:
         logger.info(f"Generating {deal}...")
