@@ -1,24 +1,37 @@
 ## Current Task
-Name:              [task name]
+Name:              Dice Roller App
 CLAUDE.md version: 1.0
-Status:            [clarifying | speccing | building | reviewing | deploying | qa | done | blocked]
-Spec approved:     [yes / no / pending]
-Rollback tag:      [git tag, set before deploy]
+Status:            deploying
+Spec approved:     yes
+Rollback tag:      [pending - set before deploy]
 
 ## Spec
-[approved spec]
+SPEC: Dice Roller App
+What will be built: A simple dice roller game — tap a button to roll 1-6,
+  shows the result with a visual die face, and keeps a roll history below.
+Success criteria:
+  - Page loads at /games/dice-roller/ without JS errors
+  - "Roll" button generates a number 1-6 on each click
+  - Die face SVG/emoji updates to match the number
+  - Roll history shows last 10 rolls
+  - Works at 390px mobile viewport
+  - All existing tests still pass (no regressions)
+File location: games/dice-roller/index.html
 
 ## Builder Output
-[summary from CHANGES.md]
+- Created games/dice-roller/index.html (single-file, inline CSS/JS)
+- Added Playwright tests to tests/qa-smoke.spec.ts
+- Updated CHANGES.md
 
 ## Reviewer Verdict
-[PASS / PASS WITH NOTES / FAIL + details]
+FAIL — missing link card on games/index.html
+Orchestrator fixed: added card to games/index.html and updated deploy/landing.html
 
 ## QA Result
-[PASS / FAIL + evidence summary]
+[pending — deploying now]
 
 ## Blockers
-[anything escalated to user]
+[none]
 
 ## Cost
-[token/cost estimate for this task]
+Builder: ~23k tokens | Reviewer: ~24k tokens
