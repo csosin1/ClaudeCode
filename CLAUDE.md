@@ -49,12 +49,42 @@ Each project is isolated to its own directory on the droplet. **Never write file
 - **Landing page** writes ONLY to `/var/www/landing/`
 - Future projects get their own `/opt/<project>/` directory
 
+### How Auto-Deploy Works
+
+There are **two independent auto-deploy systems** on the droplet, each running every 30 seconds:
+
+#### 1. General Deploy (main branch → static files)
+- **Watches:** `main` branch
+- **Repo clone:** `/opt/site-deploy/`
+- **Timer:** `general-deploy.timer`
+- **Log:** `/var/log/general-deploy.log`
+- **What it does:**
+  - Syncs `games/` directory → `/var/www/games/` (rsync, mirrors repo exactly)
+  - Copies `deploy/landing.html` → `/var/www/landing/index.html`
+  - Checks `deploy/NGINX_VERSION` and runs `deploy/update_nginx.sh` if changed
+
+**To deploy a game or static page:** Push files to `games/<name>/index.html` on `main`. They appear at `http://159.223.127.125/games/<name>/` within 30 seconds.
+
+#### 2. Carvana Deploy (feature branch → dashboard)
+- **Watches:** `claude/carvana-loan-dashboard-4QMPM` branch
+- **Repo clone:** `/opt/abs-dashboard/`
+- **Timer:** `auto-deploy.timer`
+- **Log:** `/var/log/auto-deploy.log`
+- **What it does:** Pulls code, runs Python pipeline (reingest, model, generate HTML), writes to `static_site/preview/`
+
 ### Adding a New Project
 1. Create a new directory: `/opt/<project>/` on the droplet
 2. Add a new `location /<ProjectName>/` block in `deploy/update_nginx.sh`
 3. Bump the version number in `deploy/NGINX_VERSION` to trigger nginx reload
 4. Add a link card to `deploy/landing.html`
 5. Set up its own auto-deploy script if needed (do NOT reuse Carvana's)
+
+### Deploying Static Files (Games, Simple Pages)
+Any chat can deploy static files by pushing to `main`:
+1. Push your HTML to `games/<your-game>/index.html` on the `main` branch
+2. The general auto-deploy pulls within 30s and syncs to `/var/www/games/`
+3. Your page is live at `http://159.223.127.125/games/<your-game>/`
+4. No SSH access needed. No manual steps.
 
 ### Server/Deploy General Rules
 - When sharing a droplet across projects, use separate nginx routes, databases, and environment configs.
