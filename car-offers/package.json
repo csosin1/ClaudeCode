@@ -1,0 +1,16 @@
+{
+  "name": "car-offers",
+  "version": "1.0.0",
+  "description": "Automated car purchase offer aggregator (Carvana, CarMax, Driveway)",
+  "main": "index.js",
+  "scripts": {
+    "start": "node server.js",
+    "carvana": "node index.js carvana"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.21.0",
+    "playwright-extra": "^4.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2"
+  }
+}
