@@ -4,7 +4,8 @@
 
 # Ensure landing page directory exists
 mkdir -p /var/www/landing
-cp /opt/abs-dashboard/deploy/landing.html /var/www/landing/index.html
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cp "$SCRIPT_DIR/landing.html" /var/www/landing/index.html 2>/dev/null || true
 
 cat > /etc/nginx/sites-available/abs-dashboard << 'NGXEOF'
 server {

@@ -9,15 +9,11 @@ git fetch origin claude/carvana-loan-dashboard-4QMPM 2>/dev/null
 LOCAL=$(git rev-parse HEAD)
 REMOTE=$(git rev-parse origin/claude/carvana-loan-dashboard-4QMPM)
 
-# Update nginx config if version has changed (runs every cycle, not just on new commits)
-if [ -f /opt/abs-dashboard/deploy/NGINX_VERSION ]; then
-    NEED_NGINX=$(cat /opt/abs-dashboard/deploy/NGINX_VERSION)
-    HAVE_NGINX=$(cat /opt/.nginx_version 2>/dev/null || echo "none")
-    if [ "$NEED_NGINX" != "$HAVE_NGINX" ]; then
-        echo "$(date): Updating nginx config (v$NEED_NGINX)..."
-        bash /opt/abs-dashboard/deploy/update_nginx.sh >> /var/log/auto-deploy.log 2>&1 || true
-        echo "$NEED_NGINX" > /opt/.nginx_version
-    fi
+# Bootstrap general auto-deploy (one-time: installs timer for main branch)
+if [ -f /opt/abs-dashboard/deploy/setup_general_deploy.sh ] && [ ! -f /opt/.general_deploy_setup ]; then
+    echo "$(date): Installing general auto-deploy for main branch..."
+    bash /opt/abs-dashboard/deploy/setup_general_deploy.sh >> /var/log/auto-deploy.log 2>&1 || true
+    touch /opt/.general_deploy_setup
 fi
 
 if [ "$LOCAL" != "$REMOTE" ]; then
