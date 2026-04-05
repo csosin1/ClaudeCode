@@ -484,7 +484,7 @@ Will remove:
 - Server files: [droplet path]
 - Server logs: /var/log/[project]/
 - nginx route: [location block]
-- Landing page card: [card title]
+- Link cards: landing page, games hub, any other page linking to it
 - Uptime cron job
 - Logrotate config
 - RUNBOOK.md entry
@@ -496,7 +496,10 @@ Do NOT proceed until the user confirms with the project name. "Yes" or "ok" is n
 
 Step 2 — Remove everything (no orphans):
 
-1. Remove the landing page card from `deploy/landing.html`
+1. Remove all link cards pointing to the project:
+   - `deploy/landing.html` — main landing page card
+   - `games/index.html` — game hub card (if it's a game)
+   - Any other index or hub page that links to it
 1. Remove the nginx location block (and any trailing-slash redirects) from `deploy/update_nginx.sh`
 1. Bump `NGINX_VERSION`
 1. For static games: delete the `games/<name>/` directory from the repo — `rsync --delete` removes it from the server on next deploy
