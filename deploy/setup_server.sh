@@ -82,25 +82,32 @@ server {
     listen 80 default_server;
     listen [::]:80 default_server;
 
-    # Dashboard — no auth
+    # Landing page — project index
     location / {
-        proxy_pass http://127.0.0.1:8501;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_read_timeout 86400;
+        alias /var/www/landing/;
+        index index.html;
     }
 
-    # Streamlit static assets (no auth needed for CSS/JS)
-    location /_stcore/ {
-        proxy_pass http://127.0.0.1:8501/_stcore/;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
+    # Trailing-slash redirects
+    location = /CarvanaLoanDashBoard {
+        return 301 /CarvanaLoanDashBoard/;
+    }
+    location = /CarvanaLoanDashBoard/preview {
+        return 301 /CarvanaLoanDashBoard/preview/;
+    }
+
+    # Carvana ABS Dashboard — preview
+    location /CarvanaLoanDashBoard/preview/ {
+        alias /opt/abs-dashboard/carvana_abs/static_site/preview/;
+        index index.html;
+        try_files $uri $uri/ /CarvanaLoanDashBoard/preview/index.html;
+    }
+
+    # Carvana ABS Dashboard — live
+    location /CarvanaLoanDashBoard/ {
+        alias /opt/abs-dashboard/carvana_abs/static_site/live/;
+        index index.html;
+        try_files $uri $uri/ /CarvanaLoanDashBoard/index.html;
     }
 
     # Games — no password needed (for the kids)
@@ -110,6 +117,10 @@ server {
     }
 }
 NGXEOF
+
+# Set up landing page
+mkdir -p /var/www/landing
+cp "$APP_DIR/deploy/landing.html" /var/www/landing/index.html
 
 rm -f /etc/nginx/sites-enabled/default
 ln -sf /etc/nginx/sites-available/abs-dashboard /etc/nginx/sites-enabled/
@@ -144,14 +155,10 @@ echo "============================================================"
 echo "  SETUP COMPLETE!"
 echo "============================================================"
 echo ""
-echo "  Dashboard:  http://$(curl -s ifconfig.me)"
-echo "  Username:   $DASH_USER"
-echo "  Password:   $DASH_PASS"
-echo ""
+echo "  Landing:    http://$(curl -s ifconfig.me)/"
+echo "  Dashboard:  http://$(curl -s ifconfig.me)/CarvanaLoanDashBoard/"
+echo "  Preview:    http://$(curl -s ifconfig.me)/CarvanaLoanDashBoard/preview/"
 echo "  Games:      http://$(curl -s ifconfig.me)/games/"
-echo ""
-echo "  IMPORTANT: Change your password!"
-echo "    Run: htpasswd /etc/nginx/.htpasswd $DASH_USER"
 echo ""
 echo "  Daily auto-ingestion runs at 6 AM UTC."
 echo "  Logs: /var/log/abs-ingestion.log"
