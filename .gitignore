@@ -8,3 +8,4 @@ qa-report.md
 __pycache__/
 *.pyc
 *.db
+.playwright-mcp/
