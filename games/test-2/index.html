@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Test 2 - 99 on Fire</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #0a0a0a;
+      overflow: hidden;
+    }
+    canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+    }
+    .number {
+      font-family: 'Arial Black', Impact, sans-serif;
+      font-size: clamp(8rem, 30vw, 20rem);
+      font-weight: 900;
+      background: linear-gradient(0deg, #ff2200 0%, #ff6600 30%, #ffaa00 60%, #ffee00 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      position: relative;
+      z-index: 2;
+      animation: pulse 0.15s infinite alternate;
+      filter: drop-shadow(0 0 30px rgba(255, 80, 0, 0.8))
+              drop-shadow(0 0 60px rgba(255, 40, 0, 0.5))
+              drop-shadow(0 0 100px rgba(255, 0, 0, 0.3));
+      user-select: none;
+    }
+    @keyframes pulse {
+      0% { transform: scale(1); }
+      100% { transform: scale(1.005); }
+    }
+  </style>
+</head>
+<body>
+  <canvas id="fire"></canvas>
+  <div class="number">99</div>
+
+  <script>
+    const canvas = document.getElementById('fire');
+    const ctx = canvas.getContext('2d');
+    let W, H;
+
+    function resize() {
+      W = canvas.width = window.innerWidth;
+      H = canvas.height = window.innerHeight;
+    }
+    resize();
+    window.addEventListener('resize', resize);
+
+    class Particle {
+      constructor(x, y) {
+        this.reset(x, y);
+      }
+      reset(x, y) {
+        this.x = x + (Math.random() - 0.5) * 80;
+        this.y = y + Math.random() * 20;
+        this.vx = (Math.random() - 0.5) * 1.5;
+        this.vy = -(Math.random() * 4 + 2);
+        this.life = 1;
+        this.decay = Math.random() * 0.02 + 0.01;
+        this.size = Math.random() * 12 + 4;
+      }
+      update() {
+        this.x += this.vx;
+        this.y += this.vy;
+        this.vy -= 0.03;
+        this.vx += (Math.random() - 0.5) * 0.3;
+        this.life -= this.decay;
+        this.size *= 0.99;
+      }
+      draw() {
+        if (this.life <= 0) return;
+        const r = Math.min(255, Math.floor(255));
+        const g = Math.min(255, Math.floor(this.life * 180 + 40));
+        const b = Math.floor(this.life * this.life * 30);
+        const a = this.life * 0.7;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(${r},${g},${b},${a})`;
+        ctx.fill();
+      }
+    }
+
+    // Ember particles (small rising sparks)
+    class Ember {
+      constructor(x, y) {
+        this.reset(x, y);
+      }
+      reset(x, y) {
+        this.x = x + (Math.random() - 0.5) * 120;
+        this.y = y + Math.random() * 40;
+        this.vx = (Math.random() - 0.5) * 2;
+        this.vy = -(Math.random() * 6 + 3);
+        this.life = 1;
+        this.decay = Math.random() * 0.008 + 0.005;
+        this.size = Math.random() * 3 + 1;
+      }
+      update() {
+        this.x += this.vx;
+        this.y += this.vy;
+        this.vy -= 0.02;
+        this.vx += (Math.random() - 0.5) * 0.5;
+        this.life -= this.decay;
+      }
+      draw() {
+        if (this.life <= 0) return;
+        const a = this.life;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(255,${Math.floor(150 * a + 100)},0,${a})`;
+        ctx.fill();
+      }
+    }
+
+    const particles = [];
+    const embers = [];
+    const NUM_PARTICLES = 150;
+    const NUM_EMBERS = 60;
+
+    const cx = W / 2;
+    const cy = H / 2 + 40;
+
+    for (let i = 0; i < NUM_PARTICLES; i++) {
+      particles.push(new Particle(cx, cy));
+    }
+    for (let i = 0; i < NUM_EMBERS; i++) {
+      embers.push(new Ember(cx, cy));
+    }
+
+    function animate() {
+      ctx.clearRect(0, 0, W, H);
+      ctx.globalCompositeOperation = 'lighter';
+
+      const centerX = W / 2;
+      const centerY = H / 2 + 40;
+
+      for (const p of particles) {
+        p.update();
+        p.draw();
+        if (p.life <= 0) p.reset(centerX, centerY);
+      }
+
+      for (const e of embers) {
+        e.update();
+        e.draw();
+        if (e.life <= 0) e.reset(centerX, centerY);
+      }
+
+      // Glow at the base
+      const grd = ctx.createRadialGradient(centerX, centerY + 20, 10, centerX, centerY + 20, 150);
+      grd.addColorStop(0, 'rgba(255, 60, 0, 0.15)');
+      grd.addColorStop(1, 'rgba(255, 60, 0, 0)');
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.fillStyle = grd;
+      ctx.fillRect(0, 0, W, H);
+
+      requestAnimationFrame(animate);
+    }
+
+    animate();
+  </script>
+</body>
+</html>
