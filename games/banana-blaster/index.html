@@ -1,0 +1,742 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Banana Blaster!</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            overflow: hidden;
+            background: linear-gradient(180deg, #87CEEB 0%, #98E4FF 40%, #4CAF50 40%, #388E3C 100%);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            cursor: crosshair;
+            user-select: none;
+            height: 100vh;
+        }
+
+        canvas {
+            display: block;
+        }
+
+        #ui-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        #scoreboard {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 30px;
+            background: rgba(0,0,0,0.3);
+            backdrop-filter: blur(5px);
+            color: white;
+        }
+
+        #scoreboard .score-section {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 28px;
+            font-weight: bold;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+        }
+
+        #scoreboard .label {
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            opacity: 0.8;
+        }
+
+        #title {
+            font-size: 36px;
+            font-weight: 900;
+            text-shadow: 3px 3px 6px rgba(0,0,0,0.5);
+        }
+
+        #start-screen {
+            position: fixed;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0,0,0,0.6);
+            backdrop-filter: blur(8px);
+            z-index: 100;
+        }
+
+        #start-screen h1 {
+            font-size: 72px;
+            color: #FFD700;
+            text-shadow: 4px 4px 8px rgba(0,0,0,0.7);
+            margin-bottom: 10px;
+        }
+
+        #start-screen .subtitle {
+            font-size: 24px;
+            color: #fff;
+            margin-bottom: 40px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+        }
+
+        #start-screen button {
+            pointer-events: all;
+            padding: 20px 60px;
+            font-size: 32px;
+            font-weight: bold;
+            background: linear-gradient(135deg, #FFD700, #FFA500);
+            border: 4px solid #CC8800;
+            border-radius: 20px;
+            color: #5D3A00;
+            cursor: pointer;
+            text-shadow: 1px 1px 2px rgba(255,255,255,0.3);
+            box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+            transition: transform 0.15s, box-shadow 0.15s;
+        }
+
+        #start-screen button:hover {
+            transform: scale(1.08);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.5);
+        }
+
+        #start-screen .instructions {
+            margin-top: 30px;
+            color: #ddd;
+            font-size: 18px;
+            text-align: center;
+            line-height: 1.6;
+        }
+
+        .floating-score {
+            position: fixed;
+            pointer-events: none;
+            font-size: 36px;
+            font-weight: 900;
+            z-index: 50;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+            animation: floatUp 1s ease-out forwards;
+        }
+
+        @keyframes floatUp {
+            0% { opacity: 1; transform: translateY(0) scale(1); }
+            100% { opacity: 0; transform: translateY(-80px) scale(1.5); }
+        }
+
+        #combo-display {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 64px;
+            font-weight: 900;
+            color: #FFD700;
+            text-shadow: 3px 3px 6px rgba(0,0,0,0.7);
+            pointer-events: none;
+            z-index: 50;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+
+        #power-meter {
+            position: fixed;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 300px;
+            height: 20px;
+            background: rgba(0,0,0,0.4);
+            border-radius: 10px;
+            overflow: hidden;
+            pointer-events: none;
+            z-index: 10;
+            opacity: 0;
+            transition: opacity 0.2s;
+            border: 2px solid rgba(255,255,255,0.3);
+        }
+
+        #power-fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #4CAF50, #FFEB3B, #FF5722);
+            border-radius: 10px;
+            transition: width 0.05s;
+        }
+
+        #power-label {
+            position: fixed;
+            bottom: 55px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: white;
+            font-size: 14px;
+            font-weight: bold;
+            text-shadow: 1px 1px 3px rgba(0,0,0,0.7);
+            pointer-events: none;
+            z-index: 10;
+            opacity: 0;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="game"></canvas>
+
+    <div id="ui-overlay">
+        <div id="scoreboard">
+            <div class="score-section">
+                <span class="label">Score</span>
+                <span id="score">0</span>
+            </div>
+            <div id="title">Banana Blaster!</div>
+            <div class="score-section">
+                <span class="label">Best</span>
+                <span id="best">0</span>
+            </div>
+        </div>
+    </div>
+
+    <div id="power-label">Hold & Release to Throw!</div>
+    <div id="power-meter"><div id="power-fill"></div></div>
+    <div id="combo-display"></div>
+
+    <div id="start-screen">
+        <h1>Banana Blaster!</h1>
+        <p class="subtitle">Throw bananas at the targets and score points!</p>
+        <button onclick="startGame()">Play!</button>
+        <div class="instructions">
+            Click and hold to aim & charge power<br>
+            Release to throw your banana!<br>
+            Hit the bullseye for bonus points!
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('game');
+        const ctx = canvas.getContext('2d');
+
+        let W, H;
+        function resize() {
+            W = canvas.width = window.innerWidth;
+            H = canvas.height = window.innerHeight;
+        }
+        resize();
+        window.addEventListener('resize', resize);
+
+        // Game state
+        let score = 0;
+        let bestScore = parseInt(localStorage.getItem('bananaBest') || '0');
+        let combo = 0;
+        let gameRunning = false;
+        let bananas = [];
+        let targets = [];
+        let particles = [];
+        let splats = [];
+        let clouds = [];
+        let mouseX = 0, mouseY = 0;
+        let mouseDown = false;
+        let chargeStart = 0;
+        let charge = 0;
+
+        document.getElementById('best').textContent = bestScore;
+
+        // Cloud setup
+        for (let i = 0; i < 6; i++) {
+            clouds.push({
+                x: Math.random() * W,
+                y: Math.random() * H * 0.3,
+                size: 40 + Math.random() * 60,
+                speed: 0.2 + Math.random() * 0.3
+            });
+        }
+
+        // Target class
+        class Target {
+            constructor() {
+                this.reset();
+                this.x = 100 + Math.random() * (W - 200);
+                this.y = 100 + Math.random() * (H * 0.5);
+            }
+
+            reset() {
+                this.x = 100 + Math.random() * (W - 200);
+                this.y = 80 + Math.random() * (H * 0.45);
+                this.radius = 40 + Math.random() * 25;
+                this.hit = false;
+                this.hitTimer = 0;
+                this.wobble = 0;
+                this.moveSpeed = (Math.random() - 0.5) * 2;
+                this.moveAngle = Math.random() * Math.PI * 2;
+                this.points = Math.round((65 - this.radius) / 5) * 10 + 10;
+            }
+
+            update() {
+                if (this.hit) {
+                    this.hitTimer++;
+                    if (this.hitTimer > 40) this.reset();
+                    return;
+                }
+
+                this.wobble += 0.03;
+                this.moveAngle += 0.01;
+                this.x += Math.cos(this.moveAngle) * this.moveSpeed;
+                this.y += Math.sin(this.moveAngle * 0.7) * this.moveSpeed * 0.5;
+
+                this.x = Math.max(this.radius + 20, Math.min(W - this.radius - 20, this.x));
+                this.y = Math.max(this.radius + 70, Math.min(H * 0.55, this.y));
+            }
+
+            draw() {
+                if (this.hit) {
+                    ctx.globalAlpha = 1 - this.hitTimer / 40;
+                }
+
+                const r = this.radius;
+                const wobbleOffset = Math.sin(this.wobble) * 2;
+
+                // Target rings
+                const colors = ['#FF0000', '#FFFFFF', '#FF0000', '#FFFFFF', '#FFD700'];
+                for (let i = 0; i < 5; i++) {
+                    const ringR = r * (1 - i * 0.18);
+                    ctx.beginPath();
+                    ctx.arc(this.x + wobbleOffset, this.y, ringR, 0, Math.PI * 2);
+                    ctx.fillStyle = colors[i];
+                    ctx.fill();
+                    ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+                    ctx.lineWidth = 1;
+                    ctx.stroke();
+                }
+
+                // Bullseye
+                ctx.beginPath();
+                ctx.arc(this.x + wobbleOffset, this.y, r * 0.1, 0, Math.PI * 2);
+                ctx.fillStyle = '#FF0000';
+                ctx.fill();
+
+                // Points label
+                ctx.fillStyle = 'rgba(0,0,0,0.6)';
+                ctx.font = 'bold 14px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(this.points + ' pts', this.x + wobbleOffset, this.y + r + 18);
+
+                ctx.globalAlpha = 1;
+            }
+        }
+
+        // Banana class
+        class Banana {
+            constructor(x, y, vx, vy) {
+                this.x = x;
+                this.y = y;
+                this.vx = vx;
+                this.vy = vy;
+                this.rotation = Math.random() * Math.PI * 2;
+                this.rotSpeed = (Math.random() - 0.5) * 0.3;
+                this.alive = true;
+                this.trail = [];
+            }
+
+            update() {
+                this.vy += 0.35; // gravity
+                this.x += this.vx;
+                this.y += this.vy;
+                this.rotation += this.rotSpeed;
+
+                this.trail.push({ x: this.x, y: this.y, age: 0 });
+                if (this.trail.length > 12) this.trail.shift();
+                this.trail.forEach(t => t.age++);
+
+                if (this.y > H + 50 || this.x < -50 || this.x > W + 50) {
+                    this.alive = false;
+                    if (this.y > H + 50) {
+                        combo = 0;
+                    }
+                }
+            }
+
+            draw() {
+                // Trail
+                this.trail.forEach((t, i) => {
+                    ctx.globalAlpha = (1 - t.age / 12) * 0.3;
+                    ctx.fillStyle = '#FFD700';
+                    ctx.beginPath();
+                    ctx.arc(t.x, t.y, 4, 0, Math.PI * 2);
+                    ctx.fill();
+                });
+                ctx.globalAlpha = 1;
+
+                // Banana
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                ctx.rotate(this.rotation);
+                drawBanana(0, 0, 30);
+                ctx.restore();
+            }
+        }
+
+        function drawBanana(x, y, size) {
+            ctx.save();
+            ctx.translate(x, y);
+
+            // Banana body (curved shape)
+            ctx.beginPath();
+            ctx.moveTo(-size * 0.4, size * 0.1);
+            ctx.quadraticCurveTo(-size * 0.3, -size * 0.5, size * 0.1, -size * 0.45);
+            ctx.quadraticCurveTo(size * 0.45, -size * 0.35, size * 0.4, size * 0.05);
+            ctx.quadraticCurveTo(size * 0.35, size * 0.3, size * 0.05, size * 0.35);
+            ctx.quadraticCurveTo(-size * 0.25, size * 0.35, -size * 0.4, size * 0.1);
+            ctx.fillStyle = '#FFE135';
+            ctx.fill();
+            ctx.strokeStyle = '#D4A017';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            // Banana highlight
+            ctx.beginPath();
+            ctx.moveTo(-size * 0.25, -size * 0.05);
+            ctx.quadraticCurveTo(-size * 0.1, -size * 0.35, size * 0.15, -size * 0.3);
+            ctx.quadraticCurveTo(size * 0.0, -size * 0.15, -size * 0.15, -size * 0.0);
+            ctx.fillStyle = 'rgba(255,255,255,0.3)';
+            ctx.fill();
+
+            // Stem
+            ctx.beginPath();
+            ctx.moveTo(-size * 0.35, size * 0.05);
+            ctx.lineTo(-size * 0.5, size * 0.15);
+            ctx.strokeStyle = '#8B7355';
+            ctx.lineWidth = 3;
+            ctx.stroke();
+
+            ctx.restore();
+        }
+
+        // Particle system
+        function spawnParticles(x, y, color, count) {
+            for (let i = 0; i < count; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const speed = 2 + Math.random() * 6;
+                particles.push({
+                    x, y,
+                    vx: Math.cos(angle) * speed,
+                    vy: Math.sin(angle) * speed - 2,
+                    life: 1,
+                    decay: 0.02 + Math.random() * 0.02,
+                    color,
+                    size: 3 + Math.random() * 5
+                });
+            }
+        }
+
+        function spawnBananaSplat(x, y) {
+            splats.push({
+                x, y,
+                size: 15 + Math.random() * 15,
+                life: 1,
+                decay: 0.008
+            });
+        }
+
+        // Collision detection
+        function checkCollisions() {
+            for (let b of bananas) {
+                if (!b.alive) continue;
+                for (let t of targets) {
+                    if (t.hit) continue;
+                    const dx = b.x - t.x;
+                    const dy = b.y - t.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+
+                    if (dist < t.radius + 15) {
+                        b.alive = false;
+                        t.hit = true;
+                        t.hitTimer = 0;
+
+                        // Calculate points based on accuracy
+                        const accuracy = 1 - (dist / (t.radius + 15));
+                        let points = t.points;
+                        let bonusText = '';
+
+                        if (accuracy > 0.85) {
+                            points *= 3;
+                            bonusText = 'BULLSEYE! ';
+                        } else if (accuracy > 0.6) {
+                            points *= 2;
+                            bonusText = 'Great! ';
+                        }
+
+                        combo++;
+                        if (combo > 1) {
+                            points *= combo;
+                            bonusText += combo + 'x Combo!';
+                        }
+
+                        score += points;
+                        document.getElementById('score').textContent = score;
+
+                        if (score > bestScore) {
+                            bestScore = score;
+                            localStorage.setItem('bananaBest', bestScore);
+                            document.getElementById('best').textContent = bestScore;
+                        }
+
+                        // Effects
+                        showFloatingScore(t.x, t.y, '+' + points, accuracy > 0.85 ? '#FFD700' : accuracy > 0.6 ? '#4CAF50' : '#FFFFFF');
+                        spawnParticles(t.x, t.y, '#FFE135', 20);
+                        spawnParticles(t.x, t.y, '#FF4444', 10);
+                        spawnBananaSplat(t.x, t.y);
+
+                        if (bonusText) {
+                            showCombo(bonusText);
+                        }
+                    }
+                }
+            }
+        }
+
+        function showFloatingScore(x, y, text, color) {
+            const el = document.createElement('div');
+            el.className = 'floating-score';
+            el.textContent = text;
+            el.style.left = x + 'px';
+            el.style.top = y + 'px';
+            el.style.color = color;
+            document.body.appendChild(el);
+            setTimeout(() => el.remove(), 1000);
+        }
+
+        function showCombo(text) {
+            const el = document.getElementById('combo-display');
+            el.textContent = text;
+            el.style.opacity = 1;
+            setTimeout(() => el.style.opacity = 0, 800);
+        }
+
+        // Drawing helpers
+        function drawClouds() {
+            clouds.forEach(c => {
+                c.x += c.speed;
+                if (c.x > W + c.size * 2) c.x = -c.size * 2;
+
+                ctx.fillStyle = 'rgba(255,255,255,0.7)';
+                ctx.beginPath();
+                ctx.arc(c.x, c.y, c.size, 0, Math.PI * 2);
+                ctx.arc(c.x + c.size * 0.6, c.y - c.size * 0.2, c.size * 0.7, 0, Math.PI * 2);
+                ctx.arc(c.x - c.size * 0.5, c.y + c.size * 0.1, c.size * 0.6, 0, Math.PI * 2);
+                ctx.fill();
+            });
+        }
+
+        function drawBackground() {
+            // Sky
+            const skyGrad = ctx.createLinearGradient(0, 0, 0, H * 0.6);
+            skyGrad.addColorStop(0, '#87CEEB');
+            skyGrad.addColorStop(1, '#B8E8FF');
+            ctx.fillStyle = skyGrad;
+            ctx.fillRect(0, 0, W, H * 0.6);
+
+            drawClouds();
+
+            // Ground
+            const groundGrad = ctx.createLinearGradient(0, H * 0.6, 0, H);
+            groundGrad.addColorStop(0, '#4CAF50');
+            groundGrad.addColorStop(1, '#2E7D32');
+            ctx.fillStyle = groundGrad;
+            ctx.fillRect(0, H * 0.6, W, H * 0.4);
+
+            // Grass blades at horizon
+            ctx.fillStyle = '#66BB6A';
+            for (let x = 0; x < W; x += 15) {
+                const h = 8 + Math.sin(x * 0.1 + Date.now() * 0.001) * 5;
+                ctx.fillRect(x, H * 0.6 - h, 3, h);
+            }
+        }
+
+        function drawAimLine() {
+            if (!mouseDown || !gameRunning) return;
+
+            const startX = W / 2;
+            const startY = H - 80;
+            const dx = mouseX - startX;
+            const dy = mouseY - startY;
+            const angle = Math.atan2(dy, dx);
+
+            // Aim line (dotted)
+            ctx.setLineDash([8, 8]);
+            ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(startX, startY);
+            ctx.lineTo(startX + Math.cos(angle) * 120, startY + Math.sin(angle) * 120);
+            ctx.stroke();
+            ctx.setLineDash([]);
+        }
+
+        function drawLauncher() {
+            const x = W / 2;
+            const y = H - 80;
+
+            // Platform
+            ctx.fillStyle = '#8B4513';
+            ctx.beginPath();
+            ctx.ellipse(x, y + 20, 50, 15, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = '#5D2F0E';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            // Banana on launcher (bounces when charging)
+            const bounceY = mouseDown ? Math.sin(Date.now() * 0.01) * 5 * charge : 0;
+            const launchScale = mouseDown ? 1 + charge * 0.2 : 1;
+
+            ctx.save();
+            ctx.translate(x, y - 10 + bounceY);
+            ctx.scale(launchScale, launchScale);
+            drawBanana(0, 0, 35);
+            ctx.restore();
+
+            // "You" label
+            ctx.fillStyle = 'rgba(255,255,255,0.7)';
+            ctx.font = 'bold 12px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('AIM & THROW!', x, y + 45);
+        }
+
+        // Main game loop
+        function gameLoop() {
+            ctx.clearRect(0, 0, W, H);
+            drawBackground();
+
+            // Update charge
+            if (mouseDown && gameRunning) {
+                charge = Math.min(1, (Date.now() - chargeStart) / 1500);
+                document.getElementById('power-fill').style.width = (charge * 100) + '%';
+            }
+
+            // Draw splats
+            splats = splats.filter(s => s.life > 0);
+            splats.forEach(s => {
+                s.life -= s.decay;
+                ctx.globalAlpha = s.life * 0.6;
+                ctx.fillStyle = '#FFE135';
+                ctx.beginPath();
+                ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = '#D4A017';
+                ctx.beginPath();
+                ctx.arc(s.x - s.size * 0.3, s.y + s.size * 0.2, s.size * 0.4, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.globalAlpha = 1;
+            });
+
+            // Update & draw targets
+            targets.forEach(t => {
+                t.update();
+                t.draw();
+            });
+
+            // Update & draw bananas
+            bananas = bananas.filter(b => b.alive);
+            bananas.forEach(b => {
+                b.update();
+                b.draw();
+            });
+
+            // Particles
+            particles = particles.filter(p => p.life > 0);
+            particles.forEach(p => {
+                p.x += p.vx;
+                p.y += p.vy;
+                p.vy += 0.15;
+                p.life -= p.decay;
+                ctx.globalAlpha = p.life;
+                ctx.fillStyle = p.color;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.globalAlpha = 1;
+            });
+
+            // Check collisions
+            checkCollisions();
+
+            // Draw aim line and launcher
+            if (gameRunning) {
+                drawAimLine();
+                drawLauncher();
+            }
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Input handlers
+        canvas.addEventListener('mousedown', (e) => {
+            if (!gameRunning) return;
+            mouseDown = true;
+            chargeStart = Date.now();
+            mouseX = e.clientX;
+            mouseY = e.clientY;
+            document.getElementById('power-meter').style.opacity = 1;
+            document.getElementById('power-label').style.opacity = 1;
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            mouseX = e.clientX;
+            mouseY = e.clientY;
+        });
+
+        canvas.addEventListener('mouseup', (e) => {
+            if (!mouseDown || !gameRunning) return;
+            mouseDown = false;
+            document.getElementById('power-meter').style.opacity = 0;
+            document.getElementById('power-label').style.opacity = 0;
+
+            const startX = W / 2;
+            const startY = H - 80;
+            const dx = mouseX - startX;
+            const dy = mouseY - startY;
+            const angle = Math.atan2(dy, dx);
+            const power = 8 + charge * 18;
+
+            const banana = new Banana(
+                startX,
+                startY - 10,
+                Math.cos(angle) * power,
+                Math.sin(angle) * power
+            );
+            bananas.push(banana);
+
+            charge = 0;
+            document.getElementById('power-fill').style.width = '0%';
+        });
+
+        // Prevent context menu on right click
+        canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+        // Start game
+        function startGame() {
+            document.getElementById('start-screen').style.display = 'none';
+            gameRunning = true;
+            score = 0;
+            combo = 0;
+            document.getElementById('score').textContent = '0';
+
+            // Spawn targets
+            targets = [];
+            for (let i = 0; i < 5; i++) {
+                targets.push(new Target());
+            }
+        }
+
+        // Start game loop
+        gameLoop();
+    </script>
+</body>
+</html>
