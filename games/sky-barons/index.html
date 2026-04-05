@@ -1,0 +1,1380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Sky Barons</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+:root{--bg:#1a1a2e;--card:#16213e;--card2:#0f3460;--accent:#e94560;--text:#eee;--dim:#889;--green:#2ecc71;--red:#e74c3c;--amber:#f39c12;--blue:#3498db}
+html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);font-size:16px;overflow:hidden;touch-action:manipulation}
+button{font-size:16px;min-height:44px;min-width:44px;border:none;border-radius:8px;cursor:pointer;padding:8px 16px;font-weight:600;background:var(--card2);color:var(--text)}
+button:active{opacity:0.8}
+button.primary{background:var(--accent);color:#fff}
+button.green{background:var(--green);color:#fff}
+button.red{background:var(--red);color:#fff}
+button:disabled{opacity:0.4}
+input,select{font-size:16px;min-height:44px;padding:8px 12px;border-radius:8px;border:2px solid var(--card2);background:var(--card);color:var(--text);width:100%}
+select{appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23eee' d='M6 8L1 3h10z'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center}
+.topbar{position:fixed;top:0;left:0;right:0;height:48px;background:#0d1b2a;display:flex;align-items:center;padding:0 10px;gap:8px;z-index:100;font-size:14px;border-bottom:1px solid #1b2838}
+.topbar .name{font-weight:700;flex-shrink:0}
+.topbar .stat{font-size:13px;color:var(--dim);white-space:nowrap}
+.topbar .stat b{color:var(--text)}
+.topbar .help-btn{margin-left:auto;width:36px;height:36px;border-radius:50%;background:var(--card2);display:flex;align-items:center;justify-content:center;font-size:18px;min-width:36px;min-height:36px}
+.bottombar{position:fixed;bottom:0;left:0;right:0;background:#0d1b2a;z-index:100;border-top:1px solid #1b2838}
+.fly-btn{display:block;width:calc(100% - 20px);margin:8px 10px;min-height:52px;font-size:18px;background:linear-gradient(135deg,var(--accent),#c0392b);color:#fff;border-radius:12px;font-weight:700;letter-spacing:0.5px}
+.tabs{display:flex;height:56px}
+.tabs button{flex:1;background:transparent;border-radius:0;font-size:13px;color:var(--dim);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-height:56px}
+.tabs button.active{color:var(--accent);border-top:2px solid var(--accent)}
+.tabs button span{font-size:20px}
+.content{position:fixed;top:48px;left:0;right:0;bottom:126px;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;padding:10px}
+.card{background:var(--card);border-radius:12px;padding:12px;margin-bottom:10px}
+.card h3{font-size:16px;margin-bottom:8px}
+.row{display:flex;justify-content:space-between;align-items:center;padding:4px 0;font-size:14px}
+.row .label{color:var(--dim)}
+.badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:13px;font-weight:600}
+.badge.green{background:rgba(46,204,113,0.2);color:var(--green)}
+.badge.red{background:rgba(231,76,60,0.2);color:var(--red)}
+.badge.amber{background:rgba(243,156,18,0.2);color:var(--amber)}
+.badge.blue{background:rgba(52,152,219,0.2);color:var(--blue)}
+.modal{position:fixed;top:0;left:0;right:0;bottom:0;background:var(--bg);z-index:200;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:16px;display:none}
+.modal.show{display:block}
+.modal h2{font-size:22px;margin-bottom:12px}
+.modal h3{font-size:18px;margin:16px 0 8px}
+.setup{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100%;padding:20px}
+.setup h1{font-size:28px;margin-bottom:4px}
+.setup .subtitle{color:var(--dim);margin-bottom:24px}
+.setup .field{width:100%;max-width:340px;margin-bottom:16px}
+.setup .field label{display:block;margin-bottom:6px;font-size:14px;color:var(--dim)}
+.colors{display:flex;gap:10px;flex-wrap:wrap}
+.colors .swatch{width:48px;height:48px;border-radius:50%;border:3px solid transparent;cursor:pointer}
+.colors .swatch.selected{border-color:#fff;box-shadow:0 0 0 2px var(--accent)}
+.diff-btns{display:flex;gap:8px;width:100%}
+.diff-btns button{flex:1}
+.diff-btns button.selected{background:var(--accent)}
+.accordion{border-top:1px solid #1b2838;margin-top:8px}
+.accordion-header{padding:12px 0;font-size:16px;font-weight:600;display:flex;justify-content:space-between;align-items:center;min-height:44px}
+.accordion-body{display:none;padding-bottom:12px}
+.accordion.open .accordion-body{display:block}
+.sparkline{display:inline-block;height:24px;vertical-align:middle}
+.route-row{padding:10px 0;border-bottom:1px solid #1b2838}
+.route-row:last-child{border-bottom:none}
+.aircraft-actions{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+.aircraft-actions button{font-size:13px;padding:6px 10px;min-height:36px}
+table{width:100%;border-collapse:collapse;font-size:14px}
+table th{text-align:left;padding:6px 4px;color:var(--dim);border-bottom:1px solid #1b2838;font-size:13px}
+table td{padding:6px 4px;border-bottom:1px solid rgba(27,40,56,0.5)}
+.pos{color:var(--green)}.neg{color:var(--red)}
+.fuel-display{font-size:14px;padding:4px 8px;border-radius:6px}
+.sub-tabs{display:flex;gap:4px;margin-bottom:10px}
+.sub-tabs button{font-size:14px;padding:6px 12px;background:var(--card);min-height:38px}
+.sub-tabs button.active{background:var(--accent)}
+.buy-btns{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+.buy-btns button{flex:1;min-width:100px;font-size:14px}
+.warning-banner{background:rgba(231,76,60,0.2);border:1px solid var(--red);border-radius:8px;padding:10px;margin-bottom:10px;color:var(--red);font-weight:600}
+.map-container{width:100%;aspect-ratio:1.6;position:relative}
+.map-container svg{width:100%;height:100%}
+.gameover{text-align:center;padding:40px 20px}
+.gameover h1{font-size:32px;margin-bottom:8px}
+.gameover .rank{font-size:20px;margin:8px 0}
+.scoreboard{margin:20px auto;max-width:340px}
+.scoreboard .entry{display:flex;justify-content:space-between;padding:12px;margin:6px 0;border-radius:8px;background:var(--card)}
+.scoreboard .entry.winner{background:var(--card2);border:2px solid var(--green)}
+@media(min-width:600px){.content{max-width:500px;margin:0 auto}}
+</style>
+</head>
+<body>
+<!-- SETUP SCREEN -->
+<div id="setupScreen" class="setup">
+<h1>Sky Barons</h1>
+<p class="subtitle">Airline Strategy 1950–1959</p>
+<div id="resumePrompt" style="display:none;width:100%;max-width:340px;margin-bottom:20px">
+<div class="card" style="text-align:center">
+<p style="margin-bottom:10px">Saved game found</p>
+<div style="display:flex;gap:8px">
+<button class="green" style="flex:1" onclick="resumeGame()">Resume</button>
+<button class="red" style="flex:1" onclick="clearSave()">New Game</button>
+</div></div></div>
+<div class="field"><label>Airline Name</label><input id="airlineName" maxlength="20" placeholder="Your airline name"></div>
+<div class="field"><label>Color</label>
+<div class="colors" id="colorPicker"></div></div>
+<div class="field"><label>Difficulty</label>
+<div class="diff-btns" id="diffBtns">
+<button onclick="setDiff('easy',this)">Easy</button>
+<button class="selected" onclick="setDiff('medium',this)">Medium</button>
+<button onclick="setDiff('hard',this)">Hard</button>
+</div></div>
+<button class="primary" style="width:100%;max-width:340px;margin-top:8px;min-height:52px;font-size:18px" onclick="startGame()">Take Off!</button>
+</div>
+<!-- GAME SCREEN -->
+<div id="gameScreen" style="display:none">
+<div class="topbar" id="topbar"></div>
+<div class="content" id="content"></div>
+<div class="bottombar">
+<button class="fly-btn" id="flyBtn" onclick="flyQuarter()">Fly Quarter →</button>
+<div class="tabs" id="tabBar"></div>
+</div></div>
+<!-- RESULTS MODAL -->
+<div class="modal" id="resultsModal">
+<div id="resultsContent"></div>
+</div>
+<!-- HELP MODAL -->
+<div class="modal" id="helpModal">
+<h2>How to Play</h2>
+<div class="card">
+<p style="font-size:14px;line-height:1.5"><b>Cournot pricing:</b> More seats from everyone = lower ticket price for all. Choose routes wisely.<br><br>
+<b>Fixed vs variable costs:</b> Insurance & crew run even when grounded. Parking saves some but not all.<br><br>
+<b>C-checks:</b> Mandatory heavy maintenance. Cash paid upfront but smoothed on P&L via amortization. Cash flow ≠ net income!<br><br>
+<b>Fuel index:</b> Watch it — spikes make parking attractive. Read trends in the sparkline.<br><br>
+<b>Loans:</b> Interest-only, balloon at maturity. Bankruptcy if you can't roll over. Keep D/E low.<br><br>
+<b>Net worth</b> = cash + aircraft book values + maintenance assets − debt.<br><br>
+<b>Goal:</b> Highest net worth after 40 quarters (1950–1959).</p>
+</div>
+<button class="primary" style="width:100%;margin-top:16px" onclick="closeHelp()">Got It</button>
+</div>
+<script>
+// =====================================================
+// SKY BARONS — CONSTANTS & DATA
+// =====================================================
+
+const COLORS = {blue:'#3498db',red:'#e74c3c',green:'#2ecc71',orange:'#e67e22',purple:'#9b59b6',teal:'#1abc9c'};
+const COLOR_NAMES = Object.keys(COLORS);
+
+// AIRPORTS with approximate SVG coordinates (900x560 viewbox)
+const AIRPORTS = {
+  JFK:{name:'New York',x:820,y:280,tier:'large',pop:3},
+  LAX:{name:'Los Angeles',x:100,y:340,tier:'large',pop:3},
+  ORD:{name:'Chicago',x:620,y:220,tier:'large',pop:3},
+  ATL:{name:'Atlanta',x:680,y:350,tier:'large',pop:3},
+  DFW:{name:'Dallas',x:480,y:380,tier:'medium',pop:2},
+  DEN:{name:'Denver',x:350,y:280,tier:'medium',pop:2},
+  SFO:{name:'San Francisco',x:80,y:280,tier:'medium',pop:2},
+  SEA:{name:'Seattle',x:120,y:140,tier:'smallmed',pop:1.5},
+  MIA:{name:'Miami',x:740,y:440,tier:'medium',pop:2},
+  BOS:{name:'Boston',x:840,y:240,tier:'smallmed',pop:1.5}
+};
+
+// Route distances (approximate great-circle miles / 1000)
+const DISTANCES = {
+'ATL-BOS':0.946,'ATL-DEN':1.199,'ATL-DFW':0.732,'ATL-JFK':0.760,'ATL-LAX':1.946,
+'ATL-MIA':0.594,'ATL-ORD':0.606,'ATL-SEA':2.182,'ATL-SFO':2.139,'BOS-DEN':1.754,
+'BOS-DFW':1.562,'BOS-JFK':0.187,'BOS-LAX':2.611,'BOS-MIA':1.255,'BOS-ORD':0.867,
+'BOS-SEA':2.496,'BOS-SFO':2.704,'DEN-DFW':0.641,'DEN-JFK':1.626,'DEN-LAX':0.862,
+'DEN-MIA':1.709,'DEN-ORD':0.920,'DEN-SEA':1.024,'DEN-SFO':0.967,'DFW-JFK':1.391,
+'DFW-LAX':1.235,'DFW-MIA':1.121,'DFW-ORD':0.802,'DFW-SEA':1.681,'DFW-SFO':1.464,
+'JFK-LAX':2.475,'JFK-MIA':1.090,'JFK-ORD':0.740,'JFK-SEA':2.421,'JFK-SFO':2.586,
+'LAX-MIA':2.342,'LAX-ORD':1.745,'LAX-SEA':0.954,'LAX-SFO':0.337,'MIA-ORD':1.197,
+'MIA-SEA':2.724,'MIA-SFO':2.585,'ORD-SEA':1.721,'ORD-SFO':1.846,'SEA-SFO':0.679
+};
+
+// AIRCRAFT TYPES
+const AIRCRAFT = {
+  regional:{name:'Regional Jet',seats:50,price:12e6,fuelPerSeat:80,
+    depRate:0.008,insurance:80e3,crew:120e3,landing:8e3,lightMaint:40e3,
+    reactivateShort:60e3,reactivateLong:180e3},
+  narrowbody:{name:'Narrowbody',seats:150,price:35e6,fuelPerSeat:60,
+    depRate:0.006,insurance:200e3,crew:350e3,landing:18e3,lightMaint:90e3,
+    reactivateShort:150e3,reactivateLong:450e3},
+  widebody:{name:'Widebody',seats:300,price:90e6,fuelPerSeat:50,
+    depRate:0.004,insurance:450e3,crew:700e3,landing:35e3,lightMaint:180e3,
+    reactivateShort:320e3,reactivateLong:950e3}
+};
+
+// C-CHECK schedule: [maxCycles, interval, costs{regional,narrowbody,widebody}]
+const CCHECK_SCHEDULE = [
+  {maxCycles:20,interval:8,cost:{regional:400e3,narrowbody:1.2e6,widebody:2.8e6}},
+  {maxCycles:40,interval:6,cost:{regional:600e3,narrowbody:1.8e6,widebody:4.2e6}},
+  {maxCycles:60,interval:4,cost:{regional:900e3,narrowbody:2.6e6,widebody:6.0e6}},
+  {maxCycles:Infinity,interval:3,cost:{regional:1.3e6,narrowbody:3.8e6,widebody:8.5e6}}
+];
+
+// DEMAND CALIBRATION
+// BaseDemand = popA * popB * DEMAND_MULT; PriceSensitivity = PRICE_SENS
+// Calibration: 1 narrowbody ORD-DEN (pop 3*2=6), 1 competitor narrowbody
+// total seats=300, dist=0.920
+// MarketPrice = max(0, (6*DEMAND_MULT - 300) / PRICE_SENS)
+// LoadFactor = min(1, 6*DEMAND_MULT / 300)
+// Revenue = MP * 150 * LF
+// FuelCost = 60 * 1.0 * 150 * 0.920 = $8,280
+// Fixed = 200K+350K = $550K
+// Variable = 8280 + 18K + 90K = $116,280
+// We want profit $150K-$400K
+const DEMAND_MULT = 1000;
+const PRICE_SENS = 0.7;
+
+// Interest rates by D/E ratio (quarterly)
+const INTEREST_TIERS = [{maxDE:0.5,rate:0.015},{maxDE:1.0,rate:0.02},{maxDE:1.5,rate:0.0275},{maxDE:2.0,rate:0.0375}];
+
+// =====================================================
+// GAME STATE
+// =====================================================
+let gameState = null;
+let nextId = 1;
+let currentTab = 'fleet';
+let selectedQuarterView = -1; // -1 = latest
+
+function generateId(){return nextId++}
+
+function initRoutes(){
+  const codes = Object.keys(AIRPORTS);
+  const routes = [];
+  for(let i=0;i<codes.length;i++){
+    for(let j=i+1;j<codes.length;j++){
+      const a=codes[i],b=codes[j];
+      const key=a<b?a+'-'+b:b+'-'+a;
+      const dist=DISTANCES[key]||1.0;
+      const popProduct=AIRPORTS[a].pop*AIRPORTS[b].pop;
+      routes.push({
+        id:key,from:a,to:b,
+        baseDemand:popProduct*DEMAND_MULT,
+        priceSensitivity:PRICE_SENS,
+        distanceFactor:dist,
+        lastMarketPrice:0,lastLoadFactor:0,
+        lastSeatsByAirline:[0,0,0],
+        lastProfitByAirline:[0,0,0]
+      });
+    }
+  }
+  return routes;
+}
+
+// =====================================================
+// ECONOMIC ENGINE (pure functions)
+// =====================================================
+
+function randomNormal(mean=0,sd=1){
+  let u=0,v=0;
+  while(u===0)u=Math.random();
+  while(v===0)v=Math.random();
+  return mean+sd*Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);
+}
+
+function rollFuelPrice(cur){
+  let shock=randomNormal(0,0.07);
+  if(Math.random()<0.05){
+    shock+=(Math.random()<0.5?1:-1)*(0.25+Math.random()*0.20);
+  }
+  let fp=cur+shock;
+  fp=fp*0.97+1.0*0.03; // mean revert
+  return Math.max(0.4,Math.min(2.5,fp));
+}
+
+function calcCournot(route,seatsByAirline){
+  const totalSeats=seatsByAirline.reduce((s,v)=>s+v,0);
+  if(totalSeats===0)return{marketPrice:0,loadFactor:0,revenueByAirline:[0,0,0],fuelCostByAirline:[0,0,0]};
+  const mp=Math.max(0,(route.baseDemand-totalSeats)/route.priceSensitivity);
+  const lf=Math.min(1,route.baseDemand/totalSeats);
+  const rev=seatsByAirline.map(s=>mp*s*lf);
+  return{marketPrice:mp,loadFactor:lf,revenueByAirline:rev};
+}
+
+function getAircraftType(t){return AIRCRAFT[t]}
+
+function calcFixedCosts(ac){
+  const t=AIRCRAFT[ac.type];
+  const ins=t.insurance;
+  let crew=t.crew;
+  if(ac.status==='parked'){
+    crew*=0.2;
+    const factor=ac.parkedQuarters>=3?0.15:0.30;
+    return(ins+crew)*factor;
+  }
+  return ins+crew;
+}
+
+function calcVariableCosts(ac,distFactor,fpi){
+  if(ac.status!=='flying')return{fuel:0,landing:0,maint:0,total:0};
+  const t=AIRCRAFT[ac.type];
+  const fuel=t.fuelPerSeat*fpi*t.seats*distFactor;
+  const landing=t.landing;
+  const maint=t.lightMaint;
+  return{fuel,landing,maint,total:fuel+landing+maint};
+}
+
+function getBookValue(ac){
+  const t=AIRCRAFT[ac.type];
+  return t.price*Math.max(0.10,1-ac.cycles*t.depRate);
+}
+
+function calcDepreciation(ac){
+  if(ac.status!=='flying')return 0;
+  const t=AIRCRAFT[ac.type];
+  const bvBefore=t.price*Math.max(0.10,1-ac.cycles*t.depRate);
+  const bvAfter=t.price*Math.max(0.10,1-(ac.cycles+1)*t.depRate);
+  return Math.max(0,bvBefore-bvAfter);
+}
+
+function getCCheckTier(cycles){
+  for(const tier of CCHECK_SCHEDULE){
+    if(cycles<=tier.maxCycles)return tier;
+  }
+  return CCHECK_SCHEDULE[CCHECK_SCHEDULE.length-1];
+}
+
+function getCCheckInfo(ac){
+  const tier=getCCheckTier(ac.cycles);
+  return{
+    quartersUntilDue:ac.nextCCheckIn,
+    estimatedCost:tier.cost[ac.type],
+    interval:tier.interval,
+    amortPerQtr:tier.cost[ac.type]/tier.interval
+  };
+}
+
+function calcInterestRate(de){
+  for(const tier of INTEREST_TIERS){
+    if(de<=tier.maxDE)return tier.rate;
+  }
+  return 0.0375;
+}
+
+function getTotalDebt(airline){return airline.debt.reduce((s,l)=>s+l.principal,0)}
+
+function getEquity(airline){
+  let acVal=0,maintAssets=0;
+  airline.aircraft.forEach(ac=>{acVal+=getBookValue(ac);maintAssets+=ac.maintenanceAsset});
+  return airline.cash+acVal+maintAssets-getTotalDebt(airline);
+}
+
+function getNetWorth(a){return getEquity(a)}
+
+function formatMoney(amt){
+  const abs=Math.abs(amt);const sign=amt<0?'-':'';
+  if(abs>=1e6)return sign+'$'+(abs/1e6).toFixed(1)+'M';
+  if(abs>=1e3)return sign+'$'+(abs/1e3).toFixed(0)+'K';
+  return sign+'$'+abs.toFixed(0);
+}
+
+function getTurnLabel(turn){
+  const y=1950+Math.floor(turn/4);
+  const q=(turn%4)+1;
+  return'Q'+q+' '+y;
+}
+
+// =====================================================
+// CALIBRATION CHECK
+// =====================================================
+(function calibrate(){
+  const ordDen={baseDemand:AIRPORTS.ORD.pop*AIRPORTS.DEN.pop*DEMAND_MULT,priceSensitivity:PRICE_SENS,distanceFactor:0.920};
+  const seats=[150,150,0];
+  const c=calcCournot(ordDen,seats);
+  const fuelCost=60*1.0*150*0.920;
+  const fixed=200e3+350e3;
+  const variable=fuelCost+18e3+90e3;
+  const depCharge=35e6*0.006;
+  const profit=c.revenueByAirline[0]-fixed-variable-depCharge;
+  console.log('=== ECONOMICS CALIBRATION ===');
+  console.log('Route: ORD-DEN, 2 narrowbodies (150 seats each)');
+  console.log('Market Price: $'+c.marketPrice.toFixed(2));
+  console.log('Load Factor: '+(c.loadFactor*100).toFixed(1)+'%');
+  console.log('Revenue: '+formatMoney(c.revenueByAirline[0]));
+  console.log('Fuel: '+formatMoney(fuelCost));
+  console.log('Fixed (ins+crew): '+formatMoney(fixed));
+  console.log('Variable (fuel+land+maint): '+formatMoney(variable));
+  console.log('Depreciation: '+formatMoney(depCharge));
+  console.log('Net profit: '+formatMoney(profit));
+  console.log('Target: $150K-$400K → '+(profit>=150e3&&profit<=400e3?'✓ PASS':'✗ FAIL ('+formatMoney(profit)+')'));
+  if(profit<150e3||profit>400e3)console.warn('Adjust DEMAND_MULT or PRICE_SENS');
+})();
+
+// =====================================================
+// GAME LOGIC
+// =====================================================
+
+function startNewGame(){
+  const name=document.getElementById('airlineName').value.trim()||'My Airline';
+  const colorEl=document.querySelector('.swatch.selected');
+  const playerColor=colorEl?colorEl.dataset.color:'blue';
+  const remaining=COLOR_NAMES.filter(c=>c!==playerColor);
+  const aiColors=[remaining[0],remaining[1]];
+
+  gameState={
+    phase:'configure',turn:0,
+    airlines:[
+      {name,color:playerColor,isHuman:true,cash:30e6,debt:[],aircraft:[],history:[],bankrupt:false,bankruptTurn:-1},
+      {name:'Eagle Air',color:aiColors[0],isHuman:false,cash:30e6,debt:[],aircraft:[],history:[],bankrupt:false,bankruptTurn:-1},
+      {name:'Summit Airlines',color:aiColors[1],isHuman:false,cash:30e6,debt:[],aircraft:[],history:[],bankrupt:false,bankruptTurn:-1}
+    ],
+    fuelPriceIndex:1.0,fuelHistory:[1.0],
+    routes:initRoutes(),
+    difficulty:selectedDifficulty,
+    events:[],
+    quarterData:null
+  };
+  nextId=1;
+  document.getElementById('setupScreen').style.display='none';
+  document.getElementById('gameScreen').style.display='block';
+  renderAll();
+}
+
+function startGame(){startNewGame()}
+
+let selectedDifficulty='medium';
+function setDiff(d,el){
+  selectedDifficulty=d;
+  document.querySelectorAll('.diff-btns button').forEach(b=>b.classList.remove('selected'));
+  el.classList.add('selected');
+}
+
+// SAVE / LOAD
+function autoSave(){
+  try{localStorage.setItem('skyBarons_save',JSON.stringify({gameState,nextId}))}catch(e){}
+}
+function loadSave(){
+  try{const d=JSON.parse(localStorage.getItem('skyBarons_save'));if(d&&d.gameState)return d;return null}catch(e){return null}
+}
+function clearSave(){
+  localStorage.removeItem('skyBarons_save');
+  document.getElementById('resumePrompt').style.display='none';
+}
+function resumeGame(){
+  const d=loadSave();
+  if(!d)return;
+  gameState=d.gameState;nextId=d.nextId||1;
+  document.getElementById('setupScreen').style.display='none';
+  document.getElementById('gameScreen').style.display='block';
+  if(gameState.phase==='gameover')showGameOver();
+  else if(gameState.phase==='victory')showVictory();
+  else renderAll();
+}
+
+// AIRCRAFT MANAGEMENT
+function buyAircraft(airlineIdx,typeName){
+  const al=gameState.airlines[airlineIdx];
+  const t=AIRCRAFT[typeName];
+  if(al.cash<t.price)return false;
+  al.cash-=t.price;
+  const tier=getCCheckTier(0);
+  al.aircraft.push({
+    id:generateId(),type:typeName,status:'idle',assignedRoute:null,
+    cycles:0,parkedQuarters:0,consecutiveIdleQuarters:0,
+    nextCCheckIn:tier.interval,maintenanceAsset:0,
+    maintenanceAmortPerQtr:0,amortQuartersRemaining:0,
+    purchasePrice:t.price,reactivating:false
+  });
+  return true;
+}
+
+function sellAircraft(airlineIdx,acId){
+  const al=gameState.airlines[airlineIdx];
+  const idx=al.aircraft.findIndex(a=>a.id===acId);
+  if(idx<0)return;
+  const ac=al.aircraft[idx];
+  al.cash+=getBookValue(ac);
+  al.aircraft.splice(idx,1);
+}
+
+function parkAircraft(airlineIdx,acId){
+  const al=gameState.airlines[airlineIdx];
+  const ac=al.aircraft.find(a=>a.id===acId);
+  if(!ac)return;
+  ac.status='parked';ac.assignedRoute=null;ac.parkedQuarters=0;
+}
+
+function unparkAircraft(airlineIdx,acId){
+  const al=gameState.airlines[airlineIdx];
+  const ac=al.aircraft.find(a=>a.id===acId);
+  if(!ac||ac.status!=='parked')return;
+  const t=AIRCRAFT[ac.type];
+  if(ac.parkedQuarters>=3){
+    if(al.cash<t.reactivateLong)return;
+    al.cash-=t.reactivateLong;
+    ac.reactivating=true;ac.status='idle';ac.parkedQuarters=0;
+  } else {
+    if(al.cash<t.reactivateShort)return;
+    al.cash-=t.reactivateShort;
+    ac.status='idle';ac.parkedQuarters=0;ac.reactivating=false;
+  }
+}
+
+function assignRoute(airlineIdx,acId,routeId){
+  const al=gameState.airlines[airlineIdx];
+  const ac=al.aircraft.find(a=>a.id===acId);
+  if(!ac)return;
+  if(routeId===null||routeId===''){
+    ac.status='idle';ac.assignedRoute=null;
+  } else {
+    if(ac.status==='parked'||ac.status==='grounded'||ac.reactivating)return;
+    ac.status='flying';ac.assignedRoute=routeId;
+  }
+}
+
+function borrowMoney(airlineIdx,amount){
+  const al=gameState.airlines[airlineIdx];
+  const eq=getEquity(al);
+  const maxDebt=eq*2;
+  const curDebt=getTotalDebt(al);
+  if(curDebt+amount>maxDebt)amount=Math.max(0,maxDebt-curDebt);
+  if(amount<=0)return false;
+  const de=(curDebt+amount)/Math.max(1,eq);
+  al.debt.push({id:generateId(),principal:amount,quartersRemaining:20,ratePerQuarter:calcInterestRate(de)});
+  al.cash+=amount;
+  return true;
+}
+
+function repayLoan(airlineIdx,loanId){
+  const al=gameState.airlines[airlineIdx];
+  const li=al.debt.findIndex(l=>l.id===loanId);
+  if(li<0)return;
+  const loan=al.debt[li];
+  const amt=Math.min(loan.principal,al.cash);
+  al.cash-=amt;loan.principal-=amt;
+  if(loan.principal<=0)al.debt.splice(li,1);
+}
+
+// =====================================================
+// AI LOGIC
+// =====================================================
+function runAI(aiIdx){
+  const al=gameState.airlines[aiIdx];
+  if(al.bankrupt)return;
+  const diff=gameState.difficulty;
+  const noise=diff==='easy'?0.30:diff==='medium'?0.15:0.05;
+  const maxRoutes=diff==='easy'?3:diff==='medium'?6:45;
+
+  // Score routes
+  const scored=gameState.routes.map(r=>{
+    const estPrice=r.lastMarketPrice||((r.baseDemand-150)/r.priceSensitivity);
+    const lf=r.lastLoadFactor||0.8;
+    const rev=estPrice*150*lf;
+    const cost=AIRCRAFT.narrowbody.fuelPerSeat*gameState.fuelPriceIndex*150*r.distanceFactor+
+      200e3+350e3+18e3+90e3+35e6*0.006;
+    const profit=rev-cost;
+    const noisyProfit=profit*(1+randomNormal(0,noise));
+    return{route:r,profit:noisyProfit,rawProfit:profit};
+  }).sort((a,b)=>b.profit-a.profit).slice(0,maxRoutes);
+
+  // Withdraw from unprofitable routes
+  al.aircraft.forEach(ac=>{
+    if(ac.status==='flying'&&ac.assignedRoute){
+      const r=gameState.routes.find(rt=>rt.id===ac.assignedRoute);
+      if(r){
+        const idx=gameState.airlines.indexOf(al);
+        if(r.lastProfitByAirline[idx]<0){
+          ac.status='idle';ac.assignedRoute=null;
+        }
+      }
+    }
+  });
+
+  // Park idle aircraft for 2+ quarters
+  al.aircraft.forEach(ac=>{
+    if(ac.status==='idle'){
+      ac.consecutiveIdleQuarters=(ac.consecutiveIdleQuarters||0)+1;
+      if(ac.consecutiveIdleQuarters>=2&&ac.status!=='parked'){
+        ac.status='parked';ac.parkedQuarters=0;ac.assignedRoute=null;
+      }
+    }
+  });
+
+  // Sell long-parked aircraft
+  al.aircraft=al.aircraft.filter(ac=>{
+    if(ac.status==='parked'&&ac.parkedQuarters>=6){
+      const bv=getBookValue(ac);
+      if(bv>ac.purchasePrice*0.20){al.cash+=bv;return false}
+    }
+    return true;
+  });
+
+  // Borrow if needed and D/E allows
+  const eq=getEquity(al);
+  const de=eq>0?getTotalDebt(al)/eq:99;
+  if(de<1.5&&scored[0]&&scored[0].rawProfit>0&&al.cash<35e6){
+    const borrow=Math.min(20e6,eq*2-getTotalDebt(al));
+    if(borrow>5e6)borrowMoney(gameState.airlines.indexOf(al),borrow);
+  }
+
+  // Buy and assign to profitable routes
+  const topRoutes=scored.filter(s=>s.rawProfit>0);
+  for(const sr of topRoutes){
+    const idle=al.aircraft.find(ac=>ac.status==='idle'&&!ac.reactivating);
+    if(idle){
+      idle.status='flying';idle.assignedRoute=sr.route.id;idle.consecutiveIdleQuarters=0;
+      continue;
+    }
+    // Buy if we can afford it and route is very profitable
+    if(sr.rawProfit>200e3&&al.cash>35e6){
+      const aiAl=gameState.airlines.indexOf(al);
+      if(buyAircraft(aiAl,'narrowbody')){
+        const newAc=al.aircraft[al.aircraft.length-1];
+        newAc.status='flying';newAc.assignedRoute=sr.route.id;
+      }
+    } else if(sr.rawProfit>100e3&&al.cash>12e6){
+      const aiAl=gameState.airlines.indexOf(al);
+      if(buyAircraft(aiAl,'regional')){
+        const newAc=al.aircraft[al.aircraft.length-1];
+        newAc.status='flying';newAc.assignedRoute=sr.route.id;
+      }
+    }
+  }
+
+  // Unpark aircraft if profitable routes available and we have parked planes
+  const unprofitableRouteCount=topRoutes.length;
+  if(unprofitableRouteCount>al.aircraft.filter(a=>a.status==='flying').length){
+    const parked=al.aircraft.find(a=>a.status==='parked');
+    if(parked){
+      const t=AIRCRAFT[parked.type];
+      const cost=parked.parkedQuarters>=3?t.reactivateLong:t.reactivateShort;
+      if(al.cash>cost){
+        al.cash-=cost;
+        parked.status='idle';parked.parkedQuarters=0;
+        if(parked.parkedQuarters<3)parked.reactivating=false;
+      }
+    }
+  }
+}
+
+// =====================================================
+// QUARTERLY RESOLUTION
+// =====================================================
+function resolveQuarter(){
+  const turn=gameState.turn;
+  const events=[];
+
+  // 1. AI decisions
+  for(let i=1;i<3;i++){
+    if(!gameState.airlines[i].bankrupt)runAI(i);
+  }
+
+  // 2. Roll fuel price
+  const oldFuel=gameState.fuelPriceIndex;
+  gameState.fuelPriceIndex=rollFuelPrice(oldFuel);
+  gameState.fuelHistory.push(gameState.fuelPriceIndex);
+  const fpi=gameState.fuelPriceIndex;
+  if(Math.abs(fpi-oldFuel)>0.15)events.push('Fuel index moved from '+oldFuel.toFixed(2)+' to '+fpi.toFixed(2)+(fpi>oldFuel?' ⬆ (fuel spike)':' ⬇'));
+
+  // Track financials per airline
+  const qd=gameState.airlines.map(()=>({
+    revenue:0,fuelCosts:0,landingFees:0,lightMaint:0,fixedCosts:0,
+    ccheckAmort:0,depreciation:0,interestExpense:0,
+    aircraftPurchased:0,aircraftSold:0,ccheckCashPaid:0,
+    loansDrawn:0,loansRepaid:0,openingCash:0
+  }));
+
+  // Record opening cash
+  gameState.airlines.forEach((al,i)=>{qd[i].openingCash=al.cash});
+
+  // 3. Route resolution
+  gameState.routes.forEach(route=>{
+    const seatsByAirline=[0,0,0];
+    gameState.airlines.forEach((al,ai)=>{
+      if(al.bankrupt)return;
+      al.aircraft.forEach(ac=>{
+        if(ac.status==='flying'&&ac.assignedRoute===route.id){
+          seatsByAirline[ai]+=AIRCRAFT[ac.type].seats;
+        }
+      });
+    });
+    const result=calcCournot(route,seatsByAirline);
+    route.lastMarketPrice=result.marketPrice;
+    route.lastLoadFactor=result.loadFactor;
+    route.lastSeatsByAirline=seatsByAirline;
+
+    // Revenue
+    gameState.airlines.forEach((al,ai)=>{
+      if(al.bankrupt)return;
+      qd[ai].revenue+=result.revenueByAirline[ai];
+
+      // Fuel cost per aircraft on this route
+      al.aircraft.forEach(ac=>{
+        if(ac.status==='flying'&&ac.assignedRoute===route.id){
+          const vc=calcVariableCosts(ac,route.distanceFactor,fpi);
+          qd[ai].fuelCosts+=vc.fuel;
+          qd[ai].landingFees+=vc.landing;
+          qd[ai].lightMaint+=vc.maint;
+        }
+      });
+    });
+
+    // Profit by airline for route tracking
+    route.lastProfitByAirline=[0,0,0];
+    gameState.airlines.forEach((al,ai)=>{
+      if(seatsByAirline[ai]>0){
+        let routeCost=0;
+        al.aircraft.forEach(ac=>{
+          if(ac.status==='flying'&&ac.assignedRoute===route.id){
+            const vc=calcVariableCosts(ac,route.distanceFactor,fpi);
+            routeCost+=vc.total+calcFixedCosts(ac)+calcDepreciation(ac);
+          }
+        });
+        route.lastProfitByAirline[ai]=result.revenueByAirline[ai]-routeCost;
+      }
+    });
+  });
+
+  // 4. Fixed costs
+  gameState.airlines.forEach((al,ai)=>{
+    if(al.bankrupt)return;
+    al.aircraft.forEach(ac=>{
+      qd[ai].fixedCosts+=calcFixedCosts(ac);
+    });
+  });
+
+  // 5. Interest
+  gameState.airlines.forEach((al,ai)=>{
+    if(al.bankrupt)return;
+    const eq=getEquity(al);
+    const de=eq>0?getTotalDebt(al)/eq:99;
+    al.debt.forEach(loan=>{
+      loan.ratePerQuarter=calcInterestRate(de);
+      const interest=loan.principal*loan.ratePerQuarter;
+      qd[ai].interestExpense+=interest;
+      al.cash-=interest;
+    });
+  });
+
+  // 6. C-checks
+  gameState.airlines.forEach((al,ai)=>{
+    if(al.bankrupt)return;
+    al.aircraft.forEach(ac=>{
+      if(ac.status==='flying'){
+        ac.nextCCheckIn--;
+        if(ac.nextCCheckIn<=0){
+          const tier=getCCheckTier(ac.cycles);
+          const cost=tier.cost[ac.type];
+          al.cash-=cost;
+          qd[ai].ccheckCashPaid+=cost;
+          ac.maintenanceAsset=cost;
+          const nextTier=getCCheckTier(ac.cycles+1);
+          ac.nextCCheckIn=nextTier.interval;
+          ac.maintenanceAmortPerQtr=cost/nextTier.interval;
+          ac.amortQuartersRemaining=nextTier.interval;
+          ac.status='grounded';
+          events.push(al.name+': '+AIRCRAFT[ac.type].name+' grounded for C-check ('+formatMoney(cost)+')');
+        }
+      }
+    });
+  });
+
+  // 7. Amortization
+  gameState.airlines.forEach((al,ai)=>{
+    if(al.bankrupt)return;
+    al.aircraft.forEach(ac=>{
+      if(ac.maintenanceAsset>0&&ac.amortQuartersRemaining>0){
+        const amort=ac.maintenanceAmortPerQtr;
+        qd[ai].ccheckAmort+=amort;
+        ac.maintenanceAsset=Math.max(0,ac.maintenanceAsset-amort);
+        ac.amortQuartersRemaining--;
+      }
+    });
+  });
+
+  // 8. Depreciation & cycles
+  gameState.airlines.forEach((al,ai)=>{
+    if(al.bankrupt)return;
+    al.aircraft.forEach(ac=>{
+      if(ac.status==='flying'){
+        qd[ai].depreciation+=calcDepreciation(ac);
+        ac.cycles++;
+        ac.consecutiveIdleQuarters=0;
+      } else if(ac.status==='grounded'){
+        // Grounded this quarter for c-check - unground for next quarter
+        ac.status='idle';ac.assignedRoute=null;
+      }
+    });
+  });
+
+  // 9. Parking counters
+  gameState.airlines.forEach((al,ai)=>{
+    al.aircraft.forEach(ac=>{
+      if(ac.status==='parked')ac.parkedQuarters++;
+      if(ac.status==='idle')ac.consecutiveIdleQuarters=(ac.consecutiveIdleQuarters||0)+1;
+      if(ac.reactivating)ac.reactivating=false;
+    });
+  });
+
+  // 10. Deduct costs from cash
+  gameState.airlines.forEach((al,ai)=>{
+    if(al.bankrupt)return;
+    al.cash-=(qd[ai].fuelCosts+qd[ai].landingFees+qd[ai].lightMaint+qd[ai].fixedCosts);
+    al.cash+=qd[ai].revenue;
+  });
+
+  // 11. Loan maturities
+  gameState.airlines.forEach((al,ai)=>{
+    if(al.bankrupt)return;
+    al.debt=al.debt.filter(loan=>{
+      loan.quartersRemaining--;
+      if(loan.quartersRemaining<=0){
+        if(al.cash>=loan.principal){
+          al.cash-=loan.principal;
+          qd[ai].loansRepaid+=loan.principal;
+          return false;
+        }
+        // Try refinance
+        const eq=getEquity(al);
+        const curDebt=getTotalDebt(al)-loan.principal;
+        if(curDebt+loan.principal<=eq*2&&eq>0){
+          loan.quartersRemaining=20;
+          const de=(curDebt+loan.principal)/eq;
+          loan.ratePerQuarter=calcInterestRate(de);
+          events.push(al.name+' refinanced '+formatMoney(loan.principal)+' loan');
+          return true;
+        }
+        // Bankruptcy
+        al.bankrupt=true;al.bankruptTurn=turn;
+        events.push(al.name+' went BANKRUPT! Could not repay '+formatMoney(loan.principal));
+        return false;
+      }
+      return true;
+    });
+  });
+
+  // 12. Financial statements
+  gameState.airlines.forEach((al,ai)=>{
+    if(al.bankrupt&&al.bankruptTurn!==turn)return;
+    const is={
+      revenue:qd[ai].revenue,
+      fuelCosts:qd[ai].fuelCosts,
+      landingFees:qd[ai].landingFees,
+      lightMaint:qd[ai].lightMaint,
+      fixedCosts:qd[ai].fixedCosts,
+      ccheckAmort:qd[ai].ccheckAmort,
+      depreciation:qd[ai].depreciation,
+      operatingIncome:0,
+      interestExpense:qd[ai].interestExpense,
+      netIncome:0
+    };
+    is.operatingIncome=is.revenue-is.fuelCosts-is.landingFees-is.lightMaint-is.fixedCosts-is.ccheckAmort-is.depreciation;
+    is.netIncome=is.operatingIncome-is.interestExpense;
+
+    const cf={
+      operatingCashFlow:is.netIncome+is.depreciation+is.ccheckAmort,
+      investingCashFlow:-qd[ai].aircraftPurchased+qd[ai].aircraftSold-qd[ai].ccheckCashPaid,
+      financingCashFlow:qd[ai].loansDrawn-qd[ai].loansRepaid,
+      netChange:0,openingCash:qd[ai].openingCash,closingCash:al.cash
+    };
+    cf.netChange=cf.operatingCashFlow+cf.investingCashFlow+cf.financingCashFlow;
+
+    let acBV=0,maintA=0;
+    al.aircraft.forEach(ac=>{acBV+=getBookValue(ac);maintA+=ac.maintenanceAsset});
+    const bs={
+      cash:al.cash,aircraftBookValues:acBV,maintenanceAssets:maintA,
+      totalAssets:al.cash+acBV+maintA,
+      totalDebt:getTotalDebt(al),totalLiabilities:getTotalDebt(al),
+      equity:0,deRatio:0
+    };
+    bs.equity=bs.totalAssets-bs.totalLiabilities;
+    bs.deRatio=bs.equity>0?bs.totalDebt/bs.equity:99;
+
+    // Assert balance sheet
+    if(Math.abs(bs.totalAssets-(bs.totalLiabilities+bs.equity))>1){
+      console.error('BALANCE SHEET MISMATCH airline '+ai+': A='+bs.totalAssets+' L+E='+(bs.totalLiabilities+bs.equity));
+    }
+
+    al.history.push({turn,incomeStatement:is,cashFlow:cf,balanceSheet:bs});
+  });
+
+  gameState.events=events;
+  gameState.turn++;
+
+  // Check game end
+  if(gameState.turn>=40){
+    gameState.phase='victory';
+    autoSave();
+    showVictory();
+    return;
+  }
+
+  // Check player bankruptcy
+  if(gameState.airlines[0].bankrupt){
+    gameState.phase='gameover';
+    autoSave();
+    showGameOver();
+    return;
+  }
+
+  gameState.phase='configure';
+  autoSave();
+  showResults();
+}
+
+function flyQuarter(){
+  resolveQuarter();
+}
+
+// =====================================================
+// UI RENDERING
+// =====================================================
+
+function renderAll(){
+  renderTopBar();
+  renderTabBar();
+  renderContent();
+  updateFlyBtn();
+}
+
+function renderTopBar(){
+  const al=gameState.airlines[0];
+  const fuel=gameState.fuelPriceIndex;
+  const fuelDir=gameState.fuelHistory.length>1?(fuel>gameState.fuelHistory[gameState.fuelHistory.length-2]?'⬆':'⬇'):'';
+  const fuelClass=fuel>1.2?'neg':fuel<0.8?'pos':'';
+  document.getElementById('topbar').innerHTML=
+    '<div class="name" style="color:'+COLORS[al.color]+'">'+al.name+'</div>'+
+    '<div class="stat"><b>'+formatMoney(al.cash)+'</b></div>'+
+    '<div class="stat">NW:<b>'+formatMoney(getNetWorth(al))+'</b></div>'+
+    '<div class="stat">'+getTurnLabel(gameState.turn)+'</div>'+
+    '<div class="stat '+fuelClass+'">⛽'+fuel.toFixed(2)+fuelDir+'</div>'+
+    '<div class="help-btn" onclick="showHelp()">?</div>';
+}
+
+function renderTabBar(){
+  const tabs=[{id:'fleet',icon:'✈',label:'Fleet'},{id:'map',icon:'🗺',label:'Map'},
+    {id:'routes',icon:'📋',label:'Routes'},{id:'finances',icon:'💰',label:'Finances'}];
+  document.getElementById('tabBar').innerHTML=tabs.map(t=>
+    '<button class="'+(currentTab===t.id?'active':'')+'" onclick="switchTab(\''+t.id+'\')"><span>'+t.icon+'</span>'+t.label+'</button>'
+  ).join('');
+}
+
+function switchTab(tab){currentTab=tab;renderContent();renderTabBar();}
+
+function updateFlyBtn(){
+  const btn=document.getElementById('flyBtn');
+  btn.textContent='Fly Quarter → '+getTurnLabel(gameState.turn);
+}
+
+function renderContent(){
+  const el=document.getElementById('content');
+  switch(currentTab){
+    case 'fleet':el.innerHTML=renderFleet();break;
+    case 'map':el.innerHTML=renderMap();break;
+    case 'routes':el.innerHTML=renderRoutes();break;
+    case 'finances':el.innerHTML=renderFinances();break;
+  }
+}
+
+// FLEET TAB
+function renderFleet(){
+  const al=gameState.airlines[0];
+  let html='';
+
+  // Bankruptcy warning
+  const eq=getEquity(al);
+  const de=eq>0?getTotalDebt(al)/eq:0;
+  const maturingSoon=al.debt.some(l=>l.quartersRemaining<=4);
+  if(de>1.5&&maturingSoon){
+    html+='<div class="warning-banner">⚠ D/E ratio '+de.toFixed(1)+'× — loan maturing soon! Risk of bankruptcy.</div>';
+  }
+
+  if(al.aircraft.length===0){
+    html+='<div class="card" style="text-align:center;padding:24px"><p style="color:var(--dim)">No aircraft yet. Buy your first plane below!</p></div>';
+  }
+
+  al.aircraft.forEach(ac=>{
+    const t=AIRCRAFT[ac.type];
+    const bv=getBookValue(ac);
+    const fixed=calcFixedCosts(ac);
+    const ci=getCCheckInfo(ac);
+    const statusBadge=ac.status==='flying'?'<span class="badge green">Flying</span>':
+      ac.status==='parked'?'<span class="badge amber">Parked ('+ac.parkedQuarters+'Q'+(ac.parkedQuarters>=3?' long':'')+')</span>':
+      ac.status==='grounded'?'<span class="badge red">GROUNDED</span>':
+      '<span class="badge blue">Idle</span>';
+
+    const routeName=ac.assignedRoute?ac.assignedRoute.replace('-',' → '):'—';
+
+    html+='<div class="card">';
+    html+='<div style="display:flex;justify-content:space-between;align-items:center"><h3>'+t.name+' ('+t.seats+' seats)</h3>'+statusBadge+'</div>';
+    html+='<div class="row"><span class="label">Cycles</span><span>'+ac.cycles+'</span></div>';
+    html+='<div class="row"><span class="label">Route</span><span>'+routeName+'</span></div>';
+    html+='<div class="row"><span class="label">Book Value</span><span>'+formatMoney(bv)+'</span></div>';
+    html+='<div class="row"><span class="label">Fixed Cost/Qtr</span><span>'+formatMoney(fixed)+'</span></div>';
+    if(ac.status==='flying'){
+      const route=gameState.routes.find(r=>r.id===ac.assignedRoute);
+      if(route){
+        const vc=calcVariableCosts(ac,route.distanceFactor,gameState.fuelPriceIndex);
+        html+='<div class="row"><span class="label">Variable Cost/Qtr</span><span>'+formatMoney(vc.total)+'</span></div>';
+      }
+      html+='<div class="row"><span class="label">Depreciation/Qtr</span><span>'+formatMoney(calcDepreciation(ac))+'</span></div>';
+    }
+    html+='<div class="row"><span class="label">Next C-Check</span><span>'+ci.quartersUntilDue+'Q — '+formatMoney(ci.estimatedCost)+' cash</span></div>';
+    if(ac.maintenanceAsset>0){
+      html+='<div class="row"><span class="label">Maint Asset</span><span>'+formatMoney(ac.maintenanceAsset)+' ('+formatMoney(ac.maintenanceAmortPerQtr)+'/qtr)</span></div>';
+    }
+    if(ci.quartersUntilDue<=2){
+      html+='<div style="color:var(--amber);font-size:13px;margin-top:4px">⚠ C-check due in '+ci.quartersUntilDue+' quarter(s)!</div>';
+    }
+
+    // Actions
+    html+='<div class="aircraft-actions">';
+    if(ac.status!=='grounded'){
+      html+='<select style="flex:1;min-width:120px" onchange="assignRoute(0,'+ac.id+',this.value)">';
+      html+='<option value="">— Idle —</option>';
+      gameState.routes.forEach(r=>{
+        const sel=ac.assignedRoute===r.id?'selected':'';
+        html+='<option value="'+r.id+'" '+sel+'>'+r.id.replace('-',' → ')+'</option>';
+      });
+      html+='</select>';
+    }
+    if(ac.status==='parked'){
+      const cost=ac.parkedQuarters>=3?t.reactivateLong:t.reactivateShort;
+      html+='<button onclick="unparkAircraft(0,'+ac.id+');renderAll()">Unpark '+formatMoney(cost)+'</button>';
+    } else if(ac.status!=='grounded'){
+      html+='<button onclick="parkAircraft(0,'+ac.id+');renderAll()">Park</button>';
+    }
+    html+='<button class="red" onclick="sellAircraft(0,'+ac.id+');renderAll()">Sell '+formatMoney(bv)+'</button>';
+    html+='</div></div>';
+  });
+
+  // Buy buttons
+  html+='<div class="card"><h3>Buy Aircraft</h3><div class="buy-btns">';
+  ['regional','narrowbody','widebody'].forEach(type=>{
+    const t=AIRCRAFT[type];
+    const canBuy=gameState.airlines[0].cash>=t.price;
+    html+='<button '+(canBuy?'':'disabled')+' onclick="buyAircraft(0,\''+type+'\');renderAll()">'+t.name+'<br>'+formatMoney(t.price)+'</button>';
+  });
+  html+='</div></div>';
+  return html;
+}
+
+// MAP TAB
+function renderMap(){
+  let svg='<svg viewBox="0 0 900 520" xmlns="http://www.w3.org/2000/svg">';
+  svg+='<rect width="900" height="520" fill="#0a0a1a" rx="8"/>';
+
+  // Draw routes
+  gameState.routes.forEach(r=>{
+    const a1=AIRPORTS[r.from],a2=AIRPORTS[r.to];
+    // Player route
+    if(r.lastSeatsByAirline[0]>0){
+      const profit=r.lastProfitByAirline[0];
+      const color=profit>0?'#2ecc71':'#e74c3c';
+      const width=Math.max(1,Math.min(4,r.lastSeatsByAirline[0]/100));
+      svg+='<line x1="'+a1.x+'" y1="'+a1.y+'" x2="'+a2.x+'" y2="'+a2.y+'" stroke="'+color+'" stroke-width="'+width+'" opacity="0.7"/>';
+    }
+    // AI routes
+    for(let i=1;i<3;i++){
+      if(r.lastSeatsByAirline[i]>0&&!gameState.airlines[i].bankrupt){
+        const c=COLORS[gameState.airlines[i].color];
+        svg+='<line x1="'+a1.x+'" y1="'+a1.y+'" x2="'+a2.x+'" y2="'+a2.y+'" stroke="'+c+'" stroke-width="1.5" opacity="0.3"/>';
+      }
+    }
+  });
+
+  // Draw airports
+  Object.entries(AIRPORTS).forEach(([code,ap])=>{
+    const r=ap.tier==='large'?8:ap.tier==='medium'?6:5;
+    svg+='<circle cx="'+ap.x+'" cy="'+ap.y+'" r="'+r+'" fill="'+('#16213e')+'" stroke="#3498db" stroke-width="2"/>';
+    svg+='<text x="'+ap.x+'" y="'+(ap.y-r-4)+'" fill="#eee" text-anchor="middle" font-size="12" font-weight="600">'+code+'</text>';
+  });
+
+  svg+='</svg>';
+  return'<div class="map-container">'+svg+'</div>'+
+    '<div class="card" style="margin-top:10px"><div class="row"><span class="label">Your routes</span><span style="color:var(--green)">■ Profit</span> <span style="color:var(--red)">■ Loss</span></div>'+
+    gameState.airlines.filter((a,i)=>i>0&&!a.bankrupt).map(a=>'<div class="row"><span class="label">'+a.name+'</span><span style="color:'+COLORS[a.color]+'">■ '+a.color+'</span></div>').join('')+'</div>';
+}
+
+// ROUTES TAB
+function renderRoutes(){
+  const al=gameState.airlines[0];
+  const sorted=[...gameState.routes].sort((a,b)=>b.lastProfitByAirline[0]-a.lastProfitByAirline[0]);
+  let html='<div class="card"><h3>All Routes (sorted by your profit)</h3></div>';
+
+  sorted.forEach(r=>{
+    const yourSeats=r.lastSeatsByAirline[0];
+    const compSeats=r.lastSeatsByAirline[1]+r.lastSeatsByAirline[2];
+    const profit=r.lastProfitByAirline[0];
+    const profitClass=profit>0?'pos':profit<0?'neg':'';
+
+    html+='<div class="card route-row">';
+    html+='<div style="display:flex;justify-content:space-between;align-items:center">';
+    html+='<b>'+r.id.replace('-',' → ')+'</b>';
+    html+='<span class="'+profitClass+'">'+formatMoney(profit)+'</span>';
+    html+='</div>';
+    html+='<div style="display:flex;gap:12px;font-size:13px;color:var(--dim);margin-top:4px">';
+    html+='<span>Price: $'+r.lastMarketPrice.toFixed(0)+'</span>';
+    html+='<span>LF: '+(r.lastLoadFactor*100).toFixed(0)+'%</span>';
+    html+='<span>You: '+yourSeats+'</span>';
+    html+='<span>Comp: '+compSeats+'</span>';
+    html+='</div>';
+
+    // Demand info
+    html+='<div style="font-size:13px;color:var(--dim);margin-top:2px">Demand: '+r.baseDemand.toFixed(0)+' | Dist: '+(r.distanceFactor*1000).toFixed(0)+' mi</div>';
+    html+='</div>';
+  });
+  return html;
+}
+
+// FINANCES TAB
+function renderFinances(){
+  const al=gameState.airlines[0];
+  const hist=al.history;
+  const latest=hist.length>0?hist[hist.length-1]:null;
+
+  let html='';
+
+  // Fuel sparkline
+  html+='<div class="card"><div class="row"><span class="label">Fuel Price Index</span><span class="'+(gameState.fuelPriceIndex>1.2?'neg':gameState.fuelPriceIndex<0.8?'pos':'')+'">'+gameState.fuelPriceIndex.toFixed(2)+'×</span></div>';
+  html+=renderSparkline(gameState.fuelHistory.slice(-8))+'</div>';
+
+  // Summary
+  if(latest){
+    const is=latest.incomeStatement,bs=latest.balanceSheet;
+    const deClass=bs.deRatio<1?'green':bs.deRatio<1.5?'amber':'red';
+    html+='<div class="card">';
+    html+='<div class="row"><span class="label">Net Income</span><span class="'+(is.netIncome>=0?'pos':'neg')+'">'+formatMoney(is.netIncome)+'</span></div>';
+    html+='<div class="row"><span class="label">Op Cash Flow</span><span>'+formatMoney(latest.cashFlow.operatingCashFlow)+'</span></div>';
+    html+='<div class="row"><span class="label">Net Worth</span><span>'+formatMoney(bs.equity)+'</span></div>';
+    html+='<div class="row"><span class="label">D/E Ratio</span><span class="badge '+deClass+'">'+bs.deRatio.toFixed(2)+'×</span></div>';
+    html+='</div>';
+  }
+
+  // Sub-tabs
+  html+='<div class="sub-tabs" id="finSubTabs">';
+  html+='<button class="'+(finSubTab==='pl'?'active':'')+'" onclick="finSubTab=\'pl\';renderContent()">P&L</button>';
+  html+='<button class="'+(finSubTab==='cf'?'active':'')+'" onclick="finSubTab=\'cf\';renderContent()">Cash Flow</button>';
+  html+='<button class="'+(finSubTab==='bs'?'active':'')+'" onclick="finSubTab=\'bs\';renderContent()">Balance Sheet</button>';
+  html+='</div>';
+
+  if(latest){
+    if(finSubTab==='pl')html+=renderIncomeStatement(latest.incomeStatement);
+    else if(finSubTab==='cf')html+=renderCashFlow(latest.cashFlow);
+    else if(finSubTab==='bs')html+=renderBalanceSheet(al,latest.balanceSheet);
+  } else {
+    html+='<div class="card" style="text-align:center;color:var(--dim)">No financial data yet. Fly your first quarter!</div>';
+  }
+
+  return html;
+}
+
+let finSubTab='pl';
+
+function renderIncomeStatement(is){
+  return'<div class="card"><h3>Income Statement</h3>'+
+    '<div class="row"><span class="label">Revenue</span><span class="pos">'+formatMoney(is.revenue)+'</span></div>'+
+    '<div class="row"><span class="label">Fuel Costs</span><span class="neg">-'+formatMoney(is.fuelCosts)+'</span></div>'+
+    '<div class="row"><span class="label">Landing Fees</span><span class="neg">-'+formatMoney(is.landingFees)+'</span></div>'+
+    '<div class="row"><span class="label">Light Maintenance</span><span class="neg">-'+formatMoney(is.lightMaint)+'</span></div>'+
+    '<div class="row"><span class="label">Fixed Costs</span><span class="neg">-'+formatMoney(is.fixedCosts)+'</span></div>'+
+    '<div class="row"><span class="label">C-Check Amortization</span><span class="neg">-'+formatMoney(is.ccheckAmort)+'</span></div>'+
+    '<div class="row"><span class="label">Depreciation</span><span class="neg">-'+formatMoney(is.depreciation)+'</span></div>'+
+    '<div class="row" style="border-top:2px solid var(--card2);margin-top:4px;padding-top:8px"><span class="label"><b>Operating Income</b></span><span class="'+(is.operatingIncome>=0?'pos':'neg')+'"><b>'+formatMoney(is.operatingIncome)+'</b></span></div>'+
+    '<div class="row"><span class="label">Interest Expense</span><span class="neg">-'+formatMoney(is.interestExpense)+'</span></div>'+
+    '<div class="row" style="border-top:2px solid var(--accent);margin-top:4px;padding-top:8px"><span class="label"><b>Net Income</b></span><span class="'+(is.netIncome>=0?'pos':'neg')+'"><b>'+formatMoney(is.netIncome)+'</b></span></div>'+
+    '</div>';
+}
+
+function renderCashFlow(cf){
+  return'<div class="card"><h3>Cash Flow Statement</h3>'+
+    '<div class="row"><span class="label"><b>Operating</b></span><span class="'+(cf.operatingCashFlow>=0?'pos':'neg')+'"><b>'+formatMoney(cf.operatingCashFlow)+'</b></span></div>'+
+    '<div class="row"><span class="label"><b>Investing</b></span><span>'+formatMoney(cf.investingCashFlow)+'</span></div>'+
+    '<div class="row"><span class="label"><b>Financing</b></span><span>'+formatMoney(cf.financingCashFlow)+'</span></div>'+
+    '<div class="row" style="border-top:2px solid var(--accent);margin-top:4px;padding-top:8px"><span class="label"><b>Net Change</b></span><span>'+formatMoney(cf.netChange)+'</span></div>'+
+    '<div class="row"><span class="label">Opening Cash</span><span>'+formatMoney(cf.openingCash)+'</span></div>'+
+    '<div class="row"><span class="label">Closing Cash</span><span>'+formatMoney(cf.closingCash)+'</span></div>'+
+    '</div>';
+}
+
+function renderBalanceSheet(al,bs){
+  const deClass=bs.deRatio<1?'green':bs.deRatio<1.5?'amber':'red';
+  let html='<div class="card"><h3>Balance Sheet</h3>'+
+    '<div class="row"><span class="label"><b>ASSETS</b></span></div>'+
+    '<div class="row"><span class="label">Cash</span><span>'+formatMoney(bs.cash)+'</span></div>'+
+    '<div class="row"><span class="label">Aircraft</span><span>'+formatMoney(bs.aircraftBookValues)+'</span></div>'+
+    '<div class="row"><span class="label">Maint Assets</span><span>'+formatMoney(bs.maintenanceAssets)+'</span></div>'+
+    '<div class="row" style="border-top:1px solid var(--card2)"><span class="label"><b>Total Assets</b></span><span><b>'+formatMoney(bs.totalAssets)+'</b></span></div>'+
+    '<div class="row" style="margin-top:8px"><span class="label"><b>LIABILITIES</b></span></div>'+
+    '<div class="row"><span class="label">Total Debt</span><span>'+formatMoney(bs.totalDebt)+'</span></div>'+
+    '<div class="row" style="margin-top:8px;border-top:2px solid var(--accent);padding-top:8px"><span class="label"><b>Equity</b></span><span><b>'+formatMoney(bs.equity)+'</b></span></div>'+
+    '<div class="row"><span class="label">D/E Ratio</span><span class="badge '+deClass+'">'+bs.deRatio.toFixed(2)+'×</span></div>'+
+    '</div>';
+
+  // Loan panel
+  html+='<div class="card"><h3>Loans</h3>';
+  const eq=getEquity(al);
+  const capacity=Math.max(0,eq*2-getTotalDebt(al));
+  html+='<div class="row"><span class="label">Borrowing Capacity</span><span>'+formatMoney(capacity)+'</span></div>';
+
+  al.debt.forEach(loan=>{
+    const matWarn=loan.quartersRemaining<=4?'style="color:var(--red)"':'';
+    html+='<div class="card" style="background:var(--card2);margin-top:6px">';
+    html+='<div class="row"><span class="label">Principal</span><span>'+formatMoney(loan.principal)+'</span></div>';
+    html+='<div class="row"><span class="label">Rate</span><span>'+(loan.ratePerQuarter*100).toFixed(2)+'%/qtr</span></div>';
+    html+='<div class="row"><span class="label">Interest/Qtr</span><span>'+formatMoney(loan.principal*loan.ratePerQuarter)+'</span></div>';
+    html+='<div class="row" '+matWarn+'><span class="label">Matures In</span><span>'+loan.quartersRemaining+' quarters</span></div>';
+    html+='<button class="red" style="width:100%;margin-top:6px" onclick="repayLoan(0,'+loan.id+');renderAll()">Repay (max '+formatMoney(Math.min(loan.principal,al.cash))+')</button>';
+    html+='</div>';
+  });
+
+  // Borrow button
+  html+='<div style="margin-top:10px;display:flex;gap:6px">';
+  [5e6,10e6,20e6].forEach(amt=>{
+    const canBorrow=capacity>=amt;
+    html+='<button style="flex:1" '+(canBorrow?'':'disabled')+' onclick="borrowMoney(0,'+amt+');renderAll()">Borrow '+formatMoney(amt)+'</button>';
+  });
+  html+='</div></div>';
+
+  return html;
+}
+
+function renderSparkline(data){
+  if(data.length<2)return'';
+  const w=200,h=30;
+  const min=Math.min(...data)*0.9,max=Math.max(...data)*1.1;
+  const range=max-min||1;
+  const points=data.map((v,i)=>{
+    const x=(i/(data.length-1))*w;
+    const y=h-(((v-min)/range)*h);
+    return x+','+y;
+  }).join(' ');
+  return'<svg class="sparkline" width="'+w+'" height="'+h+'" viewBox="0 0 '+w+' '+h+'"><polyline points="'+points+'" fill="none" stroke="var(--amber)" stroke-width="2"/></svg>';
+}
+
+// =====================================================
+// RESULTS MODAL
+// =====================================================
+function showResults(){
+  const al=gameState.airlines[0];
+  const h=al.history[al.history.length-1];
+  if(!h)return;
+  const is=h.incomeStatement;
+  const turn=gameState.turn-1;
+
+  let html='<h2>'+getTurnLabel(turn)+'</h2>';
+  html+='<div class="card" style="text-align:center"><h2 class="'+(is.netIncome>=0?'pos':'neg')+'">Net Income: '+formatMoney(is.netIncome)+'</h2></div>';
+
+  // Fuel update
+  if(gameState.events.length>0){
+    gameState.events.forEach(ev=>{
+      const isFuel=ev.includes('Fuel');
+      html+='<div class="card" style="'+(isFuel?'background:rgba(243,156,18,0.15)':'')+'">'+ev+'</div>';
+    });
+  }
+
+  // Fuel display
+  const fpi=gameState.fuelPriceIndex;
+  html+='<div class="card"><div class="row"><span class="label">Fuel Price Index</span><span class="'+(fpi>1.2?'neg':fpi<0.8?'pos':'')+'"><b>'+fpi.toFixed(2)+'×</b></span></div>';
+  html+=renderSparkline(gameState.fuelHistory.slice(-8))+'</div>';
+
+  // Route results
+  const playerRoutes=gameState.routes.filter(r=>r.lastSeatsByAirline[0]>0);
+  if(playerRoutes.length>0){
+    html+='<div class="card"><h3>Route Results</h3>';
+    html+='<div style="overflow-x:auto"><table><tr><th>Route</th><th>Price</th><th>You</th><th>Comp</th><th>Net</th></tr>';
+    playerRoutes.forEach(r=>{
+      const profit=r.lastProfitByAirline[0];
+      html+='<tr><td>'+r.id+'</td><td>$'+r.lastMarketPrice.toFixed(0)+'</td><td>'+r.lastSeatsByAirline[0]+'</td><td>'+(r.lastSeatsByAirline[1]+r.lastSeatsByAirline[2])+'</td><td class="'+(profit>=0?'pos':'neg')+'">'+formatMoney(profit)+'</td></tr>';
+    });
+    html+='</table></div></div>';
+  }
+
+  // Financial statements (accordions)
+  html+='<div class="accordion" onclick="this.classList.toggle(\'open\')"><div class="accordion-header">Income Statement <span>▾</span></div><div class="accordion-body">'+renderIncomeStatement(is)+'</div></div>';
+  html+='<div class="accordion" onclick="this.classList.toggle(\'open\')"><div class="accordion-header">Cash Flow <span>▾</span></div><div class="accordion-body">'+renderCashFlow(h.cashFlow)+'</div></div>';
+  html+='<div class="accordion" onclick="this.classList.toggle(\'open\')"><div class="accordion-header">Balance Sheet <span>▾</span></div><div class="accordion-body">'+renderBalanceSheet(al,h.balanceSheet)+'</div></div>';
+
+  // AI summary
+  html+='<div class="card"><h3>Competitors</h3>';
+  for(let i=1;i<3;i++){
+    const ai=gameState.airlines[i];
+    if(ai.bankrupt){
+      html+='<div class="row"><span style="color:'+COLORS[ai.color]+'">'+ai.name+'</span><span class="neg">BANKRUPT</span></div>';
+    } else {
+      const aiNW=getNetWorth(ai);
+      const aiFleet=ai.aircraft.filter(a=>a.status==='flying').length;
+      html+='<div class="row"><span style="color:'+COLORS[ai.color]+'">'+ai.name+'</span><span>NW: '+formatMoney(aiNW)+' | '+aiFleet+' flying</span></div>';
+    }
+  }
+  html+='</div>';
+
+  // Loan warnings
+  const maturingSoon=al.debt.filter(l=>l.quartersRemaining<=4);
+  if(maturingSoon.length>0){
+    html+='<div class="warning-banner">⚠ Loan(s) maturing soon: '+maturingSoon.map(l=>formatMoney(l.principal)+' in '+l.quartersRemaining+'Q').join(', ')+'</div>';
+  }
+
+  html+='<button class="primary" style="width:100%;min-height:52px;font-size:18px;margin-top:16px" onclick="closeResults()">Next Quarter →</button>';
+
+  document.getElementById('resultsContent').innerHTML=html;
+  document.getElementById('resultsModal').classList.add('show');
+}
+
+function closeResults(){
+  document.getElementById('resultsModal').classList.remove('show');
+  renderAll();
+}
+
+// =====================================================
+// GAME OVER / VICTORY
+// =====================================================
+function showGameOver(){
+  const al=gameState.airlines[0];
+  let html='<div class="gameover">';
+  html+='<h1 style="color:var(--red)">Bankruptcy</h1>';
+  html+='<p>'+al.name+' went bankrupt in '+getTurnLabel(gameState.turn)+'.</p>';
+  const matureEvent=gameState.events.find(e=>e.includes('BANKRUPT'))||'Insufficient equity to refinance.';
+  html+='<p style="color:var(--dim);margin-top:8px">'+matureEvent+'</p>';
+  html+=renderScoreboard();
+  html+='<button class="primary" style="margin-top:20px;font-size:18px" onclick="resetGame()">Play Again</button>';
+  html+='</div>';
+  document.getElementById('resultsContent').innerHTML=html;
+  document.getElementById('resultsModal').classList.add('show');
+}
+
+function showVictory(){
+  const sorted=[...gameState.airlines].sort((a,b)=>getNetWorth(b)-getNetWorth(a));
+  const winner=sorted[0];
+  let html='<div class="gameover">';
+  html+='<h1 style="color:var(--green)">Game Over — 1959</h1>';
+  html+='<p style="font-size:20px;margin:12px 0">'+winner.name+' wins!</p>';
+  html+=renderScoreboard();
+  html+='<button class="primary" style="margin-top:20px;font-size:18px" onclick="resetGame()">Play Again</button>';
+  html+='</div>';
+  document.getElementById('resultsContent').innerHTML=html;
+  document.getElementById('resultsModal').classList.add('show');
+}
+
+function renderScoreboard(){
+  const sorted=[...gameState.airlines].sort((a,b)=>getNetWorth(b)-getNetWorth(a));
+  let html='<div class="scoreboard">';
+  sorted.forEach((al,i)=>{
+    const nw=getNetWorth(al);
+    const isWinner=i===0;
+    html+='<div class="entry '+(isWinner?'winner':'')+'">';
+    html+='<span style="color:'+COLORS[al.color]+'">'+(i+1)+'. '+al.name+(al.bankrupt?' (bankrupt)':'')+'</span>';
+    html+='<span class="'+(nw>=0?'pos':'neg')+'">'+formatMoney(nw)+'</span>';
+    html+='</div>';
+  });
+  html+='</div>';
+  return html;
+}
+
+function resetGame(){
+  clearSave();
+  document.getElementById('resultsModal').classList.remove('show');
+  document.getElementById('gameScreen').style.display='none';
+  document.getElementById('setupScreen').style.display='flex';
+}
+
+// =====================================================
+// HELP MODAL
+// =====================================================
+function showHelp(){document.getElementById('helpModal').classList.add('show')}
+function closeHelp(){document.getElementById('helpModal').classList.remove('show')}
+
+// =====================================================
+// INIT
+// =====================================================
+(function init(){
+  // Color picker
+  const picker=document.getElementById('colorPicker');
+  COLOR_NAMES.forEach((c,i)=>{
+    const div=document.createElement('div');
+    div.className='swatch'+(i===0?' selected':'');
+    div.style.background=COLORS[c];
+    div.dataset.color=c;
+    div.onclick=function(){
+      document.querySelectorAll('.swatch').forEach(s=>s.classList.remove('selected'));
+      this.classList.add('selected');
+    };
+    picker.appendChild(div);
+  });
+
+  // Check for saved game
+  const save=loadSave();
+  if(save){
+    document.getElementById('resumePrompt').style.display='block';
+  }
+})();
+</script>
+</body>
+</html>
