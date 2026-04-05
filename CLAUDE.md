@@ -363,6 +363,8 @@ Process manager: [auto-detected at setup]
 
 **SSH is not available.** The Claude Code sandbox cannot reach the droplet via SSH or direct HTTP. All server-side changes — nginx config, cron jobs, log setup, directory creation — must be made through the auto-deploy pipeline by modifying files in `deploy/`. Never attempt SSH, scp, or direct server commands. Never create standalone "run this on the server" scripts. If something needs to happen on the droplet, put it in `deploy/auto_deploy_general.sh` (one-time gated with a flag file) or `deploy/update_nginx.sh` (triggered by bumping `NGINX_VERSION`).
 
+**External downloads are blocked from the sandbox.** The sandbox network proxy only allows traffic to package registries, GitHub, and Anthropic domains. HTTP requests to any other host (SEC EDGAR, financial APIs, external data sources, the droplet IP) will fail with a 403. Code that downloads external data must run on the droplet, not in the sandbox. Write the download logic, push it via the deploy pipeline, and let it execute on the server where there are no network restrictions.
+
 Builders flag any library or runtime feature not listed here before using it.
 
 -----
