@@ -60,13 +60,16 @@ async function launchBrowser(options = {}) {
     ],
   };
 
-  // Configure residential proxy if available
+  // Configure residential proxy if available (sticky session for multi-step forms)
   if (config.PROXY_HOST && config.PROXY_PORT) {
+    const sessionId = Math.random().toString(36).substring(7);
+    const stickyUsername = config.PROXY_USER ? `${config.PROXY_USER}-session-${sessionId}` : '';
+
     launchOptions.proxy = {
       server: `http://${config.PROXY_HOST}:${config.PROXY_PORT}`,
     };
-    if (config.PROXY_USER && config.PROXY_PASS) {
-      launchOptions.proxy.username = config.PROXY_USER;
+    if (stickyUsername && config.PROXY_PASS) {
+      launchOptions.proxy.username = stickyUsername;
       launchOptions.proxy.password = config.PROXY_PASS;
     }
   }

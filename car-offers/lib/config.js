@@ -15,11 +15,11 @@ const config = {
 };
 
 /**
- * Returns true if the minimum required config (PROXY_HOST and PROJECT_EMAIL)
- * are both set to non-empty values.
+ * Returns true if proxy is fully configured (host/port/user are pre-filled,
+ * so only PROXY_PASS needs to be added by the user via /setup).
  */
 config.isConfigured = function () {
-  return !!(config.PROXY_HOST && config.PROJECT_EMAIL);
+  return !!(config.PROXY_HOST && config.PROXY_PASS);
 };
 
 /**

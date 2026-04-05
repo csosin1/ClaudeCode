@@ -24,16 +24,16 @@ if [ ! -f /opt/.car_offers_initialized ]; then
     # Create project directory
     mkdir -p /opt/car-offers/data
 
-    # Create .env template (user fills in proxy creds via SSH)
+    # Create .env with Decodo proxy pre-filled (user adds password via /car-offers/setup)
     if [ ! -f /opt/car-offers/.env ]; then
         cat > /opt/car-offers/.env << 'ENVEOF'
-# Residential proxy (required — datacenter IPs will be blocked)
-PROXY_HOST=
-PROXY_PORT=
-PROXY_USER=
+# Decodo/Smartproxy residential proxy
+PROXY_HOST=gate.decodo.com
+PROXY_PORT=7000
+PROXY_USER=spjax0kgms
 PROXY_PASS=
 
-# Project email (used for Carvana offer flow)
+# Project email (leave blank to auto-generate disposable email)
 PROJECT_EMAIL=
 
 # Express server
