@@ -100,6 +100,37 @@ test.describe('Performance', () => {
   });
 });
 
+test.describe('Button Test App', () => {
+  test('clicking button generates a number between 1-100', async ({ page }) => {
+    await page.goto('/games/button-test/');
+    await expect(page.locator('h1')).toContainText('Button Test');
+
+    // Result should be empty before clicking
+    const result = page.locator('#result');
+    await expect(result).toHaveText('');
+
+    // Click the button
+    await page.locator('#generate-btn').click();
+
+    // Result should now show a number
+    const text = await result.textContent();
+    console.log(`>>> BUTTON TEST: Clicked button, got number: ${text}`);
+    expect(text).toBeTruthy();
+    const num = parseInt(text!, 10);
+    expect(num).toBeGreaterThanOrEqual(1);
+    expect(num).toBeLessThanOrEqual(100);
+    console.log(`>>> BUTTON TEST: Verified ${num} is between 1-100 ✓`);
+
+    // Click again — should get a new number (or same, both valid)
+    await page.locator('#generate-btn').click();
+    const text2 = await result.textContent();
+    const num2 = parseInt(text2!, 10);
+    console.log(`>>> BUTTON TEST: Second click got: ${num2}`);
+    expect(num2).toBeGreaterThanOrEqual(1);
+    expect(num2).toBeLessThanOrEqual(100);
+  });
+});
+
 test.describe('Webhook Health', () => {
   test('webhook health endpoint returns 200', async ({ request }) => {
     const resp = await request.get('/webhook/health');
