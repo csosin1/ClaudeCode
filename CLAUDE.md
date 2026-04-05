@@ -278,7 +278,9 @@ The dangerous moment is **after pushing to main but before reading QA results**.
 
 - Agents run **sequentially by default**.
 - Parallel only when tasks are provably independent — different files, no shared dependencies.
-- The following files are **Orchestrator-only**. No other agent may modify them:
+- The following files are **Orchestrator-only**. No other agent or chat may modify them:
+  - `CLAUDE.md`
+  - `.claude/agents/*.md`
   - `deploy/landing.html`
   - `deploy/update_nginx.sh`
   - `deploy/NGINX_VERSION`
