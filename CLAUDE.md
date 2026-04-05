@@ -462,14 +462,68 @@ If FAIL: [what the user would have seen]
 **New project setup:**
 
 1. Clarify location before writing code
-1. Create `/opt/<project>/`
-1. Add nginx location block
+1. Create `/opt/<project>/` (or `games/<name>/` for static games)
+1. Add nginx location block in `deploy/update_nginx.sh`
 1. Bump `NGINX_VERSION`
-1. Add landing page card
+1. Add link card to every relevant hub page:
+   - `deploy/landing.html` — always (this is the user's home screen)
+   - `games/index.html` — if it's a game
+   - Any parent sub-folder hub page — if the project lives inside a group (e.g. a `/carvana/` hub)
+1. If a new sub-folder group is created (e.g. `/carvana/`), create a hub `index.html` for it with cards linking to each project in the group, and add a card on the main landing page pointing to the hub
 1. Configure error logging and health check
 1. Add to `RUNBOOK.md`
 
+**Every project must be reachable by tapping links from the landing page.** No project should exist without a link card. If a user can't navigate to it from http://159.223.127.125/, it's not done.
+
 **Static deploys:** `games/<n>/index.html` on `main` → live at `http://159.223.127.125/games/<n>/` within 30s.
+
+**Moving a project:**
+
+When the user wants to reorganize — e.g. move a project into a sub-folder or rename its URL path.
+
+Step 1 — Confirm with the user. Present the before and after:
+
+```
+MOVE: [project name]
+From: [current URL and paths]
+To:   [new URL and paths]
+
+What will change:
+- URL: /old-path/ → /new-path/
+- Server directory: /opt/old/ → /opt/new/
+- nginx route updated
+- All link cards updated (landing page, hub pages)
+- RUNBOOK.md updated
+
+Type "move [project name]" to confirm.
+```
+
+Step 2 — Execute the move:
+
+1. Update nginx: remove old location block, add new one in `deploy/update_nginx.sh`. Add a temporary redirect from the old URL to the new URL so bookmarks don't break:
+   ```
+   location = /old-path { return 301 /new-path/; }
+   location = /old-path/ { return 301 /new-path/; }
+   ```
+1. Bump `NGINX_VERSION`
+1. For static games: move the `games/<old>/` directory to the new location in the repo — `rsync --delete` handles the rest
+1. For `/opt/` projects: add a one-time move block to `deploy/auto_deploy_general.sh` gated by a flag file:
+   - `mv /opt/<old>/ /opt/<new>/`
+   - `mv /var/log/<old>/ /var/log/<new>/`
+   - Update logrotate config paths in `/etc/logrotate.d/`
+   - Update uptime cron URL
+   - Flag file: `touch /opt/.moved-<project>`
+1. If creating a new sub-folder group: create a hub `index.html` with cards for all projects in the group
+1. Update all link cards on every hub page — landing page, old hub (if any), new hub
+1. Update `RUNBOOK.md` with new paths and URLs
+1. Push to `main`
+
+Step 3 — Verify after auto-deploy runs:
+
+1. Confirm the new URL returns 200
+1. Confirm the old URL redirects to the new one
+1. Confirm all hub pages show correct links
+1. Report to the user
 
 **Deleting a project:**
 
