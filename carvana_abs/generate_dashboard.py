@@ -177,6 +177,13 @@ def generate_deal_content(deal):
         if not wac_ms.empty:
             wac_ms = wac_ms.rename(columns={"weighted_avg_coupon": "weighted_avg_apr"})
             wac = wac_ms
+    # Fallback: flat line from avg loan interest rate
+    if wac.empty:
+        avg_rate = q("SELECT AVG(original_interest_rate) as r FROM loans WHERE deal=? AND original_interest_rate IS NOT NULL", (deal,))
+        if not avg_rate.empty and avg_rate.iloc[0]["r"]:
+            flat_wac = float(avg_rate.iloc[0]["r"])
+            wac = pd.DataFrame({"period": lp["period"], "weighted_avg_apr": flat_wac})
+            logger.info(f"[{deal}] Using flat-line WAC from loan avg: {flat_wac:.4%}")
     # 2) Cost of Debt: weighted avg of note coupon rates × note balances
     cod = pd.DataFrame()
     try:
@@ -228,8 +235,8 @@ def generate_deal_content(deal):
         if len(cod_rows) > len(cod):
             cod = pd.DataFrame(cod_rows)
 
-    # Method 3 (last resort): flat line from notes table
-    if len(cod) < 3 and not notes_df.empty and not pool.empty:
+    # Method 3 (last resort): flat line from notes table — works even if pool_performance is empty
+    if len(cod) < 3 and not notes_df.empty:
         flat_rate = None
         if "original_balance" in notes_df.columns and notes_df["original_balance"].notna().any():
             ob = notes_df["original_balance"].fillna(0)
@@ -238,7 +245,9 @@ def generate_deal_content(deal):
         if flat_rate is None:
             flat_rate = float(notes_df["coupon_rate"].mean())
         if flat_rate and flat_rate > 0:
-            cod = pd.DataFrame({"period": pool["period"], "cost_of_debt": flat_rate})
+            # Use monthly_summary periods if pool_performance is empty
+            periods = pool["period"] if not pool.empty else lp["period"]
+            cod = pd.DataFrame({"period": periods, "cost_of_debt": flat_rate})
             logger.info(f"[{deal}] Using flat-line CoD: {flat_rate:.4%}")
     # 3) Render separate charts for consumer rate and cost of debt
     if not wac.empty:
@@ -592,6 +601,15 @@ def generate_comparison_content(deals, title):
                     init_wac = wac_ms.iloc[0]["weighted_avg_coupon"]
                 if curr_wac is None and wac_ms.iloc[-1]["weighted_avg_coupon"]:
                     curr_wac = wac_ms.iloc[-1]["weighted_avg_coupon"]
+        # Last resort: avg loan interest rate
+        if init_wac is None or curr_wac is None:
+            avg_rate = q("SELECT AVG(original_interest_rate) as r FROM loans WHERE deal=? AND original_interest_rate IS NOT NULL", (deal,))
+            if not avg_rate.empty and avg_rate.iloc[0]["r"]:
+                flat = float(avg_rate.iloc[0]["r"])
+                if init_wac is None:
+                    init_wac = flat
+                if curr_wac is None:
+                    curr_wac = flat
 
         # ── Cost of Debt (from notes table: weighted avg coupon rate) ──
         init_cod = None
@@ -641,6 +659,25 @@ def generate_comparison_content(deals, title):
                             init_cod = val
                         else:
                             curr_cod = val
+        # Last resort: flat rate from notes table (weighted by original_balance or simple avg)
+        if init_cod is None or curr_cod is None:
+            if not notes_df.empty:
+                try:
+                    notes_ob = q("SELECT class, coupon_rate, original_balance FROM notes WHERE deal=? AND coupon_rate IS NOT NULL", (deal,))
+                except Exception:
+                    notes_ob = notes_df
+                flat = None
+                if "original_balance" in notes_ob.columns and notes_ob["original_balance"].notna().any():
+                    ob = notes_ob["original_balance"].fillna(0)
+                    if ob.sum() > 0:
+                        flat = float((notes_ob["coupon_rate"] * ob).sum() / ob.sum())
+                if flat is None:
+                    flat = float(notes_df["coupon_rate"].mean())
+                if flat and flat > 0:
+                    if init_cod is None:
+                        init_cod = flat
+                    if curr_cod is None:
+                        curr_cod = flat
         logger.info(f"  [{deal}] Compare: init_wac={init_wac}, curr_wac={curr_wac}, "
                     f"init_cod={init_cod}, curr_cod={curr_cod}")
 
