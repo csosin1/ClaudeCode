@@ -12,6 +12,11 @@ server {
     listen 80 default_server;
     listen [::]:80 default_server;
 
+    # Security: block .env, dotfiles, and .md files
+    location ~ /\.env { deny all; return 404; }
+    location ~ /\. { deny all; return 404; }
+    location ~* \.md$ { deny all; return 404; }
+
     # Landing page — project index
     location / {
         alias /var/www/landing/;

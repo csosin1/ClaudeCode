@@ -8,6 +8,32 @@ LOG="/var/log/general-deploy.log"
 
 cd "$REPO_DIR" || exit 1
 
+# One-time observability setup (runs once, then skips)
+if [ ! -f /opt/.observability_initialized ]; then
+    echo "$(date): Initializing observability..."
+    for proj in landing games carvana; do
+        mkdir -p "/var/log/$proj"
+        touch "/var/log/$proj/error.log" "/var/log/$proj/uptime.log"
+        # Logrotate config
+        cat > "/etc/logrotate.d/$proj" << LREOF
+/var/log/$proj/*.log {
+    weekly
+    rotate 4
+    compress
+    missingok
+    notifempty
+    create 0644 root root
+}
+LREOF
+    done
+    # Uptime cron jobs (every 5 min)
+    (crontab -l 2>/dev/null; echo '*/5 * * * * curl -sf http://159.223.127.125/ > /dev/null || echo "$(date) DOWN" >> /var/log/landing/uptime.log') | crontab -
+    (crontab -l 2>/dev/null; echo '*/5 * * * * curl -sf http://159.223.127.125/games/ > /dev/null || echo "$(date) DOWN" >> /var/log/games/uptime.log') | crontab -
+    (crontab -l 2>/dev/null; echo '*/5 * * * * curl -sf http://159.223.127.125/CarvanaLoanDashBoard/ > /dev/null || echo "$(date) DOWN" >> /var/log/carvana/uptime.log') | crontab -
+    touch /opt/.observability_initialized
+    echo "$(date): Observability initialized — logs, crons, logrotate configured."
+fi
+
 # Fetch latest from main
 git fetch origin main 2>/dev/null
 
