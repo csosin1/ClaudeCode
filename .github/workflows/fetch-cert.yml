@@ -5,37 +5,56 @@ on:
     branches: [claude/carvana-loan-dashboard-4QMPM]
     paths: ['.github/workflows/fetch-cert.yml']
 
+permissions:
+  contents: write
+
 jobs:
   fetch:
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
-      - name: Download and dump cert content
+      - uses: actions/checkout@v4
+        with:
+          ref: claude/carvana-loan-dashboard-4QMPM
+
+      - name: Download and extract cert
         run: |
           curl -s -A "Clifford Sosin clifford.sosin@casinvestmentpartners.com" \
             -o cert.htm \
             "https://www.sec.gov/Archives/edgar/data/1801738/000180173825000053/crvna2020-p1servicerrepo.htm"
           echo "Downloaded $(wc -c < cert.htm) bytes"
-          echo ""
-          echo "=== EXTRACTED TEXT (numbered fields area) ==="
-          python3 -c "
+
+          python3 << 'PYEOF'
           from html.parser import HTMLParser
           import re
+
           class T(HTMLParser):
               def __init__(self):
                   super().__init__()
                   self.t = []
               def handle_data(self, d):
                   self.t.append(d)
-          with open('cert.htm') as f:
+
+          with open("cert.htm") as f:
               html = f.read()
           p = T()
           p.feed(html)
-          text = '\n'.join(p.t)
-          # Find numbered fields - print fields 10-80
-          for m in re.finditer(r'(?:^|\n)\s*(\d{1,3})\.\s+(.+?)(?=\n\s*\d{1,3}\.\s|\Z)', text, re.DOTALL):
-              num = int(m.group(1))
-              if 10 <= num <= 80:
-                  content = m.group(2).strip()[:200]
-                  print(f'FIELD {num:3d}: {content}')
-          "
+          text = "\n".join(p.t)
+
+          with open("deploy/certs_fields.txt", "w") as out:
+              out.write(f"Text length: {len(text)} chars\n\n")
+              for m in re.finditer(r'(?:^|\n)\s*(\d{1,3})\.\s+(.+?)(?=\n\s*\d{1,3}\.\s|\Z)', text, re.DOTALL):
+                  num = int(m.group(1))
+                  if 10 <= num <= 80:
+                      content = m.group(2).strip()[:300]
+                      out.write(f"FIELD {num:3d}: {content}\n")
+          print("Wrote deploy/certs_fields.txt")
+          PYEOF
+
+      - name: Commit results
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add deploy/certs_fields.txt
+          git commit -m "Add cert field dump from GitHub Actions"
+          git push
