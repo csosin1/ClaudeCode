@@ -1035,9 +1035,66 @@ def main():
     logger.info("Generating Default Model analysis...")
     model_html = generate_model_content()
 
+    # Generate debug section: raw DB values + cert field dump for 2020-P1
+    debug_html = "<h3>Data Debug (2020-P1)</h3>"
+    try:
+        dbg = q("SELECT distribution_date, total_note_interest, aggregate_note_balance, note_balance_a1, note_balance_a2, note_balance_a3, note_balance_a4, note_balance_b, note_balance_c, note_balance_d, note_balance_n FROM pool_performance WHERE deal='2020-P1' ORDER BY distribution_date DESC LIMIT 5")
+        if not dbg.empty:
+            debug_html += "<h4>pool_performance (last 5 periods)</h4>" + table_html(dbg)
+        else:
+            debug_html += "<p>No pool_performance data for 2020-P1</p>"
+        dbg2 = q("SELECT class, coupon_rate, original_balance FROM notes WHERE deal='2020-P1'")
+        if not dbg2.empty:
+            debug_html += "<h4>notes table</h4>" + table_html(dbg2)
+        # Show computed CoD for last 5 periods
+        if not dbg.empty:
+            debug_html += "<h4>Computed CoD (total_note_interest / aggregate_note_balance * 12)</h4><pre>"
+            for _, row in dbg.iterrows():
+                ni = row.get("total_note_interest")
+                nb = row.get("aggregate_note_balance")
+                if pd.notna(ni) and pd.notna(nb) and nb > 0:
+                    cod_val = float(ni) / float(nb) * 12
+                    debug_html += f"{row['distribution_date']}: ${ni:,.0f} / ${nb:,.0f} * 12 = {cod_val:.4%}\n"
+                else:
+                    debug_html += f"{row['distribution_date']}: ni={ni}, nb={nb} → CANNOT COMPUTE\n"
+            debug_html += "</pre>"
+        # Dump one cert's raw fields if possible
+        try:
+            from ingestion.edgar_client import download_document
+            from ingestion.servicer_parser import _extract_numbered_fields, _parse_numbered_value
+            from db.schema import get_connection
+            conn_dbg = get_connection(ACTIVE_DB if os.path.exists(ACTIVE_DB) else FULL_DB)
+            cur = conn_dbg.cursor()
+            cur.execute("SELECT servicer_cert_url FROM filings WHERE deal='2020-P1' AND servicer_cert_url IS NOT NULL ORDER BY filing_date DESC LIMIT 1")
+            cert_row = cur.fetchone()
+            conn_dbg.close()
+            if cert_row:
+                cert_html = download_document(cert_row[0] if isinstance(cert_row, tuple) else cert_row["servicer_cert_url"])
+                if cert_html:
+                    from bs4 import BeautifulSoup
+                    cert_text = BeautifulSoup(cert_html, "html.parser").get_text("\n", strip=True)
+                    fields = _extract_numbered_fields(cert_text) or _extract_numbered_fields(cert_html)
+                    if fields:
+                        debug_html += f"<h4>Raw cert fields (14-62, latest 2020-P1 cert)</h4><pre>"
+                        for fnum in range(14, 63):
+                            if fnum in fields:
+                                raw = fields[fnum]["raw"][:120].replace("<", "&lt;").replace(">", "&gt;")
+                                pv = _parse_numbered_value(fields[fnum]["raw"])
+                                debug_html += f"  {fnum:3d}: val={pv.get('value')} pct={pv.get('pct')}  raw='{raw}'\n"
+                        for fnum in [76]:
+                            if fnum in fields:
+                                pv = _parse_numbered_value(fields[fnum]["raw"])
+                                debug_html += f"  {fnum:3d}: val={pv.get('value')} (aggregate note balance)\n"
+                        debug_html += "</pre>"
+        except Exception as e:
+            debug_html += f"<p>Cert dump error: {e}</p>"
+    except Exception as e:
+        debug_html += f"<p>Debug error: {e}</p>"
+
     # Build deal selector dropdown with comparison entries at top
     first_deal = list(deal_contents.keys())[0]
-    options = '<option value="__model__">--- Default Model ---</option>\n'
+    options = '<option value="__debug__">--- Data Debug ---</option>\n'
+    options += '<option value="__model__">--- Default Model ---</option>\n'
     options += '<option value="__prime__">--- Prime Comparison ---</option>\n'
     options += '<option value="__nonprime__">--- Non-Prime Comparison ---</option>\n'
     options += '<option disabled>──────────────────</option>\n'
@@ -1047,6 +1104,7 @@ def main():
     # Build per-deal content divs
     all_deal_html = ""
     # Add model and comparison sections first (hidden by default)
+    all_deal_html += f'<div id="deal-__debug__" class="deal-block" style="display:none">\n{debug_html}\n</div>\n'
     all_deal_html += f'<div id="deal-__model__" class="deal-block" style="display:none">\n{model_html}\n</div>\n'
     all_deal_html += f'<div id="deal-__prime__" class="deal-block" style="display:none">\n{prime_html}\n</div>\n'
     all_deal_html += f'<div id="deal-__nonprime__" class="deal-block" style="display:none">\n{nonprime_html}\n</div>\n'
