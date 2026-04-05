@@ -664,65 +664,65 @@ def generate_comparison_content(deals, title):
                 if curr_wac is None:
                     curr_wac = flat
 
-        # ── Cost of Debt (from notes table: weighted avg coupon rate) ──
+        # ── Cost of Debt: compute full time series, take first/last ──
         init_cod = None
         curr_cod = None
+        cod_source_summary = "none"
         try:
             notes_df = q("SELECT class, coupon_rate FROM notes WHERE deal=? AND coupon_rate IS NOT NULL", (deal,))
         except Exception:
-            notes_df = pd.DataFrame()  # notes table may not exist yet
-        # Normalize class names and set up balance column mapping
-        norm_rate_lookup = {}
-        if not notes_df.empty:
-            for cls, rate in zip(notes_df["class"], notes_df["coupon_rate"]):
-                norm = cls.upper().replace("-", "").replace(" ", "").replace("CLASS", "")
-                norm_rate_lookup[norm] = rate
-        bal_cols = {"A1": "note_balance_a1", "A2": "note_balance_a2", "A3": "note_balance_a3",
-                    "A4": "note_balance_a4", "B": "note_balance_b", "C": "note_balance_c",
-                    "D": "note_balance_d", "N": "note_balance_n"}
-        # Primary: try actual interest ratio FIRST (more accurate), then weighted notes
-        cod_methods_used = {}
-        for label, order in [("init", "ASC"), ("curr", "DESC")]:
-            pp = q(f"SELECT * FROM pool_performance WHERE deal=? ORDER BY distribution_date {order} LIMIT 1", (deal,))
-            if not pp.empty:
-                row = pp.iloc[0]
-                # Method 1: total_note_interest / aggregate_note_balance * 12
-                ni = row.get("total_note_interest") if "total_note_interest" in pp.columns else None
-                nb = row.get("aggregate_note_balance") if "aggregate_note_balance" in pp.columns else None
-                if ni is not None and nb is not None and pd.notna(ni) and pd.notna(nb) and float(nb) > 0 and float(ni) > 0:
-                    val = float(ni) / float(nb) * 12
-                    if 0 < val < 0.25:
-                        if label == "init":
-                            init_cod = val
-                        else:
-                            curr_cod = val
-                        cod_methods_used[label] = "method1"
-                        logger.debug(f"  [{deal}] Summary CoD {label}: method1 actual interest={ni}, balance={nb}, cod={val:.4%}")
-                        continue
-                    else:
-                        logger.debug(f"  [{deal}] Summary CoD {label}: method1 filtered, val={val:.4%} (ni={ni}, nb={nb})")
-                # Method 2 fallback: weighted coupon rates × note balances
+            notes_df = pd.DataFrame()
+
+        # Build full CoD time series (same merged Method 1+2 as per-deal chart)
+        pool_all = q("SELECT * FROM pool_performance WHERE deal=? ORDER BY distribution_date", (deal,))
+        if not pool_all.empty:
+            norm_rate_lookup = {}
+            if not notes_df.empty:
+                for cls, rate in zip(notes_df["class"], notes_df["coupon_rate"]):
+                    norm = cls.upper().replace("-", "").replace(" ", "").replace("CLASS", "")
+                    norm_rate_lookup[norm] = rate
+            bal_cols = {"A1": "note_balance_a1", "A2": "note_balance_a2", "A3": "note_balance_a3",
+                        "A4": "note_balance_a4", "B": "note_balance_b", "C": "note_balance_c",
+                        "D": "note_balance_d", "N": "note_balance_n"}
+            for col in bal_cols.values():
+                if col in pool_all.columns:
+                    pool_all[col] = pool_all[col].ffill()
+            has_ni = "total_note_interest" in pool_all.columns
+            has_nb = "aggregate_note_balance" in pool_all.columns
+            cod_series = []
+            for _, row in pool_all.iterrows():
+                # Method 1: actual interest ratio
+                if has_ni and has_nb:
+                    ni = row.get("total_note_interest")
+                    nb = row.get("aggregate_note_balance")
+                    if pd.notna(ni) and pd.notna(nb) and float(nb) > 0 and float(ni) > 0:
+                        val = float(ni) / float(nb) * 12
+                        if 0 < val < 0.25:
+                            cod_series.append(val)
+                            continue
+                # Method 2: weighted coupon × balance
                 if norm_rate_lookup:
                     w_sum, t_bal = 0.0, 0.0
-                    bal_debug = {}
                     for cls, col in bal_cols.items():
-                        if col in pp.columns and cls in norm_rate_lookup:
+                        if col in pool_all.columns and cls in norm_rate_lookup:
                             bal = row.get(col)
                             if pd.notna(bal) and float(bal) > 0:
                                 w_sum += norm_rate_lookup[cls] * float(bal)
                                 t_bal += float(bal)
-                                bal_debug[cls] = float(bal)
                     if t_bal > 0:
-                        val = w_sum / t_bal
-                        if label == "init":
-                            init_cod = val
-                        else:
-                            curr_cod = val
-                        cod_methods_used[label] = "method2"
-                        logger.debug(f"  [{deal}] Summary CoD {label}: method2 weighted notes, total_bal={t_bal}, balances={bal_debug}, cod={val:.4%}")
-        # Fallback 3: flat rate from notes table (weighted by original_balance or simple avg)
-        methods_str = "+".join(sorted(set(cod_methods_used.values()))) if cod_methods_used else "none"
-        cod_source_summary = methods_str if (init_cod is not None) else "none"
+                        cod_series.append(w_sum / t_bal)
+                        continue
+                cod_series.append(None)
+
+            # Take first and last non-None values
+            valid = [(i, v) for i, v in enumerate(cod_series) if v is not None]
+            if valid:
+                init_cod = valid[0][1]
+                curr_cod = valid[-1][1]
+                cod_source_summary = "time_series"
+                logger.info(f"  [{deal}] Summary CoD from time series: init={init_cod:.4%}, curr={curr_cod:.4%} ({len(valid)} points)")
+
+        # Fallback: flat rate from notes table
         if init_cod is None or curr_cod is None:
             if not notes_df.empty:
                 try:
@@ -739,22 +739,20 @@ def generate_comparison_content(deals, title):
                 if flat and flat > 0:
                     if init_cod is None:
                         init_cod = flat
-                        cod_source_summary = "notes_flat"
                     if curr_cod is None:
                         curr_cod = flat
-                        cod_source_summary = "notes_flat"
+                    cod_source_summary = "notes_flat"
 
-        # Fallback 4: rough estimate from avg loan interest rate
+        # Fallback: rough estimate from avg loan interest rate
         if init_cod is None or curr_cod is None:
             avg_rate_fb = q("SELECT AVG(original_interest_rate) as r FROM loans WHERE deal=? AND original_interest_rate IS NOT NULL", (deal,))
             if not avg_rate_fb.empty and avg_rate_fb.iloc[0]["r"]:
                 rough = float(avg_rate_fb.iloc[0]["r"]) * 0.4
                 if init_cod is None:
                     init_cod = rough
-                    cod_source_summary = "loan_rate_estimate"
                 if curr_cod is None:
                     curr_cod = rough
-                logger.info(f"  [{deal}] Using rough CoD estimate from loan avg rate: {rough:.4%}")
+                cod_source_summary = "loan_rate_estimate"
 
         # Track WAC source for debug
         if not first_wac.empty and first_wac.iloc[0]["weighted_avg_apr"]:
