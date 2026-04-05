@@ -1,0 +1,31 @@
+name: Fetch Servicer Cert
+
+on:
+  push:
+    branches: [claude/carvana-loan-dashboard-4QMPM]
+    paths: ['.github/workflows/fetch-cert.yml']
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Download 2020-P1 servicer cert
+        run: |
+          curl -s -A "Clifford Sosin clifford.sosin@casinvestmentpartners.com" \
+            -o cert_2020_p1.htm \
+            "https://www.sec.gov/Archives/edgar/data/1801738/000180173825000053/crvna2020-p1servicerrepo.htm"
+          echo "Downloaded $(wc -c < cert_2020_p1.htm) bytes"
+
+          # Also try an older format cert
+          curl -s -A "Clifford Sosin clifford.sosin@casinvestmentpartners.com" \
+            -o cert_2020_p1_older.htm \
+            "https://www.sec.gov/Archives/edgar/data/1801738/000119312521047833/d143744dex991.htm"
+          echo "Downloaded older cert: $(wc -c < cert_2020_p1_older.htm) bytes"
+
+      - name: Upload certs
+        uses: actions/upload-artifact@v4
+        with:
+          name: servicer-certs
+          path: "*.htm"
+          retention-days: 7
