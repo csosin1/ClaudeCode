@@ -583,6 +583,7 @@ Fix cycles used: [0-2]
 - No PRs unless asked.
 - Tag before every deploy.
 - Static deploys push to `main` only.
+- **Merge conflicts:** If `git push` fails because another chat pushed first, run `git pull --rebase origin main` to rebase on top, then push again. Never force-push to resolve conflicts. If the rebase has conflicts, resolve them manually — don't discard the other chat's work.
 
 -----
 
