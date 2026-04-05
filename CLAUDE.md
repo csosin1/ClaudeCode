@@ -59,8 +59,10 @@ User prompt (iPhone)
                           → Orchestrator shares live link with user
                       → QA FAIL
                           → Orchestrator reads failures + screenshots from Actions
+                          → Orchestrator sends Builder a QA failure brief
                           → Builder fixes → re-push → GitHub Actions re-tests
-                          → Max 2 fix cycles, then rollback + report to user
+                          → Repeat until passing or Orchestrator judges stuck
+                          → If stuck: rollback + escalate to user with evidence
 ```
 
 **Nothing is considered done until QA passes on the live deployed URL.**
@@ -170,9 +172,26 @@ QA runs on the live site via GitHub Actions Playwright — not from the sandbox 
 
 3. **Orchestrator reads results.** After deploy, Orchestrator checks the GitHub Actions run for the push commit. It reads test results, failure details, and screenshots. The Orchestrator does not accept a bare "PASS" — it must see itemized results against each success criterion from the spec.
 
-4. **Fail → fix → redeploy → retest.** If QA fails, the Orchestrator delegates the fix to the Builder with full context: which tests failed, the error messages, and screenshots. Builder fixes, Orchestrator redeploys, GitHub Actions re-runs QA automatically.
+4. **Fail → diagnose → fix → redeploy → retest.** If QA fails, the Orchestrator provides the Builder with a **QA failure brief** (see below) containing everything needed to diagnose and fix the issue. Builder fixes, Orchestrator redeploys, GitHub Actions re-runs QA automatically.
 
-5. **Max 2 fix cycles.** If QA still fails after 2 fix attempts, the Orchestrator stops, rolls back to the pre-deploy tag, and reports the failures to the user with evidence.
+5. **Escalate when stuck, not on a counter.** There is no hard cap on fix cycles. The Orchestrator uses judgment to decide when to escalate to the user. Escalate when:
+   - The same failure persists after a fix attempt (no progress)
+   - The Builder is attempting the same approach twice
+   - Fixes are making the problem worse or introducing new failures
+   - The root cause is unclear and the Orchestrator can't provide useful direction
+   - The fix requires a design decision or scope change beyond the original spec
+   
+   When escalating: rollback to the pre-deploy tag first, then report to the user with evidence (what failed, what was tried, why it's stuck).
+
+**QA failure brief — what the Orchestrator must provide to the Builder:**
+The quality of this brief determines whether the Builder can fix the issue. It must include:
+- **Which tests failed** — exact test names and describe blocks
+- **Error messages** — the full assertion or runtime error, not a summary
+- **Expected vs actual** — what the test expected to see vs what it got
+- **Screenshots** — from the Actions artifacts, showing what the page actually looked like
+- **Console errors** — any JS errors captured during the test
+- **What changed** — which files were modified in the deploy that triggered this failure
+- **Suggested investigation** — the Orchestrator's best guess at root cause based on the evidence
 
 **What makes QA meaningful:** Tests must interact with the product the way a real user would. Loading a page and checking the title is not sufficient. If the feature has a button, the test clicks it and verifies the result. If it displays data, the test checks for real values (no NaN, no blanks). If it has a form, the test fills and submits it.
 
@@ -460,15 +479,25 @@ test.describe('Feature Name', () => {
 ```
 Deploy → GitHub Actions QA → PASS → done
                            → FAIL → Orchestrator reads failures
-                                  → Builder fixes with full context (errors + screenshots)
+                                  → Orchestrator writes QA failure brief
+                                  → Builder fixes with full context
                                   → Redeploy → GitHub Actions re-runs
-                                  → Max 2 fix cycles, then rollback + report to user
+                                  → Repeat until passing or stuck
+                                  → If stuck: rollback + escalate to user
 ```
 
-The Orchestrator provides the Builder with:
-- Which tests failed and their error messages
-- Screenshots from the failed run (via Actions artifacts)
-- The specific success criteria that were not met
+**Escalate when stuck, not on a counter.** No hard limit on fix cycles. The Orchestrator escalates when the same failure repeats, when fixes aren't making progress, or when the root cause is unclear. When escalating: rollback first, then report with evidence.
+
+**QA failure brief — the Orchestrator sends this to the Builder on every failure:**
+- **Which tests failed** — exact test names
+- **Full error messages** — the assertion or runtime error verbatim, not summarized
+- **Expected vs actual** — what the test wanted vs what it got
+- **Screenshots** — from the Actions artifacts showing what the user would see
+- **Console errors** — any JS errors captured
+- **What changed** — which files were modified in the failing deploy
+- **Suggested investigation** — Orchestrator's best guess at the root cause
+
+The brief must be detailed enough that the Builder can diagnose without re-reading the entire codebase. Poor feedback = wasted fix cycles.
 
 ### Regression Testing
 
