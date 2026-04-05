@@ -131,6 +131,55 @@ test.describe('Button Test App', () => {
   });
 });
 
+test.describe('Dice Roller App', () => {
+  test('page loads with correct heading', async ({ page }) => {
+    const response = await page.goto('/games/dice-roller/');
+    expect(response?.status()).toBe(200);
+    await expect(page.locator('h1')).toContainText('Dice Roller');
+  });
+
+  test('clicking roll produces a number 1-6 and updates history', async ({ page }) => {
+    await page.goto('/games/dice-roller/');
+
+    // Result and history should be empty before clicking
+    const result = page.locator('#result');
+    await expect(result).toHaveText('');
+
+    // First roll
+    await page.locator('#roll-btn').click();
+    const text1 = await result.textContent();
+    console.log(`>>> DICE ROLLER: First roll got: ${text1}`);
+    expect(text1).toBeTruthy();
+    const num1 = parseInt(text1!, 10);
+    expect(num1).toBeGreaterThanOrEqual(1);
+    expect(num1).toBeLessThanOrEqual(6);
+    console.log(`>>> DICE ROLLER: Verified ${num1} is between 1-6`);
+
+    // Second roll
+    await page.locator('#roll-btn').click();
+    const text2 = await result.textContent();
+    console.log(`>>> DICE ROLLER: Second roll got: ${text2}`);
+    const num2 = parseInt(text2!, 10);
+    expect(num2).toBeGreaterThanOrEqual(1);
+    expect(num2).toBeLessThanOrEqual(6);
+    console.log(`>>> DICE ROLLER: Verified ${num2} is between 1-6`);
+
+    // History should have at least 2 entries
+    const historyItems = page.locator('#history .history-item');
+    const count = await historyItems.count();
+    console.log(`>>> DICE ROLLER: History has ${count} entries after 2 rolls`);
+    expect(count).toBeGreaterThanOrEqual(2);
+  });
+
+  test('no JS errors on page', async ({ page }) => {
+    const errors: string[] = [];
+    page.on('pageerror', (err) => errors.push(err.message));
+    await page.goto('/games/dice-roller/');
+    await page.locator('#roll-btn').click();
+    expect(errors, 'Dice Roller should have no JS errors').toHaveLength(0);
+  });
+});
+
 test.describe('Webhook Health', () => {
   test('webhook health endpoint returns 200', async ({ request }) => {
     const resp = await request.get('/webhook/health');

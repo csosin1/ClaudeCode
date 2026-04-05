@@ -28,12 +28,12 @@ No wild goose chases. A wrong build is worse than a delayed build.
 
 The main Claude Code session is always the **Orchestrator**. It never writes code directly — it plans, delegates, synthesizes, and maintains shared state.
 
-|Agent       |Job                              |Can Write Code|Can Deploy|
-|------------|---------------------------------|--------------|----------|
-|Orchestrator|Plans, delegates, maintains state|No            |Yes       |
-|Builder     |Implements                       |Yes           |No        |
-|Reviewer    |Reviews only                     |No            |No        |
-|QA          |Tests live environment           |No            |No        |
+|Agent       |Job                                          |Can Write Code|Can Deploy|
+|------------|---------------------------------------------|--------------|----------|
+|Orchestrator|Plans, delegates, maintains state            |No            |Yes       |
+|Builder     |Implements features + writes Playwright tests|Yes           |No        |
+|Reviewer    |Reviews only                                 |No            |No        |
+|QA          |GitHub Actions Playwright (automated)        |No            |No        |
 
 Agent definition files live in `.claude/agents/`.
 
@@ -47,21 +47,20 @@ User prompt (iPhone)
     → Orchestrator writes SPEC and surfaces to user for approval
       → User approves
         → Orchestrator updates TASK_STATE.md: status = "building"
-          → Builder implements
+          → Builder implements feature + writes Playwright tests for it
             → Orchestrator updates TASK_STATE.md: status = "reviewing"
               → Reviewer reviews (must PASS before deploy)
                 → Orchestrator tags git state as rollback point
-                  → Orchestrator deploys to droplet
-                    → Orchestrator updates TASK_STATE.md: status = "qa"
-                      → QA Agent tests live URL
-                        → QA PASS
-                            → Orchestrator updates TASK_STATE.md: status = "done"
-                            → Orchestrator updates RUNBOOK.md
-                            → Orchestrator shares live link with user
-                        → QA FAIL
-                            → Orchestrator rolls back immediately
-                            → Builder fixes → re-deploy → QA re-tests
-                            → Max 2 fix cycles, then STOP and report to user
+                  → Orchestrator pushes to main (webhook deploys in 2-3s)
+                    → GitHub Actions runs Playwright tests on live site
+                      → QA PASS
+                          → Orchestrator updates TASK_STATE.md: status = "done"
+                          → Orchestrator updates RUNBOOK.md
+                          → Orchestrator shares live link with user
+                      → QA FAIL
+                          → Orchestrator reads failures + screenshots from Actions
+                          → Builder fixes → re-push → GitHub Actions re-tests
+                          → Max 2 fix cycles, then rollback + report to user
 ```
 
 **Nothing is considered done until QA passes on the live deployed URL.**
@@ -102,12 +101,17 @@ User must approve before work begins. "Go" or "looks good" counts. If revised, O
 
 ## Stage 3 — Building
 
-Builder reads `LESSONS.md` and `TASK_STATE.md` before writing anything. After completing work, appends to `CHANGES.md`:
+Builder reads `LESSONS.md` and `TASK_STATE.md` before writing anything.
+
+**Every build includes Playwright tests.** The Builder adds task-specific tests to `tests/qa-smoke.spec.ts` that exercise the new feature like an end user — clicking buttons, verifying output, checking data. Tests are a required deliverable, not optional. A build without tests is incomplete.
+
+After completing work, appends to `CHANGES.md`:
 
 ```
 ## [date] [task name]
 - What was built
 - Files modified
+- Tests added (describe what each test verifies)
 - Assumptions made
 - Things the reviewer should check
 ```
@@ -154,9 +158,23 @@ If post-deploy QA fails, Orchestrator immediately:
 
 -----
 
-## Stage 6 — QA
+## Stage 6 — QA (Closed-Loop)
 
-QA Agent tests the live URL using Playwright MCP. The Orchestrator does not accept a bare "PASS" — the QA report must include screenshots and itemized results against each success criterion from the spec.
+QA runs on the live site via GitHub Actions Playwright — not from the sandbox (which cannot reach the droplet).
+
+**How it works:**
+
+1. **Builder writes task-specific tests.** Every feature or fix includes Playwright tests in `tests/qa-smoke.spec.ts` that exercise the new functionality like an end user — clicking buttons, filling forms, verifying output, checking data values. These tests are part of the build deliverable, not an afterthought.
+
+2. **Push to main triggers QA.** GitHub Actions runs all Playwright tests (existing + new) against the live deployed site at both 390px mobile and 1280px desktop viewports. Screenshots are captured and uploaded as artifacts.
+
+3. **Orchestrator reads results.** After deploy, Orchestrator checks the GitHub Actions run for the push commit. It reads test results, failure details, and screenshots. The Orchestrator does not accept a bare "PASS" — it must see itemized results against each success criterion from the spec.
+
+4. **Fail → fix → redeploy → retest.** If QA fails, the Orchestrator delegates the fix to the Builder with full context: which tests failed, the error messages, and screenshots. Builder fixes, Orchestrator redeploys, GitHub Actions re-runs QA automatically.
+
+5. **Max 2 fix cycles.** If QA still fails after 2 fix attempts, the Orchestrator stops, rolls back to the pre-deploy tag, and reports the failures to the user with evidence.
+
+**What makes QA meaningful:** Tests must interact with the product the way a real user would. Loading a page and checking the title is not sufficient. If the feature has a button, the test clicks it and verifies the result. If it displays data, the test checks for real values (no NaN, no blanks). If it has a form, the test fills and submits it.
 
 -----
 
@@ -233,11 +251,11 @@ After every completed task, Orchestrator:
 
 ## Agent Tool Restrictions
 
-|Agent   |Allowed Tools                                                    |
-|--------|-----------------------------------------------------------------|
-|Builder |Read, Write, Edit, Bash, Glob, Grep                              |
-|Reviewer|Read, Glob, Grep — no write access                               |
-|QA      |Playwright MCP, Write (QA report only) — no codebase write access|
+|Agent   |Allowed Tools                                                                |
+|--------|-----------------------------------------------------------------------------|
+|Builder |Read, Write, Edit, Bash, Glob, Grep (writes features + Playwright tests)     |
+|Reviewer|Read, Glob, Grep — no write access                                           |
+|QA      |GitHub Actions Playwright (automated) — Orchestrator reads results from Actions|
 
 -----
 
@@ -403,42 +421,84 @@ Builder reads `LESSONS.md` at the start of every task.
 
 ## QA Protocol
 
-**Environment:** `http://159.223.127.125` (or project-specific path)
+**Environment:** `http://159.223.127.125` (or project-specific path). The sandbox cannot reach the droplet — all live-site verification runs on GitHub Actions infrastructure.
 
-**Automated QA via GitHub Actions:** Every push to `main` runs `.github/workflows/qa.yml` which executes Playwright tests against the live site. The Orchestrator checks GitHub Actions results after each deploy. The sandbox cannot reach the droplet directly — all live-site verification happens through GitHub Actions.
+### How QA Runs
 
-**What QA tests (automated in `tests/qa-smoke.spec.ts`):**
+1. Builder adds task-specific Playwright tests to `tests/qa-smoke.spec.ts` as part of the build
+2. Orchestrator pushes to `main` → webhook deploys in 2-3s → GitHub Actions triggers `.github/workflows/qa.yml`
+3. GitHub Actions installs Playwright + Chromium, waits 15s for deploy, runs all tests at 390px mobile and 1280px desktop
+4. Screenshots uploaded as artifacts (7-day retention)
+5. Orchestrator checks the Actions run for the push commit to read pass/fail results
 
-1. Load deployed URL — no console errors
-1. Verify every success criterion from spec explicitly
-1. Interact with all major UI elements as a real iPhone user
-1. Check all data fields — no NaN, blanks, or implausible values
-1. Test at 390px width first; confirm desktop also works
-1. Check server error log at `/var/log/<project>/error.log`
-1. Spot-check two existing features (regression)
-1. Note page load time
+### Writing Task-Specific Tests
 
-**QA report** written to `qa-report.md`:
+Every feature must have Playwright tests that act like an end user:
+
+- **Interactive elements:** Click buttons, fill forms, select options — verify the response
+- **Data display:** Check for real values — no NaN, no blanks, no placeholder text
+- **Navigation:** Follow links, verify destinations load
+- **Error states:** Test invalid input if applicable
+- **Mobile:** All tests run at 390px — layouts must be usable
+
+Tests go in `tests/qa-smoke.spec.ts` in a new `test.describe` block named after the feature. Example pattern:
+
+```typescript
+test.describe('Feature Name', () => {
+  test('user can do the thing', async ({ page }) => {
+    await page.goto('/feature-path/');
+    await page.locator('#action-button').click();
+    const result = await page.locator('#result').textContent();
+    expect(result).toBeTruthy();
+    // Verify actual values, not just presence
+  });
+});
+```
+
+### Closed-Loop Iteration
 
 ```
-QA REPORT: [task] [date]
+Deploy → GitHub Actions QA → PASS → done
+                           → FAIL → Orchestrator reads failures
+                                  → Builder fixes with full context (errors + screenshots)
+                                  → Redeploy → GitHub Actions re-runs
+                                  → Max 2 fix cycles, then rollback + report to user
+```
+
+The Orchestrator provides the Builder with:
+- Which tests failed and their error messages
+- Screenshots from the failed run (via Actions artifacts)
+- The specific success criteria that were not met
+
+### Regression Testing
+
+After every deploy, the full test suite runs — not just new tests. This covers:
+- All existing project routes (landing page, games hub, each game)
+- Security checks (.env, dotfiles, .md files return 404)
+- Performance (pages load under 8s)
+- Webhook health endpoint
+
+### QA Report
+
+The GitHub Actions run serves as the QA report. The Orchestrator summarizes results in `TASK_STATE.md`:
+
+```
+## QA Result
+Run: [GitHub Actions run URL or number]
 Verdict: PASS / FAIL
-
-Success criteria:
-- [criterion]: PASS/FAIL — [detail]
-
-Regression:
-- [feature]: PASS/FAIL
-
-Console errors: none / [list]
-Server errors: none / [list]
-Mobile 390px: PASS/FAIL
-Load time: [Xs]
-Screenshots: [attached]
-If FAIL: [what the user would have seen]
+Tests: [X passed, Y failed]
+Failed tests: [list if any]
+Fix cycles used: [0-2]
 ```
 
-**Auto-FAIL:** unhandled JS error, server error in log, blank/NaN data fields, broken mobile layout, load over 8 seconds, any regression.
+### Auto-FAIL Criteria
+
+- Unhandled JS error on any page
+- Blank/NaN data fields
+- Broken mobile layout at 390px
+- Page load over 8 seconds
+- Any regression in existing features
+- Webhook health check failure
 
 -----
 
