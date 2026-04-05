@@ -1,89 +1,71 @@
 # Project Rules
 
-## General Rules
+## Philosophy
 
-### Verify Your Work
-- ALWAYS check your work before showing results to the user. Never say "check the preview" without having verified it yourself first.
-- If you cannot access a URL or service, say so immediately — don't wait or retry silently.
-- After pushing code changes, verify the deploy succeeded and the output is correct before sharing a link. Don't say "it should work now" unless you've actually verified it works.
+The user prompts from an iPhone. Claude does everything — writes code, deploys it, fixes problems. The user taps a link and sees the result in a mobile browser. No desktop. No terminal. No third-party apps. Every project lives on the droplet at `http://159.223.127.125/` and is reachable in one tap from the landing page.
+
+## Be Fully Autonomous
+
+- Do everything yourself. Never ask the user to run commands, check URLs, load files, or do anything in a terminal.
+- If something fails — a deploy, a test, a build — diagnose and fix it. Don't present the error and ask what to do.
+- If a fix doesn't work, try another approach. Only escalate to the user after multiple genuine attempts.
+- Never say "try running X" — just run it. Never say "it should work now" — verify it does, then share the link.
+- Handle git, deploys, nginx config, file permissions, all of it without user intervention.
+
+## Verify Before Sharing
+
+- After deploying, confirm the output is live and correct before sharing a link.
 - Run syntax checks, tests, and validation before declaring a task done.
-- If a deploy is taking a long time, explain why and give a realistic estimate.
-- If auto-deploy status isn't reporting back, diagnose the push mechanism — don't just keep waiting.
+- If a deploy is slow or stuck, diagnose it — don't just wait silently.
 
-### Automate Everything
-- Never ask the user to do manual steps (load files, run commands, check URLs, etc.) — do it yourself.
-- If a build/deploy/test step exists, run it automatically.
-- If you need data to verify, write a script to check it rather than asking the user to look.
+## Mobile-First Output
 
-### Sharing Links
-- When sharing URLs with the user, always use plain clickable links — never wrap them in markdown bold (`**`), backticks, or other formatting that breaks clickability.
+- All web output must be usable on a phone screen. Use responsive design — no desktop-only layouts.
+- When sharing URLs, use plain clickable links. Never wrap in bold, backticks, or formatting that breaks tap-to-open.
 
-### Code Quality
+## Code Quality
+
 - Don't add features beyond what was asked.
-- Fix root causes, not symptoms. When a value is wrong, trace it back to the data source.
-- Add sanity checks on parsed data — validate ranges, cross-reference between tables, flag outliers.
-- When building data pipelines, make the backend solid so the frontend only needs display changes.
+- Fix root causes, not symptoms.
 
-### Git Workflow
+## Git Workflow
+
 - Commit and push all changes before stopping (enforced by stop hook).
 - Use descriptive commit messages explaining why, not just what.
 - Never force-push or amend published commits without explicit permission.
 - Don't create PRs unless explicitly asked.
 
-### File Isolation (CRITICAL)
-Each project is isolated to its own directory. **Never write files outside your project's directory.** New projects get their own dedicated directory (e.g., `/opt/<project>/`).
+## How Projects Go Live
 
-## Droplet — Multi-Project Server
+**Droplet IP:** 159.223.127.125
 
-**IP:** 159.223.127.125
+Every project deploys to the droplet and gets its own URL. The landing page at `/` links to all projects — it's the user's home screen for everything Claude builds.
 
-### URL Layout
-| URL Path | Project | Server Directory |
-|----------|---------|-----------------|
-| `/` | Landing page | `/var/www/landing/` |
-| `/games/` | Games | `/var/www/games/` |
+### Project Isolation (CRITICAL)
 
-### Auto-Deploy (General)
+- Each project gets its own directory, nginx route, and deploy script.
+- Never write files outside your project's directory.
+- Deploying one project must never break another. After changing shared config (nginx, landing page), verify existing projects still work.
+- New projects get their own `/opt/<project>/` directory.
+
+### Putting a New Project Online
+
+1. Create its directory on the droplet: `/opt/<project>/`
+2. Add a `location /<project>/` block in `deploy/update_nginx.sh`
+3. Bump `deploy/NGINX_VERSION` to trigger an nginx reload
+4. Add a link card to `deploy/landing.html` so the user can find it from `/`
+5. Set up its own auto-deploy script if needed
+
+### Static File Deploys (Games, Simple Pages)
+
+Push files to `games/<name>/index.html` on the `main` branch. The general auto-deploy syncs to `/var/www/games/` within 30 seconds. Live at `http://159.223.127.125/games/<name>/`.
+
+You MUST push to `main` for static deploys — the auto-deploy only watches `main`.
+
+### Auto-Deploy System
+
 - **Watches:** `main` branch
 - **Repo clone:** `/opt/site-deploy/`
 - **Timer:** `general-deploy.timer`
 - **Log:** `/var/log/general-deploy.log`
-- **What it does:**
-  - Syncs `games/` directory → `/var/www/games/` (rsync, mirrors repo exactly)
-  - Copies `deploy/landing.html` → `/var/www/landing/index.html`
-  - Checks `deploy/NGINX_VERSION` and runs `deploy/update_nginx.sh` if changed
-
-### Deploying Static Files (Games, Simple Pages)
-Any chat can deploy static files by pushing to `main`:
-1. Push your HTML to `games/<your-game>/index.html` on the `main` branch
-2. The general auto-deploy pulls within 30s and syncs to `/var/www/games/`
-3. Your page is live at `http://159.223.127.125/games/<your-game>/`
-4. No SSH access needed. No manual steps.
-
-**Step-by-step commands (from any branch):**
-```bash
-git stash                              # save any uncommitted work
-git checkout main
-git pull origin main
-mkdir -p games/<your-game>
-cp <path-to-your-game.html> games/<your-game>/index.html
-git add games/<your-game>/index.html
-git commit -m "Deploy <your-game> to /games/<your-game>/"
-git push origin main
-git checkout -                         # go back to your feature branch
-git stash pop                          # restore uncommitted work
-# Wait ~30 seconds, then verify:
-#    http://159.223.127.125/games/<your-game>/
-```
-
-**Important:** You MUST push to `main`, not your feature branch. The auto-deploy only watches `main` for static files.
-
-### Adding a New Project
-1. Create a new directory: `/opt/<project>/` on the droplet
-2. Add a new `location /<ProjectName>/` block in `deploy/update_nginx.sh`
-3. Bump the version number in `deploy/NGINX_VERSION` to trigger nginx reload
-4. Add a link card to `deploy/landing.html`
-5. Set up its own auto-deploy script if needed
-
-### Server Architecture
-- When sharing the droplet across projects, use separate nginx routes, databases, and environment configs.
+- **Actions:** syncs `games/` → `/var/www/games/`, copies `deploy/landing.html` → `/var/www/landing/index.html`, reloads nginx if `deploy/NGINX_VERSION` changed
