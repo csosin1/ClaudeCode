@@ -470,3 +470,15 @@ If FAIL: [what the user would have seen]
 1. Add to `RUNBOOK.md`
 
 **Static deploys:** `games/<n>/index.html` on `main` → live at `http://159.223.127.125/games/<n>/` within 30s.
+
+**Deleting a project:**
+
+1. Confirm with the user — name the project and what will be removed
+1. Remove the landing page card from `deploy/landing.html`
+1. Remove the nginx location block from `deploy/update_nginx.sh`
+1. Bump `NGINX_VERSION`
+1. For static games: delete the `games/<name>/` directory from the repo — `rsync --delete` removes it from the server on next deploy
+1. For `/opt/` projects: add a cleanup block to `deploy/auto_deploy_general.sh` gated by a flag file (e.g. `rm -rf /opt/<project>/ && touch /opt/.cleaned-<project>`)
+1. Remove uptime cron and logrotate config via a gated block in `deploy/auto_deploy_general.sh`
+1. Remove from `RUNBOOK.md`
+1. Push to `main`
