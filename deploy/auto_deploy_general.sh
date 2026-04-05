@@ -46,11 +46,12 @@ if [ ! -f /opt/.webhook_initialized ]; then
     cp "$REPO_DIR/deploy/webhook_deploy.py" /opt/webhook_deploy.py
     chmod +x /opt/webhook_deploy.py
 
-    # Generate webhook secret if not already present
+    # Webhook secret should already exist from initial deploy.
+    # If missing (fresh setup), generate a new one — then configure GitHub webhook manually.
     if [ ! -f /opt/.webhook_secret ]; then
-        echo "21d43b1031bce36e1858ec500e55d1206484133598b942afa39ac36f5375a44d" > /opt/.webhook_secret
+        python3 -c "import secrets; print(secrets.token_hex(32))" > /opt/.webhook_secret
         chmod 600 /opt/.webhook_secret
-        echo "$(date): Webhook secret written to /opt/.webhook_secret"
+        echo "$(date): NEW webhook secret generated. Configure GitHub webhook with: $(cat /opt/.webhook_secret)"
     fi
 
     # Create systemd service
@@ -89,6 +90,26 @@ LREOF
 
     touch /opt/.webhook_initialized
     echo "$(date): Webhook deploy listener installed and started on 127.0.0.1:9000"
+fi
+
+# Slow timer from 30s to 5min once webhook is handling instant deploys
+if [ ! -f /opt/.timer_slowed ] && [ -f /opt/.webhook_initialized ]; then
+    cat > /etc/systemd/system/general-deploy.timer << 'TMREOF'
+[Unit]
+Description=Check main branch for updates every 5 minutes (fallback for webhook)
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=300s
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+TMREOF
+    systemctl daemon-reload
+    systemctl restart general-deploy.timer
+    touch /opt/.timer_slowed
+    echo "$(date): Timer slowed to 5-minute fallback (webhook handles instant deploys)."
 fi
 
 # Fetch latest from main

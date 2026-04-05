@@ -405,9 +405,9 @@ Builder reads `LESSONS.md` at the start of every task.
 
 **Environment:** `http://159.223.127.125` (or project-specific path)
 
-**Playwright MCP:** `claude mcp add playwright npx @playwright/mcp@latest`
+**Automated QA via GitHub Actions:** Every push to `main` runs `.github/workflows/qa.yml` which executes Playwright tests against the live site. The Orchestrator checks GitHub Actions results after each deploy. The sandbox cannot reach the droplet directly — all live-site verification happens through GitHub Actions.
 
-**What QA tests:**
+**What QA tests (automated in `tests/qa-smoke.spec.ts`):**
 
 1. Load deployed URL — no console errors
 1. Verify every success criterion from spec explicitly
@@ -455,7 +455,11 @@ If FAIL: [what the user would have seen]
 
 ## Deployment System
 
-**Auto-deploy watches:** `main` branch → `/opt/site-deploy/` → `general-deploy.timer` → log at `/var/log/general-deploy.log` → syncs `games/` → `/var/www/games/`, copies `deploy/landing.html` → `/var/www/landing/index.html`, reloads nginx if `deploy/NGINX_VERSION` changed.
+**Instant deploy via webhook:** Push to `main` → GitHub webhook → `http://159.223.127.125/webhook/deploy` → nginx proxies to Python listener on `127.0.0.1:9000` → verifies HMAC-SHA256 signature → triggers deploy script → deploys in 2-3 seconds. Fallback timer runs every 5 minutes in case webhook fails.
+
+**Auto-deploy pipeline:** `main` branch → `/opt/site-deploy/` → syncs `games/` → `/var/www/games/`, copies `deploy/landing.html` → `/var/www/landing/index.html`, reloads nginx if `deploy/NGINX_VERSION` changed. Log at `/var/log/general-deploy.log`.
+
+**Automated QA:** Every push to `main` triggers a GitHub Actions workflow (`.github/workflows/qa.yml`) that runs Playwright tests against the live site at 390px mobile and 1280px desktop. Tests cover: page loads, link integrity, JS errors, security (dotfile/env blocking), performance (<8s load), and webhook health. Results visible in the GitHub Actions tab. Screenshots uploaded as artifacts.
 
 **Project isolation:** Own directory, nginx route, deploy script. Never write outside project directory. One deploy never breaks another.
 

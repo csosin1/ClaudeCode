@@ -33,13 +33,13 @@ StandardOutput=append:/var/log/general-deploy.log
 StandardError=append:/var/log/general-deploy.log
 EOF
 
-# Create systemd timer (every 30 seconds)
+# Create systemd timer (5-minute fallback — webhook handles instant deploys)
 cat > /etc/systemd/system/general-deploy.timer << 'EOF'
 [Unit]
-Description=Check main branch for updates every 30 seconds
+Description=Check main branch for updates every 5 minutes (fallback for webhook)
 [Timer]
 OnBootSec=1min
-OnUnitActiveSec=30s
+OnUnitActiveSec=300s
 Persistent=true
 [Install]
 WantedBy=timers.target
@@ -53,6 +53,6 @@ systemctl start general-deploy.timer
 /opt/auto_deploy_general.sh
 
 echo "General auto-deploy installed and running."
-echo "  Timer: general-deploy.timer (every 30s)"
+echo "  Timer: general-deploy.timer (every 5min, webhook handles instant)"
 echo "  Log:   /var/log/general-deploy.log"
 echo "  Repo:  $DEPLOY_DIR (main branch)"
