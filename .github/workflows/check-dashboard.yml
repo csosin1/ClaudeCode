@@ -17,33 +17,23 @@ jobs:
         with:
           ref: claude/carvana-loan-dashboard-4QMPM
 
-      - name: Fetch dashboard and check
+      - name: Check
         run: |
-          curl -s -o dashboard.html "http://159.223.127.125/CarvanaLoanDashBoard/preview/?v=$(date +%s)"
+          curl -s -o d.html "http://159.223.127.125/CarvanaLoanDashBoard/preview/?v=$(date +%s)"
           python3 << 'PYEOF'
           import re
-          with open("dashboard.html") as f:
-              html = f.read()
-          with open("deploy/dashboard_check.txt", "w") as out:
-              out.write(f"Size: {len(html)} bytes\n\n")
-              for d in re.findall(r'<!-- DEBUG_SUMMARY.*?-->', html):
-                  out.write(f"{d}\n")
-              out.write(f"\nCoD charts: {html.count('Avg Trust Cost of Debt')}\n")
-              for d in re.findall(r'<!-- DEBUG \[.*?-->', html):
-                  out.write(f"{d}\n")
-              # Prime table
-              pm = re.search(r'Prime Deals — Summary.*?</table>', html, re.DOTALL)
-              if pm:
-                  cells = re.findall(r'<td>(.*?)</td>', pm.group(0))
-                  out.write(f"\nPRIME TABLE:\n")
-                  for i in range(0, len(cells), 10):
-                      out.write(f"  {'|'.join(cells[i:i+10])}\n")
-              nm = re.search(r'Non-Prime Deals — Summary.*?</table>', html, re.DOTALL)
-              if nm:
-                  cells = re.findall(r'<td>(.*?)</td>', nm.group(0))
-                  out.write(f"\nNON-PRIME TABLE:\n")
-                  for i in range(0, len(cells), 10):
-                      out.write(f"  {'|'.join(cells[i:i+10])}\n")
+          with open("d.html") as f: html=f.read()
+          with open("deploy/dashboard_check.txt","w") as o:
+              o.write(f"Size: {len(html)}\n\n")
+              for d in re.findall(r'<!-- DEBUG_SUMMARY.*?-->',html): o.write(f"{d}\n")
+              o.write(f"\nCoD charts: {html.count('Avg Trust Cost of Debt')}\n\n")
+              for d in re.findall(r'<!-- DEBUG \[.*?-->',html): o.write(f"{d}\n")
+              for label,pat in [("PRIME","Prime Deals"),("NON-PRIME","Non-Prime Deals")]:
+                  m=re.search(pat+r' — Summary.*?</table>',html,re.DOTALL)
+                  if m:
+                      cells=re.findall(r'<td>(.*?)</td>',m.group(0))
+                      o.write(f"\n{label} TABLE:\n")
+                      for i in range(0,len(cells),10): o.write(f"  {'|'.join(cells[i:i+10])}\n")
           PYEOF
 
       - name: Commit
@@ -51,4 +41,4 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add deploy/dashboard_check.txt
-          git diff --cached --quiet || (git commit -m "QA check v2" && git push)
+          git diff --cached --quiet || (git commit -m "QA check v3" && git push)
