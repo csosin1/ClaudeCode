@@ -263,6 +263,8 @@ The dangerous moment is **after pushing to main but before reading QA results**.
 - Try genuinely different approaches. Escalate only after **3 distinct strategies** have failed.
 - Never say "try running X" — just run it. Never say "it should work now" — verify it does, then share the link.
 - Handle git, deploys, nginx config, and file permissions without user intervention.
+- **Never ask the user to SSH into the droplet.** SSH is not available to anyone — not you, not the user. All server-side changes (directory creation, env files, config, cron jobs) go through `deploy/auto_deploy_general.sh` with one-time gated blocks. If you need something on the server, write it into the deploy pipeline and push.
+- **Never ask the user to paste commands into a terminal.** You have all the tools. If you can't do something from the sandbox, route it through the deploy pipeline.
 - Exception: if intent is unclear, always clarify before building.
 
 -----
