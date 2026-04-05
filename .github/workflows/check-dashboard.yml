@@ -1,0 +1,91 @@
+name: Check Dashboard
+
+on:
+  push:
+    branches: [claude/carvana-loan-dashboard-4QMPM]
+    paths: ['.github/workflows/check-dashboard.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: claude/carvana-loan-dashboard-4QMPM
+
+      - name: Fetch dashboard and extract debug info
+        run: |
+          curl -s -o dashboard.html "http://159.223.127.125/CarvanaLoanDashBoard/preview/?v=$(date +%s)"
+          echo "Downloaded $(wc -c < dashboard.html) bytes"
+
+          python3 << 'PYEOF'
+          import re
+
+          with open("dashboard.html") as f:
+              html = f.read()
+
+          with open("deploy/dashboard_check.txt", "w") as out:
+              out.write(f"Dashboard size: {len(html)} bytes\n\n")
+
+              # Extract all DEBUG comments
+              debugs = re.findall(r'<!-- DEBUG.*?-->', html)
+              out.write(f"=== PER-DEAL DEBUG ({len(debugs)} deals) ===\n")
+              for d in debugs:
+                  out.write(f"{d}\n")
+
+              # Extract summary debug comments
+              summaries = re.findall(r'<!-- DEBUG_SUMMARY.*?-->', html)
+              out.write(f"\n=== SUMMARY TABLE DEBUG ({len(summaries)} deals) ===\n")
+              for s in summaries:
+                  out.write(f"{s}\n")
+
+              # Check for CoD charts
+              cod_count = html.count("Avg Trust Cost of Debt")
+              wac_count = html.count("Avg Consumer Rate")
+              out.write(f"\n=== CHART COUNTS ===\n")
+              out.write(f"CoD charts: {cod_count}\n")
+              out.write(f"WAC charts: {wac_count}\n")
+
+              # Extract Data Debug section content
+              debug_match = re.search(r'id="deal-__debug__".*?</div>\s*\n\s*<div', html, re.DOTALL)
+              if debug_match:
+                  debug_section = debug_match.group(0)[:3000]
+                  # Strip HTML tags for readability
+                  clean = re.sub(r'<[^>]+>', ' ', debug_section)
+                  clean = re.sub(r'\s+', ' ', clean).strip()
+                  out.write(f"\n=== DATA DEBUG TAB (first 3000 chars) ===\n{clean}\n")
+
+              # Check Prime comparison table
+              prime_match = re.search(r'Prime Deals — Summary.*?</table>', html, re.DOTALL)
+              if prime_match:
+                  table = prime_match.group(0)
+                  cells = re.findall(r'<td>(.*?)</td>', table)
+                  out.write(f"\n=== PRIME SUMMARY TABLE CELLS ===\n")
+                  # Group by rows (10 columns per row based on the table structure)
+                  for i in range(0, len(cells), 10):
+                      row = cells[i:i+10]
+                      out.write(f"  {' | '.join(row)}\n")
+
+              # Check Non-Prime comparison table
+              nonprime_match = re.search(r'Non-Prime Deals — Summary.*?</table>', html, re.DOTALL)
+              if nonprime_match:
+                  table = nonprime_match.group(0)
+                  cells = re.findall(r'<td>(.*?)</td>', table)
+                  out.write(f"\n=== NON-PRIME SUMMARY TABLE CELLS ===\n")
+                  for i in range(0, len(cells), 10):
+                      row = cells[i:i+10]
+                      out.write(f"  {' | '.join(row)}\n")
+
+          print("Done")
+          PYEOF
+
+      - name: Commit results
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add deploy/dashboard_check.txt
+          git diff --cached --quiet && echo "No changes" || (git commit -m "Dashboard QA check results" && git push)
