@@ -2,6 +2,8 @@
 .env.*
 *.env
 node_modules/
+package.json
+package-lock.json
 qa-report.md
 __pycache__/
 *.pyc

@@ -45,6 +45,21 @@ server {
         alias /var/www/games/;
         index index.html;
     }
+
+    # Webhook deploy endpoint (proxied to localhost Python listener)
+    location = /webhook/deploy {
+        proxy_pass http://127.0.0.1:9000;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header Host $host;
+        proxy_read_timeout 120s;
+        limit_except POST { deny all; }
+    }
+
+    # Webhook health check
+    location = /webhook/health {
+        proxy_pass http://127.0.0.1:9000/health;
+    }
 }
 NGXEOF
 
