@@ -1,12 +1,168 @@
 const express = require('express');
+const fs = require('fs');
+const path = require('path');
 const config = require('./lib/config');
 const { getCarvanaOffer } = require('./lib/carvana');
 
 const app = express();
 app.use(express.json());
+app.use(express.urlencoded({ extended: false }));
+
+// --- Setup page: configure .env from the browser ---
+app.get('/setup', (_req, res) => {
+  const msg = _req.query.msg || '';
+  res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Setup — Car Offer Tool</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      min-height: 100vh;
+      padding: 16px;
+    }
+    h1 {
+      font-size: 1.5rem;
+      text-align: center;
+      margin: 12px 0 8px;
+      color: #38bdf8;
+    }
+    .subtitle {
+      text-align: center;
+      color: #94a3b8;
+      font-size: 0.85rem;
+      margin-bottom: 20px;
+    }
+    .card {
+      background: #1e293b;
+      border-radius: 12px;
+      padding: 20px;
+      max-width: 480px;
+      margin: 0 auto;
+    }
+    label {
+      display: block;
+      font-size: 0.85rem;
+      color: #94a3b8;
+      margin-bottom: 4px;
+      margin-top: 16px;
+    }
+    label:first-of-type { margin-top: 0; }
+    input {
+      width: 100%;
+      padding: 12px;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      background: #0f172a;
+      color: #f1f5f9;
+      font-size: 1rem;
+      outline: none;
+    }
+    input:focus { border-color: #38bdf8; }
+    button {
+      width: 100%;
+      margin-top: 20px;
+      padding: 14px;
+      border: none;
+      border-radius: 8px;
+      background: #0ea5e9;
+      color: #fff;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    button:hover { background: #0284c7; }
+    .alert {
+      max-width: 480px;
+      margin: 0 auto 16px;
+      padding: 12px 16px;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      text-align: center;
+    }
+    .alert-warn { background: #422006; color: #fbbf24; }
+    .alert-ok   { background: #052e16; color: #4ade80; }
+  </style>
+</head>
+<body>
+  <h1>Server Setup</h1>
+  <p class="subtitle">Configure proxy &amp; email for Carvana lookups</p>
+  ${msg === 'saved' ? '<div class="alert alert-ok">Configuration saved! <a href="/" style="color:#4ade80;font-weight:600;">Go to Car Offer Tool &rarr;</a></div>' : ''}
+  ${msg === 'required' ? '<div class="alert alert-warn">Please configure your proxy and email first.</div>' : ''}
+  <form class="card" method="POST" action="/api/setup">
+    <label for="proxyHost">Proxy Host</label>
+    <input type="text" id="proxyHost" name="proxyHost" placeholder="proxy.example.com" value="${escapeAttr(config.PROXY_HOST)}">
+
+    <label for="proxyPort">Proxy Port</label>
+    <input type="text" id="proxyPort" name="proxyPort" placeholder="12345" inputmode="numeric" value="${escapeAttr(config.PROXY_PORT)}">
+
+    <label for="proxyUser">Proxy Username</label>
+    <input type="text" id="proxyUser" name="proxyUser" placeholder="username" value="${escapeAttr(config.PROXY_USER)}">
+
+    <label for="proxyPass">Proxy Password</label>
+    <input type="password" id="proxyPass" name="proxyPass" placeholder="${config.PROXY_PASS ? '••••••••' : 'password'}" value="">
+
+    <label for="projectEmail">Project Email</label>
+    <input type="email" id="projectEmail" name="projectEmail" placeholder="you@example.com" value="${escapeAttr(config.PROJECT_EMAIL)}">
+
+    <button type="submit">Save Configuration</button>
+  </form>
+</body>
+</html>`);
+});
+
+app.post('/api/setup', (req, res) => {
+  const sanitize = (v) => String(v || '').replace(/[\r\n]/g, '').trim();
+
+  const proxyHost = sanitize(req.body.proxyHost);
+  const proxyPort = sanitize(req.body.proxyPort);
+  const proxyUser = sanitize(req.body.proxyUser);
+  // If password field is blank, keep the existing value
+  const proxyPass = req.body.proxyPass ? sanitize(req.body.proxyPass) : config.PROXY_PASS;
+  const projectEmail = sanitize(req.body.projectEmail);
+
+  const envContent = [
+    `PROXY_HOST=${proxyHost}`,
+    `PROXY_PORT=${proxyPort}`,
+    `PROXY_USER=${proxyUser}`,
+    `PROXY_PASS=${proxyPass}`,
+    `PROJECT_EMAIL=${projectEmail}`,
+    `PORT=${config.PORT}`,
+  ].join('\n') + '\n';
+
+  const envPath = path.join(__dirname, '.env');
+  fs.writeFileSync(envPath, envContent, 'utf8');
+  config.reloadConfig();
+
+  // If the request is JSON (API call), return JSON; otherwise redirect
+  if (req.headers['content-type'] === 'application/json') {
+    return res.json({ ok: true, message: 'Configuration saved.' });
+  }
+  res.redirect('/setup?msg=saved');
+});
+
+/** Escape a string for use inside an HTML attribute value (double-quoted). */
+function escapeAttr(str) {
+  return String(str || '')
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
 
 // --- Serve the HTML UI at GET / ---
 app.get('/', (_req, res) => {
+  // Redirect to setup if not configured
+  if (!config.isConfigured()) {
+    return res.redirect('/setup?msg=required');
+  }
+
   res.send(`<!DOCTYPE html>
 <html lang="en">
 <head>
