@@ -77,10 +77,13 @@ SPEC: [task name]
 What will be built: [1-2 sentences]
 Success criteria:   [explicit testable list — QA will verify each one]
 Non-goals:          [explicitly out of scope]
+File location:      [exact path(s) where new files go — e.g. games/my-game/index.html]
 Approach:           [brief implementation plan]
 Complexity:         [simple / moderate / complex]
 Estimated agent delegations: [number]
 ```
+
+**File location is mandatory.** The Builder will not create files without it. For new projects, specify the full path. For changes to existing projects, list the files being modified.
 
 User must approve before work begins. "Go" or "looks good" counts. If revised, Orchestrator updates and re-surfaces.
 
