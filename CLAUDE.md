@@ -282,6 +282,8 @@ Runtimes:        [auto-detected at setup]
 Process manager: [auto-detected at setup]
 ```
 
+**SSH is not available.** The Claude Code sandbox cannot reach the droplet via SSH or direct HTTP. All server-side changes — nginx config, cron jobs, log setup, directory creation — must be made through the auto-deploy pipeline by modifying files in `deploy/`. Never attempt SSH, scp, or direct server commands. Never create standalone "run this on the server" scripts. If something needs to happen on the droplet, put it in `deploy/auto_deploy_general.sh` (one-time gated with a flag file) or `deploy/update_nginx.sh` (triggered by bumping `NGINX_VERSION`).
+
 Builders flag any library or runtime feature not listed here before using it.
 
 -----
