@@ -11,84 +11,60 @@ permissions:
 jobs:
   fetch:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
         with:
           ref: claude/carvana-loan-dashboard-4QMPM
 
-      - name: Download certs from multiple deals
+      - name: Download 2022-P1 cert
         run: |
           UA="Clifford Sosin clifford.sosin@casinvestmentpartners.com"
+          # 2022-P1 CIK=0001903763
+          CIK="1903763"
 
-          # Get a 2022-P1 cert URL from the DB on the server
-          # Since we can't query the DB, fetch the filing index from SEC
-          # 2022-P1 CIK is 0001903766 (from config.py)
-          # Just fetch the most recent 10-D filing page
-          curl -s -A "$UA" -o 2022p1_submissions.json \
-            "https://data.sec.gov/submissions/CIK0001903766.json"
-
-          # Extract a servicer cert URL from the submissions
-          python3 << 'PYEOF'
-          import json, re, sys
-
-          with open("2022p1_submissions.json") as f:
-              data = json.load(f)
-
-          # Find recent 10-D filings
-          recent = data.get("filings", {}).get("recent", {})
-          forms = recent.get("form", [])
-          accessions = recent.get("accessionNumber", [])
-          dates = recent.get("filingDate", [])
-
-          for i, form in enumerate(forms):
-              if form == "10-D":
-                  print(f"Found 10-D: {accessions[i]} filed {dates[i]}")
-                  # Format accession for URL
-                  acc = accessions[i].replace("-", "")
-                  cik = "1903766"
-                  print(f"Index: https://www.sec.gov/Archives/edgar/data/{cik}/{acc}/index.json")
-                  with open("acc_2022p1.txt", "w") as f:
-                      f.write(f"{cik}\n{acc}\n{accessions[i]}\n{dates[i]}")
+          # Get submissions
+          curl -s -A "$UA" "https://data.sec.gov/submissions/CIK0001903763.json" | python3 -c "
+          import json,sys
+          d=json.load(sys.stdin)
+          r=d.get('filings',{}).get('recent',{})
+          forms=r.get('form',[])
+          accs=r.get('accessionNumber',[])
+          for i,f in enumerate(forms):
+              if f=='10-D':
+                  acc=accs[i].replace('-','')
+                  print(f'{acc}')
                   break
-          PYEOF
+          " > acc.txt
 
-          if [ -f acc_2022p1.txt ]; then
-            CIK=$(sed -n '1p' acc_2022p1.txt)
-            ACC=$(sed -n '2p' acc_2022p1.txt)
-            echo "Fetching filing index for $ACC"
-            curl -s -A "$UA" -o filing_index.json \
-              "https://www.sec.gov/Archives/edgar/data/$CIK/$ACC/index.json"
+          ACC=$(cat acc.txt)
+          echo "Latest 10-D accession: $ACC"
 
-            # Find the servicer report exhibit
-            python3 << 'PYEOF2'
-          import json
-
-          with open("filing_index.json") as f:
-              data = json.load(f)
-
-          items = data.get("directory", {}).get("item", [])
+          # Get filing index
+          sleep 0.2
+          curl -s -A "$UA" "https://www.sec.gov/Archives/edgar/data/$CIK/$ACC/index.json" | python3 -c "
+          import json,sys
+          d=json.load(sys.stdin)
+          items=d.get('directory',{}).get('item',[])
           for item in items:
-              name = item.get("name", "")
-              # Look for servicer report (usually ex-99.1 or similar)
-              if "servicer" in name.lower() or "ex99" in name.lower() or "ex-99" in name.lower():
-                  print(f"Found: {name}")
-                  with open("cert_url.txt", "w") as f:
-                      f.write(name)
+              n=item.get('name','').lower()
+              if 'servicer' in n or 'ex99' in n or 'ex-99' in n:
+                  print(item['name'])
                   break
-          PYEOF2
+          " > cert_name.txt
 
-            if [ -f cert_url.txt ]; then
-              CERT_NAME=$(cat cert_url.txt)
-              CERT_URL="https://www.sec.gov/Archives/edgar/data/$CIK/$ACC/$CERT_NAME"
-              echo "Downloading cert: $CERT_URL"
-              curl -s -A "$UA" -o cert_2022p1.htm "$CERT_URL"
-              echo "Downloaded $(wc -c < cert_2022p1.htm) bytes"
-            fi
+          CERT=$(cat cert_name.txt)
+          echo "Cert exhibit: $CERT"
+
+          if [ -n "$CERT" ]; then
+            sleep 0.2
+            curl -s -A "$UA" -o cert_2022p1.htm \
+              "https://www.sec.gov/Archives/edgar/data/$CIK/$ACC/$CERT"
+            echo "Downloaded $(wc -c < cert_2022p1.htm) bytes"
           fi
 
-          # Extract text from all downloaded certs
-          python3 << 'PYEOF3'
+          # Extract text
+          python3 << 'PYEOF'
           from html.parser import HTMLParser
           import os
 
@@ -101,24 +77,23 @@ jobs:
                   if d:
                       self.t.append(d)
 
-          for fname in ["cert_2022p1.htm"]:
-              if not os.path.exists(fname):
-                  continue
-              with open(fname) as f:
+          if os.path.exists("cert_2022p1.htm"):
+              with open("cert_2022p1.htm") as f:
                   html = f.read()
               p = T()
               p.feed(html)
-              outname = f"deploy/{fname.replace('.htm', '_text.txt')}"
-              with open(outname, "w") as out:
-                  out.write(f"Source: {fname} ({len(html)} bytes)\n\n")
+              with open("deploy/cert_2022p1_text.txt", "w") as out:
+                  out.write(f"Size: {len(html)} bytes\n\n")
                   for seg in p.t:
                       out.write(f"{seg}\n")
-              print(f"Wrote {outname}")
-          PYEOF3
+              print(f"Extracted {len(p.t)} text segments")
+          else:
+              print("No cert downloaded")
+          PYEOF
 
       - name: Commit results
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add deploy/cert_2022p1_text.txt 2>/dev/null || true
-          git diff --cached --quiet && echo "No changes" || (git commit -m "Add 2022-P1 cert text dump" && git push)
+          git diff --cached --quiet && echo "No changes" || (git commit -m "Add 2022-P1 cert text" && git push)
