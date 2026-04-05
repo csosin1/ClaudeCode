@@ -1,43 +1,32 @@
 ## Current Task
-Name:              Dice Roller App
+Name:              Goal 1 — One Carvana Offer, End-to-End
 CLAUDE.md version: 1.0
-Status:            done
+Status:            deploying
 Spec approved:     yes
-Rollback tag:      rollback-20260405-dice-roller
+Rollback tag:      (set before merge to main)
 
 ## Spec
-SPEC: Dice Roller App
-What will be built: A simple dice roller game — tap a button to roll 1-6,
-  shows the result with a visual die face, and keeps a roll history below.
-Success criteria:
-  - Page loads at /games/dice-roller/ without JS errors
-  - "Roll" button generates a number 1-6 on each click
-  - Die face SVG/emoji updates to match the number
-  - Roll history shows last 10 rolls
-  - Works at 390px mobile viewport
-  - All existing tests still pass (no regressions)
-File location: games/dice-roller/index.html
+Get one real Carvana offer for a 2022 Honda Accord Touring (VIN 1HGCV2F9XNA008352), zip 06880, ~48k miles. Playwright automates the sell-my-car flow. Express server lets user trigger from iPhone.
 
 ## Builder Output
-- Created games/dice-roller/index.html (single-file, inline CSS/JS, Unicode dice faces)
-- Added 3 Playwright tests to tests/qa-smoke.spec.ts (page load, roll+history, JS errors)
-- Updated CHANGES.md
+- car-offers/package.json — deps: playwright-extra, stealth plugin, dotenv, express
+- car-offers/.env.example — proxy + email + port template
+- car-offers/lib/config.js — env loader
+- car-offers/lib/browser.js — stealth Chromium launcher with proxy, human delays
+- car-offers/lib/carvana.js — full sell flow with multi-selector fallbacks, PerimeterX detection
+- car-offers/index.js — CLI entry point
+- car-offers/server.js — Express + mobile-first HTML form on port 3100
 
 ## Reviewer Verdict
-FAIL initially — missing link card on games/index.html
-Orchestrator fixed: added card to games/index.html and updated deploy/landing.html
-Effective verdict: PASS after fix
+PASS WITH NOTES — ready to deploy.
+Notes: add rate limiting (one request at a time), stricter input validation, helmet middleware. Non-blocking for initial deploy.
 
 ## QA Result
-Run: GitHub Actions QA Smoke Tests #8
-Verdict: PASS
-Tests: All passed (56s total)
-Failed tests: none
-Fix cycles used: 0
+Pending — deploy first, then QA on live URL.
 
 ## Blockers
-[none]
+- User needs to SSH to droplet and fill in .env (proxy creds + email)
+- Carvana selectors may need tuning on real site
 
 ## Cost
-Builder: ~23k tokens | Reviewer: ~24k tokens | Orchestrator overhead: ~15k tokens
-Total: ~62k tokens
+Builder: ~37k tokens, 24 tool uses. Reviewer: ~29k tokens, 12 tool uses.

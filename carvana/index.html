@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Project Dashboard</title>
+    <title>Carvana Tools</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -20,6 +20,14 @@
             width: 90%;
             padding: 2rem;
         }
+        .back {
+            display: inline-block;
+            color: #94a3b8;
+            text-decoration: none;
+            font-size: 0.85rem;
+            margin-bottom: 1rem;
+        }
+        .back:hover { color: #e2e8f0; }
         h1 {
             font-size: 1.8rem;
             margin-bottom: 2rem;
@@ -64,17 +72,23 @@
 </head>
 <body>
     <div class="container">
-        <h1>Projects</h1>
+        <a class="back" href="/">&larr; All Projects</a>
+        <h1>Carvana</h1>
         <div class="projects">
-            <a class="card" href="/carvana/">
-                <div class="card-title">Carvana</div>
-                <div class="card-desc">ABS loan analytics, car offer comparison tool, and more.</div>
-                <div class="card-path">/carvana/</div>
+            <a class="card" href="/CarvanaLoanDashBoard/">
+                <div class="card-title">ABS Loan Dashboard</div>
+                <div class="card-desc">Auto-loan securitization analytics — pool performance, delinquencies, losses, and cash waterfall analysis.</div>
+                <div class="card-path">/CarvanaLoanDashBoard/</div>
             </a>
-            <a class="card" href="/games/">
-                <div class="card-title">Games</div>
-                <div class="card-desc">Banana Blaster, Snake, and Dino Dash.</div>
-                <div class="card-path">/games/</div>
+            <a class="card" href="/CarvanaLoanDashBoard/preview/">
+                <div class="card-title">ABS Dashboard — Preview</div>
+                <div class="card-desc">Candidate version for review before promotion to live.</div>
+                <div class="card-path">/CarvanaLoanDashBoard/preview/</div>
+            </a>
+            <a class="card" href="/car-offers/">
+                <div class="card-title">Car Offer Comparison</div>
+                <div class="card-desc">Get instant purchase offers from Carvana, CarMax, and Driveway for any VIN.</div>
+                <div class="card-path">/car-offers/</div>
             </a>
         </div>
     </div>

@@ -36,6 +36,25 @@ Backups: DigitalOcean automated backups
 - Deploy method: separate auto-deploy
 - Health check: http://159.223.127.125/CarvanaLoanDashBoard/preview/
 
+### Carvana Hub
+- URL: http://159.223.127.125/carvana/
+- Directory: /var/www/carvana/
+- Process: static (nginx)
+- Dependencies: none
+- Deploy method: auto-deploy (general-deploy.timer syncs carvana/ → /var/www/carvana/)
+- Last deployed: 2026-04-05
+- Health check: http://159.223.127.125/carvana/
+
+### Car Offer Comparison Tool
+- URL: http://159.223.127.125/car-offers/
+- Directory: /opt/car-offers/
+- Process: PM2 (car-offers → node server.js on port 3100)
+- Dependencies: playwright-extra, puppeteer-extra-plugin-stealth, dotenv, express
+- Env vars required: PROXY_HOST, PROXY_PORT, PROXY_USER, PROXY_PASS, PROJECT_EMAIL, PORT
+- Deploy method: auto-deploy (general-deploy.timer syncs car-offers/ → /opt/car-offers/, npm install, pm2 restart)
+- Last deployed: 2026-04-05
+- Health check: http://159.223.127.125/car-offers/
+
 ### Games (Static)
 - URL: http://159.223.127.125/games/
 - Directory: /var/www/games/

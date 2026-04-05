@@ -8,6 +8,58 @@ LOG="/var/log/general-deploy.log"
 
 cd "$REPO_DIR" || exit 1
 
+# One-time car-offers setup (Node.js + Playwright + PM2)
+if [ ! -f /opt/.car_offers_initialized ]; then
+    echo "$(date): Initializing car-offers project..."
+
+    # System deps for Playwright Chromium
+    apt-get update -qq && apt-get install -y -qq build-essential \
+        libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
+        libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 \
+        libpango-1.0-0 libcairo2 libasound2 libxshmfence1 2>/dev/null
+
+    # Install PM2 globally
+    npm install -g pm2 2>/dev/null
+
+    # Create project directory
+    mkdir -p /opt/car-offers/data
+
+    # Create .env template (user fills in proxy creds via SSH)
+    if [ ! -f /opt/car-offers/.env ]; then
+        cat > /opt/car-offers/.env << 'ENVEOF'
+# Residential proxy (required — datacenter IPs will be blocked)
+PROXY_HOST=
+PROXY_PORT=
+PROXY_USER=
+PROXY_PASS=
+
+# Project email (used for Carvana offer flow)
+PROJECT_EMAIL=
+
+# Express server
+PORT=3100
+ENVEOF
+    fi
+
+    # Observability for car-offers
+    mkdir -p /var/log/car-offers
+    touch /var/log/car-offers/error.log /var/log/car-offers/uptime.log
+    cat > /etc/logrotate.d/car-offers << 'LREOF'
+/var/log/car-offers/*.log {
+    weekly
+    rotate 4
+    compress
+    missingok
+    notifempty
+    create 0644 root root
+}
+LREOF
+    (crontab -l 2>/dev/null; echo '*/5 * * * * curl -sf http://159.223.127.125/car-offers/ > /dev/null || echo "$(date) DOWN" >> /var/log/car-offers/uptime.log') | crontab -
+
+    touch /opt/.car_offers_initialized
+    echo "$(date): car-offers initialized — dirs, .env template, observability configured."
+fi
+
 # Fetch latest from main
 git fetch origin main 2>/dev/null
 
@@ -41,6 +93,40 @@ if [ "$LOCAL" != "$REMOTE" ]; then
         mkdir -p /var/www/games
         rsync -a --delete "$REPO_DIR/games/" /var/www/games/
         echo "$(date): Games synced to /var/www/games/"
+    fi
+
+    # Sync carvana hub page
+    if [ -d "$REPO_DIR/carvana" ]; then
+        mkdir -p /var/www/carvana
+        rsync -a --delete "$REPO_DIR/carvana/" /var/www/carvana/
+        echo "$(date): Carvana hub synced to /var/www/carvana/"
+    fi
+
+    # Sync car-offers project (exclude node_modules, *.db, .env)
+    if [ -d "$REPO_DIR/car-offers" ]; then
+        mkdir -p /opt/car-offers
+        rsync -a --delete \
+            --exclude='node_modules' \
+            --exclude='*.db' \
+            --exclude='.env' \
+            "$REPO_DIR/car-offers/" /opt/car-offers/
+
+        # npm install if package.json changed
+        if [ "$REPO_DIR/car-offers/package.json" -nt /opt/car-offers/.npm_installed ] || [ ! -f /opt/car-offers/.npm_installed ]; then
+            cd /opt/car-offers && npm install --production 2>/dev/null
+            npx playwright install chromium --with-deps 2>/dev/null
+            touch /opt/car-offers/.npm_installed
+            echo "$(date): car-offers npm install + Playwright install complete."
+        fi
+
+        # Start or restart with PM2
+        if pm2 describe car-offers > /dev/null 2>&1; then
+            pm2 restart car-offers 2>/dev/null
+        else
+            cd /opt/car-offers && pm2 start server.js --name car-offers 2>/dev/null
+            pm2 save 2>/dev/null
+        fi
+        echo "$(date): car-offers synced and running."
     fi
 
     # Update the running copy of this script

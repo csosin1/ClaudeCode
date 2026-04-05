@@ -40,6 +40,24 @@ server {
         try_files $uri $uri/ /CarvanaLoanDashBoard/index.html;
     }
 
+    # Carvana hub — static page with cards for ABS Dashboard + Car Offers
+    location = /carvana { return 301 /carvana/; }
+    location /carvana/ {
+        alias /var/www/carvana/;
+        index index.html;
+    }
+
+    # Car Offers — reverse proxy to Express on port 3100
+    location = /car-offers { return 301 /car-offers/; }
+    location /car-offers/ {
+        proxy_pass http://127.0.0.1:3100/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_read_timeout 180s;
+    }
+
     # Games — isolated to /var/www/games/
     location /games/ {
         alias /var/www/games/;
