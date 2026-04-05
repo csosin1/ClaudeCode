@@ -60,11 +60,23 @@ Backups: DigitalOcean automated backups
 ## nginx
 Config location: /etc/nginx/sites-available/abs-dashboard
 Reload: sudo systemctl reload nginx
-NGINX_VERSION file: deploy/NGINX_VERSION (currently v2)
+NGINX_VERSION file: deploy/NGINX_VERSION (currently v4)
 
 ## Auto-Deploy
-- Timer: general-deploy.timer (runs every 30s)
+- **Primary:** GitHub webhook → nginx → Python listener on 127.0.0.1:9000 → instant deploy (2-3s)
+- **Fallback:** general-deploy.timer (runs every 5 min)
 - Script: /opt/auto_deploy_general.sh (copied from deploy/auto_deploy_general.sh)
+- Webhook listener: /opt/webhook_deploy.py (systemd: webhook-deploy.service)
+- Webhook secret: /opt/.webhook_secret (chmod 600)
 - Repo clone: /opt/site-deploy/
-- Log: /var/log/general-deploy.log
+- Deploy log: /var/log/general-deploy.log
+- Webhook log: /var/log/webhook-deploy.log
 - Watches: main branch only
+
+## Automated QA
+- Trigger: every push to main (GitHub Actions)
+- Workflow: .github/workflows/qa.yml
+- Tests: tests/qa-smoke.spec.ts (Playwright)
+- Viewports: 390px mobile (iPhone 13), 1280px desktop
+- Results: GitHub Actions tab, screenshots as artifacts
+- Covers: page loads, link integrity, JS errors, security, performance
