@@ -1,0 +1,80 @@
+Dashboard size: 1130534 bytes
+
+=== PER-DEAL DEBUG (32 deals) ===
+<!-- DEBUG_SUMMARY [2020-P1]: wac_src=pool_perf, cod_src=time_series, init_wac=0.0818, curr_wac=0.0824, init_cod=0.006219082796520368, curr_cod=0.010849417754249288 -->
+<!-- DEBUG_SUMMARY [2021-P1]: wac_src=pool_perf, cod_src=time_series, init_wac=0.08199999999999999, curr_wac=0.0815, init_cod=0.007333557659602461, curr_cod=0.008282455495778877 -->
+<!-- DEBUG_SUMMARY [2021-P2]: wac_src=pool_perf, cod_src=time_series, init_wac=0.07980000000000001, curr_wac=0.0793, init_cod=0.006942185580006673, curr_cod=0.007559167230220586 -->
+<!-- DEBUG_SUMMARY [2022-P1]: wac_src=monthly_summary, cod_src=loan_rate_estimate, init_wac=0.07567654179178868, curr_wac=0.07752426575702168, init_cod=0.03147125013946494, curr_cod=0.03147125013946494 -->
+<!-- DEBUG_SUMMARY [2022-P2]: wac_src=monthly_summary, cod_src=loan_rate_estimate, init_wac=0.09123205821413016, curr_wac=0.09321488640911588, init_cod=0.03716122114002874, curr_cod=0.03716122114002874 -->
+<!-- DEBUG_SUMMARY [2022-P3]: wac_src=monthly_summary, cod_src=loan_rate_estimate, init_wac=0.10325706159701471, curr_wac=0.10432181966275285, init_cod=0.04214398669189119, curr_cod=0.04214398669189119 -->
+<!-- DEBUG_SUMMARY [2024-P2]: wac_src=monthly_summary, cod_src=loan_rate_estimate, init_wac=0.1379272669842112, curr_wac=0.13936924066887751, init_cod=0.05573491304347827, curr_cod=0.05573491304347827 -->
+<!-- DEBUG_SUMMARY [2024-P3]: wac_src=monthly_summary, cod_src=loan_rate_estimate, init_wac=0.13827207485262402, curr_wac=0.13965539978491764, init_cod=0.055887666973603436, curr_cod=0.055887666973603436 -->
+<!-- DEBUG_SUMMARY [2024-P4]: wac_src=monthly_summary, cod_src=loan_rate_estimate, init_wac=0.13137610500855987, curr_wac=0.13281663276270383, init_cod=0.05362439885359446, curr_cod=0.05362439885359446 -->
+<!-- DEBUG_SUMMARY [2025-P2]: wac_src=monthly_summary, cod_src=time_series, init_wac=0.12922870236148162, curr_wac=0.1291592750296374, init_cod=0.0475, curr_cod=0.0475 -->
+<!-- DEBUG_SUMMARY [2025-P3]: wac_src=monthly_summary, cod_src=loan_rate_estimate, init_wac=0.1219039609849397, curr_wac=0.12176331974083208, init_cod=0.04960108169681975, curr_cod=0.04960108169681975 -->
+<!-- DEBUG_SUMMARY [2025-P4]: wac_src=monthly_summary, cod_src=loan_rate_estimate, init_wac=0.11287609828713119, curr_wac=0.11279881654767224, init_cod=0.046099453771153195, curr_cod=0.046099453771153195 -->
+<!-- DEBUG_SUMMARY [2021-N1]: wac_src=monthly_summary, cod_src=time_series, init_wac=0.19282732762524363, curr_wac=0.19598358077013442, init_cod=0.24665039908292402, curr_cod=0.20755428914011398 -->
+<!-- DEBUG_SUMMARY [2021-N2]: wac_src=monthly_summary, cod_src=time_series, init_wac=0.19225348008380544, curr_wac=0.19215980208928363, init_cod=0.011844246023003699, curr_cod=0.012372437408400046 -->
+<!-- DEBUG_SUMMARY [2021-N3]: wac_src=monthly_summary, cod_src=time_series, init_wac=0.18599235419243687, curr_wac=0.18590925695299323, init_cod=0.16613791786899854, curr_cod=0.06717111663425124 -->
+<!-- DEBUG_SUMMARY [2021-N4]: wac_src=monthly_summary, cod_src=time_series, init_wac=0.1882603121753472, curr_wac=0.18592976579943177, init_cod=0.1044198636173104, curr_cod=0.16529527135492322 -->
+<!-- DEBUG [2020-P1]: pool_perf=60 rows, notes=1 classes, wac_source=pool_perf, cod_source=method1 -->
+<!-- DEBUG [2021-N1]: pool_perf=59 rows, notes=0 classes, wac_source=monthly_summary, cod_source=loan_rate_estimate -->
+<!-- DEBUG [2021-N2]: pool_perf=57 rows, notes=0 classes, wac_source=monthly_summary, cod_source=method1 -->
+<!-- DEBUG [2021-N3]: pool_perf=54 rows, notes=0 classes, wac_source=monthly_summary, cod_source=method1 -->
+<!-- DEBUG [2021-N4]: pool_perf=51 rows, notes=0 classes, wac_source=monthly_summary, cod_source=method1 -->
+<!-- DEBUG [2021-P1]: pool_perf=60 rows, notes=0 classes, wac_source=pool_perf, cod_source=method1 -->
+<!-- DEBUG [2021-P2]: pool_perf=57 rows, notes=0 classes, wac_source=pool_perf, cod_source=method1 -->
+<!-- DEBUG [2022-P1]: pool_perf=48 rows, notes=0 classes, wac_source=monthly_summary, cod_source=loan_rate_estimate -->
+<!-- DEBUG [2022-P2]: pool_perf=46 rows, notes=0 classes, wac_source=monthly_summary, cod_source=loan_rate_estimate -->
+<!-- DEBUG [2022-P3]: pool_perf=42 rows, notes=0 classes, wac_source=monthly_summary, cod_source=loan_rate_estimate -->
+<!-- DEBUG [2024-P2]: pool_perf=21 rows, notes=0 classes, wac_source=monthly_summary, cod_source=loan_rate_estimate -->
+<!-- DEBUG [2024-P3]: pool_perf=18 rows, notes=0 classes, wac_source=monthly_summary, cod_source=loan_rate_estimate -->
+<!-- DEBUG [2024-P4]: pool_perf=15 rows, notes=0 classes, wac_source=monthly_summary, cod_source=loan_rate_estimate -->
+<!-- DEBUG [2025-P2]: pool_perf=9 rows, notes=1 classes, wac_source=monthly_summary, cod_source=method2 -->
+<!-- DEBUG [2025-P3]: pool_perf=6 rows, notes=0 classes, wac_source=monthly_summary, cod_source=loan_rate_estimate -->
+<!-- DEBUG [2025-P4]: pool_perf=4 rows, notes=0 classes, wac_source=monthly_summary, cod_source=loan_rate_estimate -->
+
+=== SUMMARY TABLE DEBUG (16 deals) ===
+<!-- DEBUG_SUMMARY [2020-P1]: wac_src=pool_perf, cod_src=time_series, init_wac=0.0818, curr_wac=0.0824, init_cod=0.006219082796520368, curr_cod=0.010849417754249288 -->
+<!-- DEBUG_SUMMARY [2021-P1]: wac_src=pool_perf, cod_src=time_series, init_wac=0.08199999999999999, curr_wac=0.0815, init_cod=0.007333557659602461, curr_cod=0.008282455495778877 -->
+<!-- DEBUG_SUMMARY [2021-P2]: wac_src=pool_perf, cod_src=time_series, init_wac=0.07980000000000001, curr_wac=0.0793, init_cod=0.006942185580006673, curr_cod=0.007559167230220586 -->
+<!-- DEBUG_SUMMARY [2022-P1]: wac_src=monthly_summary, cod_src=loan_rate_estimate, init_wac=0.07567654179178868, curr_wac=0.07752426575702168, init_cod=0.03147125013946494, curr_cod=0.03147125013946494 -->
+<!-- DEBUG_SUMMARY [2022-P2]: wac_src=monthly_summary, cod_src=loan_rate_estimate, init_wac=0.09123205821413016, curr_wac=0.09321488640911588, init_cod=0.03716122114002874, curr_cod=0.03716122114002874 -->
+<!-- DEBUG_SUMMARY [2022-P3]: wac_src=monthly_summary, cod_src=loan_rate_estimate, init_wac=0.10325706159701471, curr_wac=0.10432181966275285, init_cod=0.04214398669189119, curr_cod=0.04214398669189119 -->
+<!-- DEBUG_SUMMARY [2024-P2]: wac_src=monthly_summary, cod_src=loan_rate_estimate, init_wac=0.1379272669842112, curr_wac=0.13936924066887751, init_cod=0.05573491304347827, curr_cod=0.05573491304347827 -->
+<!-- DEBUG_SUMMARY [2024-P3]: wac_src=monthly_summary, cod_src=loan_rate_estimate, init_wac=0.13827207485262402, curr_wac=0.13965539978491764, init_cod=0.055887666973603436, curr_cod=0.055887666973603436 -->
+<!-- DEBUG_SUMMARY [2024-P4]: wac_src=monthly_summary, cod_src=loan_rate_estimate, init_wac=0.13137610500855987, curr_wac=0.13281663276270383, init_cod=0.05362439885359446, curr_cod=0.05362439885359446 -->
+<!-- DEBUG_SUMMARY [2025-P2]: wac_src=monthly_summary, cod_src=time_series, init_wac=0.12922870236148162, curr_wac=0.1291592750296374, init_cod=0.0475, curr_cod=0.0475 -->
+<!-- DEBUG_SUMMARY [2025-P3]: wac_src=monthly_summary, cod_src=loan_rate_estimate, init_wac=0.1219039609849397, curr_wac=0.12176331974083208, init_cod=0.04960108169681975, curr_cod=0.04960108169681975 -->
+<!-- DEBUG_SUMMARY [2025-P4]: wac_src=monthly_summary, cod_src=loan_rate_estimate, init_wac=0.11287609828713119, curr_wac=0.11279881654767224, init_cod=0.046099453771153195, curr_cod=0.046099453771153195 -->
+<!-- DEBUG_SUMMARY [2021-N1]: wac_src=monthly_summary, cod_src=time_series, init_wac=0.19282732762524363, curr_wac=0.19598358077013442, init_cod=0.24665039908292402, curr_cod=0.20755428914011398 -->
+<!-- DEBUG_SUMMARY [2021-N2]: wac_src=monthly_summary, cod_src=time_series, init_wac=0.19225348008380544, curr_wac=0.19215980208928363, init_cod=0.011844246023003699, curr_cod=0.012372437408400046 -->
+<!-- DEBUG_SUMMARY [2021-N3]: wac_src=monthly_summary, cod_src=time_series, init_wac=0.18599235419243687, curr_wac=0.18590925695299323, init_cod=0.16613791786899854, curr_cod=0.06717111663425124 -->
+<!-- DEBUG_SUMMARY [2021-N4]: wac_src=monthly_summary, cod_src=time_series, init_wac=0.1882603121753472, curr_wac=0.18592976579943177, init_cod=0.1044198636173104, curr_cod=0.16529527135492322 -->
+
+=== CHART COUNTS ===
+CoD charts: 20
+WAC charts: 20
+
+=== DATA DEBUG TAB (first 3000 chars) ===
+id="deal-__debug__" class="deal-block" style="display:none"> Data Debug (2020-P1) pool_performance (last 5 periods) distribution_date total_note_interest aggregate_note_balance note_balance_a1 note_balance_a2 note_balance_a3 note_balance_a4 note_balance_b note_balance_c note_balance_d note_balance_n 9/9/2024 52887.65 58496392.56 0.0 0.0 0.0 20426392.56 13365000.0 17212000.0 7493000.0 0.0 9/8/2025 27196.42 19289719.59 0.0 0.0 0.0 0.0 0.0 11796719.59 7493000.0 0.0 9/8/2023 79751.08 110423502.4 0.0 0.0 0.0 72353502.4 13365000.0 17212000.0 7493000.0 0.0 9/8/2022 105642.01 178830952.62 0.0 0.0 64830952.62 75930000.0 13365000.0 17212000.0 7493000.0 0.0 9/8/2021 149224.28 287521169.85 0.0 58521169.85 115000000.0 75930000.0 13365000.0 17212000.0 7493000.0 3336182.11 notes table class coupon_rate original_balance A1 0.005 nan Computed CoD (total_note_interest / aggregate_note_balance * 12) 9/9/2024: $52,888 / $58,496,393 * 12 = 1.0849% 9/8/2025: $27,196 / $19,289,720 * 12 = 1.6919% 9/8/2023: $79,751 / $110,423,502 * 12 = 0.8667% 9/8/2022: $105,642 / $178,830,953 * 12 = 0.7089% 9/8/2021: $149,224 / $287,521,170 * 12 = 0.6228% Cert dump error: No module named 'carvana_abs' <div
+
+=== PRIME SUMMARY TABLE CELLS ===
+  2020-P1 | 709 | 8.18% | 8.24% | 0.62% | 1.08% | $405.0M | 24.2% | 1.18% | 8.17%
+  2021-P1 | 707 | 8.20% | 8.15% | 0.73% | 0.83% | $301.6M | 8.3% | 1.85% | 10.24%
+  2021-P2 | 706 | 7.98% | 7.93% | 0.69% | 0.76% | $629.6M | 11.1% | 1.92% | 7.13%
+  2022-P1 | 703 | 7.57% | 7.75% | 3.15% | 3.15% | $793.3M | 24.5% | 3.46% | 2.17%
+  2022-P2 | 703 | 9.12% | 9.32% | 3.72% | 3.72% | $482.0M | 25.9% | 3.78% | 1.78%
+  2022-P3 | 703 | 10.33% | 10.43% | 4.21% | 4.21% | $324.7M | 28.7% | 3.67% | 3.89%
+  2024-P2 | 704 | 13.79% | 13.94% | 5.57% | 5.57% | $410.9M | 64.5% | 1.57% | 5.99%
+  2024-P3 | 703 | 13.83% | 13.97% | 5.59% | 5.59% | $574.8M | 64.5% | 1.11% | 5.29%
+  2024-P4 | 704 | 13.14% | 13.28% | 5.36% | 5.36% | $625.1M | 64.8% | 0.74% | 3.32%
+  2025-P2 | 700 | 12.92% | 12.92% | 4.75% | 4.75% | $541.1M | 97.0% | 0.44% | 1.46%
+  2025-P3 | 702 | 12.19% | 12.18% | 4.96% | 4.96% | $927.3M | 97.0% | 0.12% | 1.13%
+  2025-P4 | 706 | 11.29% | 11.28% | 4.61% | 4.61% | $910.8M | 97.2% | 0.01% | 0.53%
+
+=== NON-PRIME SUMMARY TABLE CELLS ===
+  2021-N1 | 569 | 19.28% | 19.60% | 24.67% | 20.76% | $304.4M | 11.5% | 14.64% | 19.92%
+  2021-N2 | 565 | 19.23% | 19.22% | 1.18% | 1.24% | $334.3M | 13.5% | 16.64% | 16.93%
+  2021-N3 | 576 | 18.60% | 18.59% | 16.61% | 6.72% | $390.9M | 14.7% | 19.58% | 4.74%
+  2021-N4 | 576 | 18.83% | 18.59% | 10.44% | 16.53% | $460.0M | 16.6% | 19.44% | 2.32%
