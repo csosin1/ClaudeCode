@@ -344,9 +344,30 @@ def _parse_from_numbered_text(text: str) -> dict:
             if pct and 0.1 < pct < 30:  # Sanity: rate should be 0.1% to 30%
                 data[col_name] = pct / 100.0  # Store as decimal
 
+    # --- Note Interest Distributable (rate field + 1 for each class) ---
+    note_interest_map = {
+        15: "A1", 21: "A2", 27: "A3",
+        33: "A4", 39: "B", 45: "C",
+        51: "D", 56: "N",
+    }
+    note_interest_total = 0.0
+    for field_num, cls_name in note_interest_map.items():
+        if field_num in fields:
+            val = _parse_numbered_value(fields[field_num]["raw"])["value"]
+            if val and val > 0:
+                note_interest_total += val
+    if note_interest_total > 0:
+        data["total_note_interest"] = note_interest_total
+
     # Aggregate note balance (field 76 or sum)
     if 76 in fields:
         data["aggregate_note_balance"] = _parse_numbered_value(fields[76]["raw"])["value"]
+    if "aggregate_note_balance" not in data or not data["aggregate_note_balance"]:
+        bal_sum = sum(data.get(col, 0) or 0 for col in
+                      ["note_balance_a1", "note_balance_a2", "note_balance_a3", "note_balance_a4",
+                       "note_balance_b", "note_balance_c", "note_balance_d", "note_balance_n"])
+        if bal_sum > 0:
+            data["aggregate_note_balance"] = bal_sum
 
     # --- Overcollateralization & Reserve (fields 63, 65, 78, 81) ---
     if 63 in fields:
