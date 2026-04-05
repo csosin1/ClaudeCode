@@ -566,8 +566,53 @@ Step 2 — Remove everything (no orphans):
 1. Remove from `RUNBOOK.md`
 1. Push to `main`
 
-Step 3 — Verify after auto-deploy runs:
+Step 3 — Clean up empty hubs:
+
+After deleting a project, check if its parent hub is now empty (no remaining project cards). If so:
+
+1. Present this to the user:
+   ```
+   The [hub name] hub at /[path]/ is now empty.
+   Remove the empty hub and its landing page card?
+   Type "delete [hub name] hub" to confirm.
+   ```
+1. Do NOT auto-delete the empty hub — wait for user confirmation with the hub name
+1. If confirmed: remove the hub `index.html`, its nginx route, and its card from the parent landing page
+1. If not confirmed: leave it in place (user may plan to add new projects there)
+
+Step 4 — Verify after auto-deploy runs:
 
 1. Confirm the project URL returns 404
 1. Confirm the landing page no longer links to it
+1. If a hub was removed: confirm that URL also returns 404
 1. Report to the user that deletion is complete
+
+-----
+
+## Link Audit
+
+Links can drift from reality over time. The Orchestrator runs a link audit at the start of every task (before writing any spec) and after every deploy.
+
+**Audit procedure:**
+
+1. Scan all hub pages for link cards: `deploy/landing.html`, `games/index.html`, and any other `index.html` files that serve as hubs
+1. For each link card, verify the target exists:
+   - Static games: check that the `games/<name>/` directory exists in the repo with an `index.html`
+   - `/opt/` projects: check that the nginx location block exists in `deploy/update_nginx.sh`
+1. Check the reverse — scan for projects that exist but have no link card:
+   - `games/*/index.html` files with no card on `games/index.html`
+   - nginx location blocks with no card on any hub page
+1. Check for empty hubs — hub pages with zero project cards
+
+**If drift is found:**
+
+- Report it to the user before starting the current task:
+  ```
+  LINK AUDIT: [issues found]
+  - Dead link: [hub page] → [target] (target missing)
+  - Unlinked project: [project] has no card on [hub page]
+  - Empty hub: [hub page] has no project cards
+  Fix these before proceeding? (y/n)
+  ```
+- If the user says yes, fix them as a prerequisite before the main task
+- If no, note the drift in `TASK_STATE.md` blockers and proceed
