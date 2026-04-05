@@ -9,20 +9,20 @@ git fetch origin claude/carvana-loan-dashboard-4QMPM 2>/dev/null
 LOCAL=$(git rev-parse HEAD)
 REMOTE=$(git rev-parse origin/claude/carvana-loan-dashboard-4QMPM)
 
+# Update nginx config if version has changed (runs every cycle, not just on new commits)
+if [ -f /opt/abs-dashboard/deploy/NGINX_VERSION ]; then
+    NEED_NGINX=$(cat /opt/abs-dashboard/deploy/NGINX_VERSION)
+    HAVE_NGINX=$(cat /opt/.nginx_version 2>/dev/null || echo "none")
+    if [ "$NEED_NGINX" != "$HAVE_NGINX" ]; then
+        echo "$(date): Updating nginx config (v$NEED_NGINX)..."
+        bash /opt/abs-dashboard/deploy/update_nginx.sh >> /var/log/auto-deploy.log 2>&1 || true
+        echo "$NEED_NGINX" > /opt/.nginx_version
+    fi
+fi
+
 if [ "$LOCAL" != "$REMOTE" ]; then
     echo "$(date): New changes detected, deploying..."
     git reset --hard origin/claude/carvana-loan-dashboard-4QMPM
-
-    # Update nginx config if version has changed
-    if [ -f /opt/abs-dashboard/deploy/NGINX_VERSION ]; then
-        NEED_NGINX=$(cat /opt/abs-dashboard/deploy/NGINX_VERSION)
-        HAVE_NGINX=$(cat /opt/.nginx_version 2>/dev/null || echo "none")
-        if [ "$NEED_NGINX" != "$HAVE_NGINX" ]; then
-            echo "$(date): Updating nginx config (v$NEED_NGINX)..."
-            bash /opt/abs-dashboard/deploy/update_nginx.sh >> /var/log/auto-deploy.log 2>&1 || true
-            echo "$NEED_NGINX" > /opt/.nginx_version
-        fi
-    fi
 
     # Check if a reingest is needed (flag file in repo signals this)
     if [ -f /opt/abs-dashboard/deploy/REINGEST_VERSION ]; then
