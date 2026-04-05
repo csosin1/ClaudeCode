@@ -48,6 +48,10 @@ Every project deploys to the droplet and gets its own URL. The landing page at `
 - Deploying one project must never break another. After changing shared config (nginx, landing page), verify existing projects still work.
 - New projects get their own `/opt/<project>/` directory.
 
+### New Project Placement
+
+When the user asks to create a new program or project, ask where it should live in the file architecture before writing any code — unless they've already specified. Choices include `games/<name>/` for static pages, `/opt/<project>/` for backend services, or another location of their choosing.
+
 ### Putting a New Project Online
 
 1. Create its directory on the droplet: `/opt/<project>/`
