@@ -52,8 +52,13 @@ if [ "$LOCAL" != "$REMOTE" ]; then
     if [ -f /opt/abs-dashboard/carvana_abs/diagnose_data.py ]; then
         /opt/abs-venv/bin/python /opt/abs-dashboard/carvana_abs/diagnose_data.py > /opt/abs-dashboard/deploy/LAST_DIAGNOSTIC.txt 2>&1 || true
     fi
+    # Dump cert fields for debugging (one-time)
+    if [ -f /opt/abs-dashboard/carvana_abs/dump_cert_fields.py ] && [ ! -f /opt/.cert_fields_dumped ]; then
+        /opt/abs-venv/bin/python /opt/abs-dashboard/carvana_abs/dump_cert_fields.py > /opt/abs-dashboard/deploy/LAST_CERT_FIELDS.txt 2>&1 || true
+        touch /opt/.cert_fields_dumped
+    fi
     cd /opt/abs-dashboard
-    git add deploy/LAST_STATUS.json deploy/LAST_VALIDATION.txt deploy/LAST_DATA_CHECK.txt deploy/LAST_DIAGNOSTIC.txt 2>/dev/null
+    git add deploy/LAST_STATUS.json deploy/LAST_VALIDATION.txt deploy/LAST_DATA_CHECK.txt deploy/LAST_DIAGNOSTIC.txt deploy/LAST_CERT_FIELDS.txt 2>/dev/null
     git commit -m "Auto-deploy status update" --allow-empty 2>/dev/null || true
     # Pull-rebase before push to avoid non-fast-forward rejection
     git pull --rebase origin claude/carvana-loan-dashboard-4QMPM 2>/dev/null || true
