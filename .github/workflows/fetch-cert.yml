@@ -10,43 +10,32 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: claude/carvana-loan-dashboard-4QMPM
-
-      - name: Download 2020-P1 servicer cert and extract fields
+      - name: Download and dump cert content
         run: |
           curl -s -A "Clifford Sosin clifford.sosin@casinvestmentpartners.com" \
-            -o cert_2020_p1.htm \
+            -o cert.htm \
             "https://www.sec.gov/Archives/edgar/data/1801738/000180173825000053/crvna2020-p1servicerrepo.htm"
-          echo "Downloaded $(wc -c < cert_2020_p1.htm) bytes"
-
-          # Extract just the text with numbered fields for readability
+          echo "Downloaded $(wc -c < cert.htm) bytes"
+          echo ""
+          echo "=== EXTRACTED TEXT (numbered fields area) ==="
           python3 -c "
           from html.parser import HTMLParser
-          class TextExtractor(HTMLParser):
+          import re
+          class T(HTMLParser):
               def __init__(self):
                   super().__init__()
-                  self.text = []
-              def handle_data(self, data):
-                  self.text.append(data)
-          with open('cert_2020_p1.htm') as f:
+                  self.t = []
+              def handle_data(self, d):
+                  self.t.append(d)
+          with open('cert.htm') as f:
               html = f.read()
-          p = TextExtractor()
+          p = T()
           p.feed(html)
-          text = '\n'.join(p.text)
-          with open('cert_text.txt', 'w') as f:
-              f.write(text)
-          print(f'Extracted {len(text)} chars of text')
-          " 2>&1
-
-      - name: Commit cert files to repo
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          mkdir -p deploy/certs
-          cp cert_2020_p1.htm deploy/certs/
-          cp cert_text.txt deploy/certs/
-          git add deploy/certs/
-          git commit -m "Add downloaded servicer cert for field inspection"
-          git push origin claude/carvana-loan-dashboard-4QMPM
+          text = '\n'.join(p.t)
+          # Find numbered fields - print fields 10-80
+          for m in re.finditer(r'(?:^|\n)\s*(\d{1,3})\.\s+(.+?)(?=\n\s*\d{1,3}\.\s|\Z)', text, re.DOTALL):
+              num = int(m.group(1))
+              if 10 <= num <= 80:
+                  content = m.group(2).strip()[:200]
+                  print(f'FIELD {num:3d}: {content}')
+          "
