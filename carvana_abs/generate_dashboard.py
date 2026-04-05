@@ -578,6 +578,68 @@ def generate_deal_content(deal):
                 h += chart(traces, {"title": "OC & Reserve Account", "yaxis": {"tickformat": "$,.0f"}, "hovermode": "x unified"})
     sections["Notes & OC"] = h
 
+    # ── DOCUMENTS ──
+    h = ""
+    # Query servicer certificates from filings table
+    certs = q("SELECT filing_date, servicer_cert_url, accession_number FROM filings "
+              "WHERE deal=? AND servicer_cert_url IS NOT NULL ORDER BY filing_date DESC", (deal,))
+    if not certs.empty:
+        h += "<h3>Servicer Certificates</h3>"
+        cert_rows = []
+        for _, cert_row in certs.iterrows():
+            fd = cert_row["filing_date"]
+            cert_url = cert_row["servicer_cert_url"]
+            # Format date for display
+            try:
+                dt_obj = datetime.strptime(str(fd).strip()[:10], "%Y-%m-%d")
+                date_display = dt_obj.strftime("%b %Y")
+                date_slug = dt_obj.strftime("%Y-%m")
+            except (ValueError, TypeError):
+                date_display = str(fd)[:10] if fd else "Unknown"
+                date_slug = str(fd)[:7] if fd else "unknown"
+            # Check if local PDF/HTML exists
+            pdf_filename = f"{deal}_servicer_{date_slug}.pdf"
+            html_filename = f"{deal}_servicer_{date_slug}.html"
+            pdf_path = os.path.join(OUT_DIR, "docs", deal, pdf_filename)
+            html_path = os.path.join(OUT_DIR, "docs", deal, html_filename)
+            if os.path.exists(pdf_path):
+                link = f'<a href="docs/{deal}/{pdf_filename}" target="_blank">PDF</a>'
+            elif os.path.exists(html_path):
+                link = f'<a href="docs/{deal}/{html_filename}" target="_blank">HTML</a>'
+            else:
+                # Link to SEC directly
+                link = f'<a href="{cert_url}" target="_blank" rel="noopener">SEC&nbsp;Filing</a>'
+            cert_rows.append({"Date": date_display, "Download": link})
+        cert_df = pd.DataFrame(cert_rows)
+        h += table_html(cert_df, cls="compare")
+
+    # Prospectus & Annual Reports — link to SEC EDGAR search for the deal's CIK
+    from carvana_abs.config import DEALS as DEAL_REGISTRY
+    deal_info = DEAL_REGISTRY.get(deal, {})
+    cik = deal_info.get("cik", "")
+    entity = deal_info.get("entity_name", f"Carvana Auto Receivables Trust {deal}")
+    if cik:
+        h += "<h3>Prospectus &amp; Other Filings</h3>"
+        cik_clean = cik.lstrip("0")
+        edgar_base = f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK={cik}"
+        # Build links table for common filing types
+        filing_links = [
+            {"Document": "All SEC Filings",
+             "Description": f"Complete filing history for {entity}",
+             "Link": f'<a href="{edgar_base}&type=&dateb=&owner=include&count=40" target="_blank" rel="noopener">EDGAR</a>'},
+            {"Document": "Prospectus (424B)",
+             "Description": "Offering prospectus and supplements",
+             "Link": f'<a href="{edgar_base}&type=424B&dateb=&owner=include&count=10" target="_blank" rel="noopener">EDGAR</a>'},
+            {"Document": "Annual Reports (10-K)",
+             "Description": "Annual reports filed with SEC",
+             "Link": f'<a href="{edgar_base}&type=10-K&dateb=&owner=include&count=10" target="_blank" rel="noopener">EDGAR</a>'},
+            {"Document": "Current Reports (8-K)",
+             "Description": "Material event disclosures",
+             "Link": f'<a href="{edgar_base}&type=8-K&dateb=&owner=include&count=10" target="_blank" rel="noopener">EDGAR</a>'},
+        ]
+        h += table_html(pd.DataFrame(filing_links), cls="compare")
+    sections["Documents"] = h
+
     # Build metrics + tabs HTML for this deal
     metrics_html = f"""<div class="metrics">
 <div class="metric"><div class="mv">{fm(ORIG_BAL)}</div><div class="ml">Original Balance</div></div>
