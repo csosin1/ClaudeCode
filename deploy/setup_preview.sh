@@ -1,12 +1,11 @@
 #!/bin/bash
-# Update nginx for multi-project layout.
-# Each project is served from its own isolated directory.
+# Set up preview system: /CarvanaLoanDashBoard/preview/ shows candidate,
+# /CarvanaLoanDashBoard/ shows approved live version.
+# Run once on the server.
 
-# Ensure landing page directory exists
-mkdir -p /var/www/landing
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-cp "$SCRIPT_DIR/landing.html" /var/www/landing/index.html 2>/dev/null || true
+mkdir -p /opt/abs-dashboard/carvana_abs/static_site/preview
 
+# Update nginx for multi-project layout
 cat > /etc/nginx/sites-available/abs-dashboard << 'NGXEOF'
 server {
     listen 80 default_server;
@@ -26,7 +25,7 @@ server {
         return 301 /CarvanaLoanDashBoard/preview/;
     }
 
-    # Carvana ABS Dashboard — preview (must come before live for longest-prefix match)
+    # Carvana ABS Dashboard — preview
     location /CarvanaLoanDashBoard/preview/ {
         alias /opt/abs-dashboard/carvana_abs/static_site/preview/;
         index index.html;
@@ -45,23 +44,20 @@ server {
         alias /var/www/games/;
         index index.html;
     }
-
-    # Webhook deploy endpoint (proxied to localhost Python listener)
-    location = /webhook/deploy {
-        proxy_pass http://127.0.0.1:9000;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header Host $host;
-        proxy_read_timeout 120s;
-        limit_except POST { deny all; }
-    }
-
-    # Webhook health check
-    location = /webhook/health {
-        proxy_pass http://127.0.0.1:9000/health;
-    }
 }
 NGXEOF
 
+# Set up landing page
+mkdir -p /var/www/landing
+cp /opt/abs-dashboard/deploy/landing.html /var/www/landing/index.html
+
+# Move current index.html to live/
+mkdir -p /opt/abs-dashboard/carvana_abs/static_site/live
+if [ -f /opt/abs-dashboard/carvana_abs/static_site/index.html ]; then
+    cp /opt/abs-dashboard/carvana_abs/static_site/index.html /opt/abs-dashboard/carvana_abs/static_site/live/index.html
+fi
+
 nginx -t && systemctl reload nginx
-echo "Nginx updated — multi-project layout active."
+echo "Preview system set up!"
+echo "  Live:    http://159.223.127.125/CarvanaLoanDashBoard/"
+echo "  Preview: http://159.223.127.125/CarvanaLoanDashBoard/preview/"
