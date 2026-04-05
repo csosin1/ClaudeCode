@@ -495,7 +495,7 @@ What will change:
 - All link cards updated (landing page, hub pages)
 - RUNBOOK.md updated
 
-Type "move [project name]" to confirm.
+Confirm? (yes/no)
 ```
 
 Step 2 — Execute the move:
@@ -543,10 +543,10 @@ Will remove:
 - Logrotate config
 - RUNBOOK.md entry
 
-Type "delete [project name]" to confirm.
+Confirm? (yes/no)
 ```
 
-Do NOT proceed until the user confirms with the project name. "Yes" or "ok" is not enough — the user must name what they're deleting.
+Do NOT proceed until the user says yes. Wait for an explicit answer.
 
 Step 2 — Remove everything (no orphans):
 
@@ -573,10 +573,9 @@ After deleting a project, check if its parent hub is now empty (no remaining pro
 1. Present this to the user:
    ```
    The [hub name] hub at /[path]/ is now empty.
-   Remove the empty hub and its landing page card?
-   Type "delete [hub name] hub" to confirm.
+   Remove the empty hub and its landing page card? (yes/no)
    ```
-1. Do NOT auto-delete the empty hub — wait for user confirmation with the hub name
+1. Do NOT auto-delete the empty hub — wait for the user to say yes
 1. If confirmed: remove the hub `index.html`, its nginx route, and its card from the parent landing page
 1. If not confirmed: leave it in place (user may plan to add new projects there)
 
