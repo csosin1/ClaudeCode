@@ -235,7 +235,10 @@ def generate_deal_content(deal):
         if len(cod_rows) > len(cod):
             cod = pd.DataFrame(cod_rows)
 
-    # Method 3 (last resort): flat line from notes table — works even if pool_performance is empty
+    # Method 3: flat line from notes table — works even if pool_performance is empty
+    cod_source = "none"
+    if len(cod) >= 3:
+        cod_source = "method1_or_2"
     if len(cod) < 3 and not notes_df.empty:
         flat_rate = None
         if "original_balance" in notes_df.columns and notes_df["original_balance"].notna().any():
@@ -248,7 +251,30 @@ def generate_deal_content(deal):
             # Use monthly_summary periods if pool_performance is empty
             periods = pool["period"] if not pool.empty else lp["period"]
             cod = pd.DataFrame({"period": periods, "cost_of_debt": flat_rate})
-            logger.info(f"[{deal}] Using flat-line CoD: {flat_rate:.4%}")
+            cod_source = "notes_flat"
+            logger.info(f"[{deal}] Using flat-line CoD from notes: {flat_rate:.4%}")
+
+    # Method 4 (rough estimate): derive from avg loan interest rate if nothing else works
+    if len(cod) < 3:
+        avg_rate_q = q("SELECT AVG(original_interest_rate) as r FROM loans WHERE deal=? AND original_interest_rate IS NOT NULL", (deal,))
+        if not avg_rate_q.empty and avg_rate_q.iloc[0]["r"]:
+            avg_loan_rate = float(avg_rate_q.iloc[0]["r"])
+            rough_cod = avg_loan_rate * 0.4  # rough proxy: funding cost ~ 40% of loan yield
+            periods = pool["period"] if not pool.empty else lp["period"]
+            cod = pd.DataFrame({"period": periods, "cost_of_debt": rough_cod})
+            cod_source = "loan_rate_estimate"
+            logger.info(f"[{deal}] Using rough CoD estimate from loan avg rate ({avg_loan_rate:.4%} * 0.4 = {rough_cod:.4%})")
+
+    # Track WAC source for debug
+    wac_source = "none"
+    if not wac.empty:
+        if not pool.empty and "weighted_avg_apr" in pool.columns and pool["weighted_avg_apr"].notna().any():
+            wac_source = "pool_perf"
+        elif "weighted_avg_coupon" in lp.columns and lp["weighted_avg_coupon"].notna().any():
+            wac_source = "monthly_summary"
+        else:
+            wac_source = "loan_avg"
+
     # 3) Render separate charts for consumer rate and cost of debt
     if not wac.empty:
         h += chart([{"x": wac["period"].tolist(), "y": wac["weighted_avg_apr"].tolist(),
@@ -266,6 +292,10 @@ def generate_deal_content(deal):
                     "xaxis": {"range": [x[0], x[-1]], "tickangle": -45, "automargin": True}})
     else:
         logger.warning(f"[{deal}] No cost of debt data available")
+    # Debug info for diagnosing data availability
+    notes_count = len(notes_df) if not notes_df.empty else 0
+    pool_rows = len(pool) if not pool.empty else 0
+    h += f"\n<!-- DEBUG [{deal}]: pool_perf={pool_rows} rows, notes={notes_count} classes, wac_source={wac_source}, cod_source={cod_source} -->\n"
     sections["Pool Summary"] = h
 
     # ── DELINQUENCIES ──
@@ -578,6 +608,7 @@ def generate_comparison_content(deals, title):
 
     # ── Summary Table ──
     rows = []
+    debug_comments = []
     for deal in deals:
         loan_stats = q("SELECT AVG(original_interest_rate) as avg_yield, AVG(obligor_credit_score) as avg_fico FROM loans WHERE deal=?", (deal,))
         avg_fico = loan_stats.iloc[0]["avg_fico"] if not loan_stats.empty and loan_stats.iloc[0]["avg_fico"] else None
@@ -659,8 +690,11 @@ def generate_comparison_content(deals, title):
                             init_cod = val
                         else:
                             curr_cod = val
-        # Last resort: flat rate from notes table (weighted by original_balance or simple avg)
+        # Fallback 3: flat rate from notes table (weighted by original_balance or simple avg)
+        cod_source_summary = "weighted_notes" if (init_cod is not None) else "none"
         if init_cod is None or curr_cod is None:
+            if cod_source_summary == "none":
+                cod_source_summary = "note_interest_ratio"
             if not notes_df.empty:
                 try:
                     notes_ob = q("SELECT class, coupon_rate, original_balance FROM notes WHERE deal=? AND coupon_rate IS NOT NULL", (deal,))
@@ -676,10 +710,39 @@ def generate_comparison_content(deals, title):
                 if flat and flat > 0:
                     if init_cod is None:
                         init_cod = flat
+                        cod_source_summary = "notes_flat"
                     if curr_cod is None:
                         curr_cod = flat
+                        cod_source_summary = "notes_flat"
+
+        # Fallback 4: rough estimate from avg loan interest rate
+        if init_cod is None or curr_cod is None:
+            avg_rate_fb = q("SELECT AVG(original_interest_rate) as r FROM loans WHERE deal=? AND original_interest_rate IS NOT NULL", (deal,))
+            if not avg_rate_fb.empty and avg_rate_fb.iloc[0]["r"]:
+                rough = float(avg_rate_fb.iloc[0]["r"]) * 0.4
+                if init_cod is None:
+                    init_cod = rough
+                    cod_source_summary = "loan_rate_estimate"
+                if curr_cod is None:
+                    curr_cod = rough
+                logger.info(f"  [{deal}] Using rough CoD estimate from loan avg rate: {rough:.4%}")
+
+        # Track WAC source for debug
+        if not first_wac.empty and first_wac.iloc[0]["weighted_avg_apr"]:
+            wac_source_summary = "pool_perf"
+        elif init_wac is not None and (first_wac.empty or not first_wac.iloc[0]["weighted_avg_apr"]):
+            # Was set by monthly_summary or loan_avg fallback
+            avg_rate_check = q("SELECT AVG(original_interest_rate) as r FROM loans WHERE deal=? AND original_interest_rate IS NOT NULL", (deal,))
+            if not avg_rate_check.empty and avg_rate_check.iloc[0]["r"] and init_wac == float(avg_rate_check.iloc[0]["r"]):
+                wac_source_summary = "loan_avg"
+            else:
+                wac_source_summary = "monthly_summary"
+        else:
+            wac_source_summary = "none"
+
         logger.info(f"  [{deal}] Compare: init_wac={init_wac}, curr_wac={curr_wac}, "
-                    f"init_cod={init_cod}, curr_cod={curr_cod}")
+                    f"init_cod={init_cod}, curr_cod={curr_cod}, "
+                    f"wac_src={wac_source_summary}, cod_src={cod_source_summary}")
 
         # Pool factor from monthly_summary (more reliable than pool_performance)
         latest_ms = q("SELECT total_balance FROM monthly_summary WHERE deal=? ORDER BY reporting_period_end DESC LIMIT 1", (deal,))
@@ -697,6 +760,7 @@ def generate_comparison_content(deals, title):
             net = (loss.iloc[0]["co"] or 0) - (loss.iloc[0]["rec"] or 0)
             cum_loss_rate = net / init_bal
 
+        debug_comments.append(f"<!-- DEBUG_SUMMARY [{deal}]: wac_src={wac_source_summary}, cod_src={cod_source_summary}, init_wac={init_wac}, curr_wac={curr_wac}, init_cod={init_cod}, curr_cod={curr_cod} -->")
         rows.append({
             "Deal": deal,
             "Avg FICO": f"{avg_fico:.0f}" if avg_fico else "-",
@@ -721,6 +785,8 @@ def generate_comparison_content(deals, title):
             elif col in summary_df.columns:
                 summary_df[col] = summary_df[col].fillna("-")
         h += f"<h3>{title} — Summary</h3>" + table_html(summary_df, cls="compare")
+        # Append debug comments for each deal's data sources
+        h += "\n".join(debug_comments) + "\n"
 
     # ── Cumulative Loss Curve (by deal age in months) ──
     traces = []
