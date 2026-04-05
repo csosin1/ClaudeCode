@@ -8,6 +8,15 @@
 
 The user prompts from an iPhone. Claude does everything — writes code, deploys it, fixes problems. The user taps a link and sees the result in a mobile browser. No desktop. No terminal. No third-party apps. Every project lives on the droplet at http://159.223.127.125/ and is reachable in one tap from the landing page.
 
+**Sandbox limitations — read before doing anything:**
+- You **cannot** SSH, curl, or make HTTP requests to the droplet (159.223.127.125) from this sandbox
+- You **cannot** download from external sites (SEC EDGAR, APIs, data sources) — the proxy blocks everything except package registries, GitHub, and Anthropic
+- You **cannot** run Playwright or a browser against the live site from this sandbox
+- All server-side changes go through the deploy pipeline (push to `main` → auto-deploy)
+- All external downloads must happen in code that runs on the droplet, not here
+- All live-site testing runs via GitHub Actions, not from this sandbox
+- See "Production Environment" section for details
+
 -----
 
 ## Clarify Before Building
