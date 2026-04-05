@@ -320,6 +320,18 @@ The dangerous moment is **after pushing to main but before reading QA results**.
 
 -----
 
+## Skills Registry
+
+Reusable skills live in `SKILLS/`. Before building a feature, check if a relevant skill exists — it contains tested patterns, config, and gotchas.
+
+| Skill | File | Description |
+|-------|------|-------------|
+| residential-proxy | `SKILLS/residential-proxy.md` | Routes Playwright through Decodo residential proxies for bot-evasion automation. Includes stealth config, sticky sessions, human-like delays, and site-specific notes. |
+
+When a project needs a skill, read the skill file first. It has everything: dependencies, code patterns, env vars, and known issues.
+
+-----
+
 ## Agent Tool Restrictions
 
 |Agent   |Allowed Tools                                                                |
