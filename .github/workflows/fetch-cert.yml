@@ -10,22 +10,43 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
-      - name: Download 2020-P1 servicer cert
+      - uses: actions/checkout@v4
+        with:
+          ref: claude/carvana-loan-dashboard-4QMPM
+
+      - name: Download 2020-P1 servicer cert and extract fields
         run: |
           curl -s -A "Clifford Sosin clifford.sosin@casinvestmentpartners.com" \
             -o cert_2020_p1.htm \
             "https://www.sec.gov/Archives/edgar/data/1801738/000180173825000053/crvna2020-p1servicerrepo.htm"
           echo "Downloaded $(wc -c < cert_2020_p1.htm) bytes"
 
-          # Also try an older format cert
-          curl -s -A "Clifford Sosin clifford.sosin@casinvestmentpartners.com" \
-            -o cert_2020_p1_older.htm \
-            "https://www.sec.gov/Archives/edgar/data/1801738/000119312521047833/d143744dex991.htm"
-          echo "Downloaded older cert: $(wc -c < cert_2020_p1_older.htm) bytes"
+          # Extract just the text with numbered fields for readability
+          python3 -c "
+          from html.parser import HTMLParser
+          class TextExtractor(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.text = []
+              def handle_data(self, data):
+                  self.text.append(data)
+          with open('cert_2020_p1.htm') as f:
+              html = f.read()
+          p = TextExtractor()
+          p.feed(html)
+          text = '\n'.join(p.text)
+          with open('cert_text.txt', 'w') as f:
+              f.write(text)
+          print(f'Extracted {len(text)} chars of text')
+          " 2>&1
 
-      - name: Upload certs
-        uses: actions/upload-artifact@v4
-        with:
-          name: servicer-certs
-          path: "*.htm"
-          retention-days: 7
+      - name: Commit cert files to repo
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          mkdir -p deploy/certs
+          cp cert_2020_p1.htm deploy/certs/
+          cp cert_text.txt deploy/certs/
+          git add deploy/certs/
+          git commit -m "Add downloaded servicer cert for field inspection"
+          git push origin claude/carvana-loan-dashboard-4QMPM
