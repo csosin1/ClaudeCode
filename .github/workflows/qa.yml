@@ -1,0 +1,40 @@
+name: QA Smoke Tests
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Playwright
+        run: |
+          npm init -y
+          npm install @playwright/test
+          npx playwright install chromium
+          npx playwright install-deps chromium
+
+      - name: Wait for deploy
+        run: sleep 15
+
+      - name: Run QA tests
+        run: npx playwright test --config=playwright.config.ts
+        env:
+          BASE_URL: http://159.223.127.125
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-screenshots
+          path: test-results/
+          retention-days: 7
