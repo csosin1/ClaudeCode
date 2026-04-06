@@ -106,8 +106,11 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
     await screenshot(page, '01-landing');
 
     if (await isBlocked(page)) {
-      await screenshot(page, 'blocked');
-      return { error: 'blocked' };
+      const ssPath = await screenshot(page, 'blocked');
+      const pageTitle = await page.title().catch(() => 'unknown');
+      const bodySnippet = await page.textContent('body').then(t => t.substring(0, 300)).catch(() => 'could not read body');
+      console.log(`[carvana] BLOCKED — title: ${pageTitle}, body: ${bodySnippet}`);
+      return { error: 'blocked', details: { pageTitle, bodySnippet, screenshot: ssPath, url: page.url() } };
     }
 
     // --- Step 2: Enter VIN ---

@@ -71,17 +71,19 @@ async function launchBrowser(options = {}) {
 
   // Build proxy config
   // NOTE: Decodo session suffix (-session-xxx) causes auth failure.
-  // Use plain username for now. Sticky sessions may need a different format.
+  // But country targeting (-country-us) is needed for US-only sites.
   let proxyConfig = null;
   if (config.PROXY_HOST && config.PROXY_PASS) {
     const proxyPort = (config.PROXY_PORT === '7000') ? '10001' : (config.PROXY_PORT || '10001');
+    // Append -country-us for US residential IPs (Carvana is US-only)
+    const proxyUser = config.PROXY_USER ? `${config.PROXY_USER}-country-us` : '';
 
     proxyConfig = {
       server: `http://${config.PROXY_HOST}:${proxyPort}`,
-      username: config.PROXY_USER,
+      username: proxyUser,
       password: config.PROXY_PASS,
     };
-    console.log(`[browser] Using proxy: ${config.PROXY_HOST}:${proxyPort} user=${config.PROXY_USER}`);
+    console.log(`[browser] Using proxy: ${config.PROXY_HOST}:${proxyPort} user=${proxyUser}`);
   } else {
     console.log('[browser] No proxy configured — using direct connection');
   }

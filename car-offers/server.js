@@ -557,13 +557,14 @@ async function testPlaywrightProxy() {
   let browser = null;
   try {
     const proxyPort = (config.PROXY_PORT === '7000') ? '10001' : (config.PROXY_PORT || '10001');
+    const proxyUser = config.PROXY_USER ? `${config.PROXY_USER}-country-us` : config.PROXY_USER;
     const pw = require('playwright');
     browser = await pw.chromium.launch({
       headless: true,
       args: ['--no-sandbox', '--disable-setuid-sandbox', '--no-zygote', '--single-process', '--disable-gpu', '--disable-dev-shm-usage'],
       proxy: {
         server: `http://${config.PROXY_HOST}:${proxyPort}`,
-        username: config.PROXY_USER,
+        username: proxyUser,
         password: config.PROXY_PASS,
       },
     });
