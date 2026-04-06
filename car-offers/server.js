@@ -1,6 +1,7 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+const { execSync } = require('child_process');
 const config = require('./lib/config');
 
 const app = express();
@@ -15,177 +16,100 @@ const selfTest = {
   lastCarvanaRun: null,
 };
 
-/**
- * Run a proxy connectivity test in the background.
- * Stores result in selfTest for the /api/status endpoint.
- */
-async function runProxyTest() {
-  try { config.reloadConfig(); } catch (_) {}
-  if (!config.PROXY_HOST || !config.PROXY_PASS) {
-    selfTest.proxyResult = { ok: false, error: 'Proxy not configured (no password)' };
-    selfTest.proxyTestedAt = new Date().toISOString();
-    return;
-  }
-
-  const proxyPort = (config.PROXY_PORT === '7000') ? '10001' : (config.PROXY_PORT || '10001');
-  const sessionId = Math.random().toString(36).substring(7);
-  const proxyUser = config.PROXY_USER ? `${config.PROXY_USER}-session-${sessionId}` : '';
-
-  let browser = null;
+/** Save diagnostic results to a static file so QA/external tools can read them */
+function saveResults() {
   try {
-    const pw = require('playwright');
-    browser = await pw.chromium.launch({
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--no-zygote', '--single-process', '--disable-gpu', '--disable-dev-shm-usage'],
-      proxy: {
-        server: `http://${config.PROXY_HOST}:${proxyPort}`,
-        username: proxyUser,
-        password: config.PROXY_PASS,
-      },
-    });
-
-    const page = await browser.newPage();
-    await page.goto('https://ip.decodo.com/json', { timeout: 30000 });
-    const body = await page.textContent('body');
-    await browser.close();
-    browser = null;
-
-    try {
-      const ipData = JSON.parse(body);
-      selfTest.proxyResult = { ok: true, ip: ipData.ip, country: ipData.country_code, port: proxyPort };
-    } catch {
-      selfTest.proxyResult = { ok: true, ip: body.trim().substring(0, 100), port: proxyPort };
-    }
-  } catch (err) {
-    if (browser) try { await browser.close(); } catch (_) {}
-    selfTest.proxyResult = { ok: false, error: err.message, port: proxyPort };
+    const resultsPath = path.join(__dirname, 'startup-results.json');
+    fs.writeFileSync(resultsPath, JSON.stringify(selfTest, null, 2));
+    console.log('[diag] Results saved to startup-results.json');
+  } catch (e) {
+    console.error('[diag] Failed to save results:', e.message);
   }
-  selfTest.proxyTestedAt = new Date().toISOString();
-  console.log(`[self-test] Proxy test result:`, JSON.stringify(selfTest.proxyResult));
 }
 
 /**
- * Run network-level diagnostics (TCP, DNS, HTTP CONNECT) and store in selfTest.
+ * Run a curl-based proxy test (no Playwright, no browser — just raw HTTP).
+ * Tests: DNS, TCP, curl through proxy to httpbin.org and ip.decodo.com.
  */
-async function runNetworkDiag() {
+async function runFullDiagnostic() {
   try { config.reloadConfig(); } catch (_) {}
-  const net = require('net');
-  const dns = require('dns');
-  const proxyPort = (config.PROXY_PORT === '7000') ? '10001' : (config.PROXY_PORT || '10001');
   const host = config.PROXY_HOST || 'gate.decodo.com';
-  const diag = {};
+  const port = (config.PROXY_PORT === '7000') ? '10001' : (config.PROXY_PORT || '10001');
+  const user = config.PROXY_USER || '';
+  const pass = config.PROXY_PASS || '';
+  const diag = { timestamp: new Date().toISOString(), tests: {} };
 
-  // DNS
-  diag.dns = await new Promise((resolve) => {
-    dns.resolve4(host, (err, addresses) => {
-      if (err) return resolve({ ok: false, error: err.message });
-      resolve({ ok: true, addresses });
-    });
-  });
+  // Helper: run a shell command with timeout, return {ok, output/error}
+  function run(label, cmd, timeoutMs = 15000) {
+    try {
+      const output = execSync(cmd, { timeout: timeoutMs, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+      diag.tests[label] = { ok: true, output: output.trim().substring(0, 500) };
+      console.log(`[diag] ${label}: OK — ${output.trim().substring(0, 200)}`);
+    } catch (err) {
+      diag.tests[label] = { ok: false, error: (err.stderr || err.message || '').substring(0, 500), exitCode: err.status };
+      console.log(`[diag] ${label}: FAIL — ${(err.stderr || err.message || '').substring(0, 200)}`);
+    }
+  }
 
-  // TCP to proxy
-  diag.tcp_proxy = await new Promise((resolve) => {
-    const sock = net.createConnection({ host, port: parseInt(proxyPort), timeout: 10000 }, () => {
-      sock.destroy();
-      resolve({ ok: true, host, port: proxyPort });
-    });
-    sock.on('error', (err) => { sock.destroy(); resolve({ ok: false, error: err.message }); });
-    sock.on('timeout', () => { sock.destroy(); resolve({ ok: false, error: 'timeout' }); });
-  });
+  // Test 1: DNS resolution
+  run('dns_resolve', `dig +short ${host} 2>&1 || nslookup ${host} 2>&1 | head -5`);
 
-  // HTTP CONNECT with auth
-  if (diag.tcp_proxy.ok && config.PROXY_PASS) {
-    diag.http_connect = await new Promise((resolve) => {
-      const sock = net.createConnection({ host, port: parseInt(proxyPort), timeout: 15000 }, () => {
-        const sessionId = Math.random().toString(36).substring(7);
-        const proxyUser = config.PROXY_USER ? `${config.PROXY_USER}-session-${sessionId}` : config.PROXY_USER;
-        const auth = Buffer.from(`${proxyUser}:${config.PROXY_PASS}`).toString('base64');
-        sock.write(`CONNECT ip.decodo.com:443 HTTP/1.1\r\nHost: ip.decodo.com:443\r\nProxy-Authorization: Basic ${auth}\r\n\r\n`);
-        let data = '';
-        sock.on('data', (chunk) => {
-          data += chunk.toString();
-          if (data.includes('\r\n\r\n')) {
-            sock.destroy();
-            const statusLine = data.split('\r\n')[0];
-            resolve({ ok: statusLine.includes('200'), response: statusLine });
-          }
-        });
-        sock.on('timeout', () => { sock.destroy(); resolve({ ok: false, error: 'HTTP CONNECT timeout' }); });
-      });
-      sock.on('error', (err) => { sock.destroy(); resolve({ ok: false, error: err.message }); });
-      sock.on('timeout', () => { sock.destroy(); resolve({ ok: false, error: 'TCP timeout' }); });
-    });
+  // Test 2: TCP connectivity to proxy port
+  run('tcp_proxy', `timeout 5 bash -c 'echo > /dev/tcp/${host}/${port}' 2>&1 && echo "TCP OK" || echo "TCP FAIL"`, 10000);
 
-    // Also try without session suffix (plain username)
-    if (!diag.http_connect.ok) {
-      diag.http_connect_plain = await new Promise((resolve) => {
-        const sock = net.createConnection({ host, port: parseInt(proxyPort), timeout: 15000 }, () => {
-          const auth = Buffer.from(`${config.PROXY_USER}:${config.PROXY_PASS}`).toString('base64');
-          sock.write(`CONNECT ip.decodo.com:443 HTTP/1.1\r\nHost: ip.decodo.com:443\r\nProxy-Authorization: Basic ${auth}\r\n\r\n`);
-          let data = '';
-          sock.on('data', (chunk) => {
-            data += chunk.toString();
-            if (data.includes('\r\n\r\n')) {
-              sock.destroy();
-              const statusLine = data.split('\r\n')[0];
-              resolve({ ok: statusLine.includes('200'), response: statusLine });
-            }
-          });
-          sock.on('timeout', () => { sock.destroy(); resolve({ ok: false, error: 'timeout' }); });
-        });
-        sock.on('error', (err) => { sock.destroy(); resolve({ ok: false, error: err.message }); });
-        sock.on('timeout', () => { sock.destroy(); resolve({ ok: false, error: 'timeout' }); });
-      });
+  // Test 3: curl to httpbin.org through proxy (simple, never blocks)
+  const proxyUrl = `http://${user}:${pass}@${host}:${port}`;
+  run('curl_httpbin_proxy', `curl -s --max-time 15 --proxy "${proxyUrl}" http://httpbin.org/ip 2>&1`);
+
+  // Test 4: curl to ip.decodo.com through proxy
+  run('curl_decodo_proxy', `curl -s --max-time 15 --proxy "${proxyUrl}" https://ip.decodo.com/json 2>&1`);
+
+  // Test 5: curl to httpbin directly (no proxy — baseline)
+  run('curl_httpbin_direct', `curl -s --max-time 10 http://httpbin.org/ip 2>&1`);
+
+  // Test 6: curl to example.com through proxy (HTTPS)
+  run('curl_example_proxy', `curl -s --max-time 15 --proxy "${proxyUrl}" https://example.com 2>&1 | head -5`);
+
+  // Test 7: try with session suffix
+  const sessionProxy = `http://${user}-session-test123:${pass}@${host}:${port}`;
+  run('curl_session_proxy', `curl -s --max-time 15 --proxy "${sessionProxy}" http://httpbin.org/ip 2>&1`);
+
+  // Test 8: try other ports if main port failed
+  if (!diag.tests.curl_httpbin_proxy.ok) {
+    for (const altPort of ['10002', '10003', '10004', '10005', '10006', '10007']) {
+      if (altPort === port) continue;
+      const altProxy = `http://${user}:${pass}@${host}:${altPort}`;
+      run(`curl_port_${altPort}`, `curl -s --max-time 10 --proxy "${altProxy}" http://httpbin.org/ip 2>&1`);
+      if (diag.tests[`curl_port_${altPort}`].ok && diag.tests[`curl_port_${altPort}`].output.includes('origin')) {
+        diag.workingPort = altPort;
+        console.log(`[diag] FOUND WORKING PORT: ${altPort}`);
+        break;
+      }
     }
   }
 
   selfTest.networkDiag = diag;
-  selfTest.networkDiagAt = new Date().toISOString();
-  console.log('[startup] Network diag:', JSON.stringify(diag));
-}
+  selfTest.networkDiagAt = diag.timestamp;
 
-/**
- * Try alternative proxy ports (10001-10007) if the default fails.
- */
-async function tryAlternativeProxyConfigs() {
-  const ports = ['10001', '10002', '10003', '10004', '10005'];
-  const currentPort = (config.PROXY_PORT === '7000') ? '10001' : (config.PROXY_PORT || '10001');
-
-  for (const port of ports) {
-    if (port === currentPort && selfTest.proxyResult && !selfTest.proxyResult.ok) continue; // skip already-failed port
-
-    console.log(`[startup] Trying proxy on port ${port}...`);
-    let browser = null;
+  // Determine overall proxy status from curl tests
+  const httpbinResult = diag.tests.curl_httpbin_proxy;
+  if (httpbinResult && httpbinResult.ok && httpbinResult.output.includes('origin')) {
     try {
-      const pw = require('playwright');
-      browser = await pw.chromium.launch({
-        headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox', '--no-zygote', '--single-process', '--disable-gpu', '--disable-dev-shm-usage'],
-        proxy: {
-          server: `http://${config.PROXY_HOST}:${port}`,
-          username: config.PROXY_USER,
-          password: config.PROXY_PASS,
-        },
-      });
-      const page = await browser.newPage();
-      await page.goto('https://ip.decodo.com/json', { timeout: 20000 });
-      const body = await page.textContent('body');
-      await browser.close();
-      browser = null;
-
-      const ipData = JSON.parse(body);
-      selfTest.proxyResult = { ok: true, ip: ipData.ip, country: ipData.country_code, port, note: `worked on port ${port} (no session suffix)` };
-      selfTest.proxyTestedAt = new Date().toISOString();
-      selfTest.workingPort = port;
-      console.log(`[startup] Proxy WORKS on port ${port}! IP: ${ipData.ip}`);
-      return; // Found a working config
-    } catch (err) {
-      if (browser) try { await browser.close(); } catch (_) {}
-      console.log(`[startup] Port ${port} failed: ${err.message}`);
+      const parsed = JSON.parse(httpbinResult.output);
+      selfTest.proxyResult = { ok: true, ip: parsed.origin, method: 'curl', port };
+    } catch {
+      selfTest.proxyResult = { ok: true, raw: httpbinResult.output, method: 'curl', port };
     }
+  } else if (diag.workingPort) {
+    selfTest.proxyResult = { ok: true, method: 'curl', port: diag.workingPort, note: 'worked on alt port' };
+    selfTest.workingPort = diag.workingPort;
+  } else {
+    selfTest.proxyResult = { ok: false, error: 'All curl proxy tests failed', method: 'curl', port };
   }
+  selfTest.proxyTestedAt = new Date().toISOString();
 
-  console.log('[startup] All proxy ports failed.');
+  saveResults();
+  return diag;
 }
 
 // --- Setup page: configure .env from the browser ---
@@ -595,55 +519,24 @@ app.get('/api/debug', (_req, res) => {
   res.json(info);
 });
 
-// --- Proxy test endpoint (uses regular playwright, not stealth — more stable) ---
+// --- Proxy test endpoint (uses curl, not Playwright) ---
 app.get('/api/test-proxy', async (_req, res) => {
   try { config.reloadConfig(); } catch (_) {}
-
   if (!config.PROXY_HOST || !config.PROXY_PASS) {
     return res.json({ ok: false, error: 'Proxy not configured. Save your password first.' });
   }
+  const diag = await runFullDiagnostic();
+  return res.json({ ok: !!selfTest.proxyResult?.ok, result: selfTest.proxyResult, diag: diag.tests });
+});
 
-  const proxyPort = (config.PROXY_PORT === '7000') ? '10001' : (config.PROXY_PORT || '10001');
-  const sessionId = Math.random().toString(36).substring(7);
-  const proxyUser = config.PROXY_USER ? `${config.PROXY_USER}-session-${sessionId}` : '';
-
-  const proxyInfo = {
-    host: config.PROXY_HOST,
-    port: proxyPort,
-    user: proxyUser,
-    pass_length: (config.PROXY_PASS || '').length,
-  };
-
-  let browser = null;
-  try {
-    const pw = require('playwright');
-    browser = await pw.chromium.launch({
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--no-zygote', '--single-process', '--disable-gpu', '--disable-dev-shm-usage'],
-      proxy: {
-        server: `http://${config.PROXY_HOST}:${proxyPort}`,
-        username: proxyUser,
-        password: config.PROXY_PASS,
-      },
-    });
-
-    const page = await browser.newPage();
-    await page.goto('https://ip.decodo.com/json', { timeout: 30000 });
-    const body = await page.textContent('body');
-    await browser.close();
-    browser = null;
-
-    try {
-      const ipData = JSON.parse(body);
-      return res.json({ ok: true, ip: ipData.ip, country: ipData.country_code, proxy: proxyInfo });
-    } catch {
-      return res.json({ ok: true, ip: body.trim().substring(0, 100), proxy: proxyInfo });
-    }
-  } catch (err) {
-    if (browser) try { await browser.close(); } catch (_) {}
-    console.error('[test-proxy] Error:', err.message);
-    return res.json({ ok: false, error: err.message, proxy: proxyInfo });
+// --- Serve static results file (for QA/external tools) ---
+app.get('/api/startup-results', (_req, res) => {
+  const resultsPath = path.join(__dirname, 'startup-results.json');
+  if (fs.existsSync(resultsPath)) {
+    res.setHeader('Content-Type', 'application/json');
+    return res.send(fs.readFileSync(resultsPath, 'utf8'));
   }
+  res.json({ error: 'No results yet — server may still be starting up' });
 });
 
 // --- Dashboard: auto-refreshing status page with one-tap actions ---
@@ -897,73 +790,10 @@ app.get('/api/auto-run', async (_req, res) => {
   }
 });
 
-// --- Raw TCP connectivity test to proxy server ---
-app.get('/api/diag-network', async (_req, res) => {
-  try { config.reloadConfig(); } catch (_) {}
-  const net = require('net');
-  const proxyPort = (config.PROXY_PORT === '7000') ? '10001' : (config.PROXY_PORT || '10001');
-  const host = config.PROXY_HOST || 'gate.decodo.com';
-  const results = {};
-
-  // Test 1: TCP connect to proxy
-  results.tcp_proxy = await new Promise((resolve) => {
-    const sock = net.createConnection({ host, port: parseInt(proxyPort), timeout: 10000 }, () => {
-      sock.destroy();
-      resolve({ ok: true, host, port: proxyPort });
-    });
-    sock.on('error', (err) => { sock.destroy(); resolve({ ok: false, host, port: proxyPort, error: err.message }); });
-    sock.on('timeout', () => { sock.destroy(); resolve({ ok: false, host, port: proxyPort, error: 'TCP timeout (10s)' }); });
-  });
-
-  // Test 2: TCP connect to ip.decodo.com:443 (direct, no proxy)
-  results.tcp_decodo_direct = await new Promise((resolve) => {
-    const sock = net.createConnection({ host: 'ip.decodo.com', port: 443, timeout: 10000 }, () => {
-      sock.destroy();
-      resolve({ ok: true });
-    });
-    sock.on('error', (err) => { sock.destroy(); resolve({ ok: false, error: err.message }); });
-    sock.on('timeout', () => { sock.destroy(); resolve({ ok: false, error: 'TCP timeout (10s)' }); });
-  });
-
-  // Test 3: DNS resolve proxy host
-  const dns = require('dns');
-  results.dns_proxy = await new Promise((resolve) => {
-    dns.resolve4(host, (err, addresses) => {
-      if (err) return resolve({ ok: false, error: err.message });
-      resolve({ ok: true, addresses });
-    });
-  });
-
-  // Test 4: Try HTTP CONNECT through proxy (raw)
-  results.http_connect = await new Promise((resolve) => {
-    const sock = net.createConnection({ host, port: parseInt(proxyPort), timeout: 15000 }, () => {
-      const sessionId = Math.random().toString(36).substring(7);
-      const proxyUser = config.PROXY_USER ? `${config.PROXY_USER}-session-${sessionId}` : config.PROXY_USER;
-      const auth = Buffer.from(`${proxyUser}:${config.PROXY_PASS}`).toString('base64');
-      sock.write(`CONNECT ip.decodo.com:443 HTTP/1.1\r\nHost: ip.decodo.com:443\r\nProxy-Authorization: Basic ${auth}\r\n\r\n`);
-
-      let data = '';
-      sock.on('data', (chunk) => {
-        data += chunk.toString();
-        if (data.includes('\r\n\r\n')) {
-          sock.destroy();
-          const statusLine = data.split('\r\n')[0];
-          resolve({ ok: statusLine.includes('200'), response: statusLine });
-        }
-      });
-      sock.on('timeout', () => { sock.destroy(); resolve({ ok: false, error: 'HTTP CONNECT timeout (15s)' }); });
-    });
-    sock.on('error', (err) => { sock.destroy(); resolve({ ok: false, error: err.message }); });
-    sock.on('timeout', () => { sock.destroy(); resolve({ ok: false, error: 'TCP timeout (15s)' }); });
-  });
-
-  res.json(results);
-});
-
 // --- Retest proxy endpoint ---
 app.get('/api/retest-proxy', async (_req, res) => {
-  res.json({ ok: true, message: 'Proxy retest started. Check /car-offers/api/status in 15-20s.' });
-  await runProxyTest();
+  res.json({ ok: true, message: 'Proxy retest started. Check /car-offers/api/status in 20-30s.' });
+  await runFullDiagnostic();
 });
 
 // --- Browser diagnostic: can Chromium launch at all? ---
@@ -1054,15 +884,7 @@ app.listen(port, '0.0.0.0', () => {
 
   // Run full diagnostics 5 seconds after startup
   setTimeout(async () => {
-    console.log('[startup] Running full network diagnostics...');
-    await runNetworkDiag();
-    console.log('[startup] Running proxy self-test...');
-    await runProxyTest();
-
-    // If proxy test failed, try alternative configs
-    if (selfTest.proxyResult && !selfTest.proxyResult.ok) {
-      console.log('[startup] Proxy failed — trying alternative ports...');
-      await tryAlternativeProxyConfigs();
-    }
+    console.log('[startup] Running full curl-based diagnostics...');
+    await runFullDiagnostic();
   }, 5000);
 });
