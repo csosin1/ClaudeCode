@@ -52,4 +52,12 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add car-offers/results/proxy-diag.txt
-          git diff --cached --quiet || (git commit -m "diag: proxy diagnostic results [skip ci]" && git push)
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "diag: proxy diagnostic results [skip ci]"
+            # Retry push up to 3 times (other chats may push concurrently)
+            for i in 1 2 3; do
+              git pull --rebase origin main && git push && break || sleep 5
+            done
+          fi
