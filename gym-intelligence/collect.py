@@ -290,23 +290,42 @@ def write_snapshots(conn, today: str):
     logger.info("Wrote %d snapshot rows for %s", len(rows), today)
 
 
-def run_collection():
-    """Run the full data collection pipeline."""
+def run_collection(progress_cb=None):
+    """Run the full data collection pipeline.
+
+    progress_cb: optional callable(msg: str) for live progress updates.
+    """
+    def log(msg):
+        logger.info(msg)
+        if progress_cb:
+            progress_cb(msg)
+
     init_db()
     today = date.today().isoformat()
     all_seen = set()
+    total_locations = 0
 
     with get_db() as conn:
-        for country_code in COUNTRY_BBOXES:
+        country_names = {
+            "NL": "Netherlands", "BE": "Belgium", "FR": "France",
+            "ES": "Spain", "LU": "Luxembourg", "DE": "Germany",
+        }
+        country_list = list(COUNTRY_BBOXES.keys())
+        for i, country_code in enumerate(country_list, 1):
+            cname = country_names.get(country_code, country_code)
+            log(f"Collecting {cname} ({i}/{len(country_list)})...")
             try:
                 locations = collect_country(country_code)
                 seen = upsert_locations(conn, locations, today)
                 all_seen.update(seen)
-                logger.info("Upserted %d locations for %s", len(locations), country_code)
+                total_locations += len(locations)
+                log(f"  {cname}: {len(locations)} gyms found ({total_locations} total)")
 
                 # Pause between countries to be kind to Overpass
-                time.sleep(10)
+                if i < len(country_list):
+                    time.sleep(10)
             except Exception as e:
+                log(f"  {cname}: FAILED — {e}")
                 logger.error("Failed to collect %s: %s", country_code, e)
 
         # Mark locations not seen in this pull as inactive
@@ -318,11 +337,17 @@ def run_collection():
             )
 
         # Assign chains and update counts
+        log("Normalizing chain names...")
         assign_chains(conn)
         update_chain_location_counts(conn)
+
+        chain_count = conn.execute("SELECT COUNT(*) as c FROM chains WHERE location_count > 0").fetchone()["c"]
+        log(f"Identified {chain_count} distinct chains")
+
+        log("Writing snapshots...")
         write_snapshots(conn, today)
 
-    logger.info("Collection complete")
+    log(f"Collection complete: {total_locations} gyms across {len(country_list)} countries")
 
 
 if __name__ == "__main__":
