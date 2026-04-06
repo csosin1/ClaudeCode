@@ -114,6 +114,35 @@ app.get('/setup', (_req, res) => {
 
     <button type="submit">Save Configuration</button>
   </form>
+
+  <div class="card" style="margin-top:20px;">
+    <button id="testBtn" type="button" onclick="testProxy()" style="background:#059669;">Test Proxy Connection</button>
+    <div id="testResult" style="margin-top:12px;font-size:0.9rem;text-align:center;"></div>
+  </div>
+
+  <script>
+    async function testProxy() {
+      const btn = document.getElementById('testBtn');
+      const result = document.getElementById('testResult');
+      btn.disabled = true;
+      btn.textContent = 'Testing...';
+      result.innerHTML = '<span style="color:#94a3b8;">Launching browser through proxy... (10-20s)</span>';
+      try {
+        const resp = await fetch('/car-offers/api/test-proxy');
+        const data = await resp.json();
+        if (data.ok) {
+          result.innerHTML = '<span style="color:#4ade80;">Proxy working! IP: ' + (data.ip || 'unknown') + ' (' + (data.country || '?') + ')</span>';
+        } else {
+          result.innerHTML = '<span style="color:#f87171;">Proxy failed: ' + (data.error || 'unknown error') + '</span>';
+        }
+      } catch (e) {
+        result.innerHTML = '<span style="color:#f87171;">Request failed: ' + e.message + '</span>';
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Test Proxy Connection';
+      }
+    }
+  </script>
 </body>
 </html>`);
 });
@@ -366,6 +395,40 @@ app.get('/', (_req, res) => {
   </script>
 </body>
 </html>`);
+});
+
+// --- Proxy test endpoint ---
+app.get('/api/test-proxy', async (_req, res) => {
+  try { config.reloadConfig(); } catch (_) {}
+
+  if (!config.PROXY_HOST || !config.PROXY_PASS) {
+    return res.json({ ok: false, error: 'Proxy not configured. Save your password first.' });
+  }
+
+  let browser = null;
+  try {
+    const { launchBrowser, closeBrowser } = require('./lib/browser');
+    const result = await launchBrowser();
+    browser = result.browser;
+    const page = result.page;
+
+    // Hit Decodo's IP check endpoint through the proxy
+    await page.goto('https://ip.decodo.com/json', { timeout: 20000 });
+    const body = await page.textContent('body');
+    await closeBrowser(browser);
+    browser = null;
+
+    try {
+      const ipData = JSON.parse(body);
+      return res.json({ ok: true, ip: ipData.ip, country: ipData.country_code, raw: ipData });
+    } catch {
+      return res.json({ ok: true, ip: body.trim().substring(0, 100) });
+    }
+  } catch (err) {
+    if (browser) try { await browser.close(); } catch (_) {}
+    console.error('[test-proxy] Error:', err.message);
+    return res.json({ ok: false, error: err.message });
+  }
 });
 
 // --- API endpoint ---
