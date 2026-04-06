@@ -7,6 +7,52 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
+// --- Startup self-test state ---
+const selfTest = {
+  proxyResult: null,
+  proxyTestedAt: null,
+  startedAt: new Date().toISOString(),
+  lastCarvanaRun: null,
+};
+
+/**
+ * Run a proxy connectivity test in the background.
+ * Stores result in selfTest for the /api/status endpoint.
+ */
+async function runProxyTest() {
+  try { config.reloadConfig(); } catch (_) {}
+  if (!config.PROXY_HOST || !config.PROXY_PASS) {
+    selfTest.proxyResult = { ok: false, error: 'Proxy not configured (no password)' };
+    selfTest.proxyTestedAt = new Date().toISOString();
+    return;
+  }
+
+  let browser = null;
+  try {
+    const { launchBrowser, closeBrowser } = require('./lib/browser');
+    const result = await launchBrowser();
+    browser = result.browser;
+    const page = result.page;
+
+    await page.goto('https://ip.decodo.com/json', { timeout: 25000 });
+    const body = await page.textContent('body');
+    await closeBrowser(browser);
+    browser = null;
+
+    try {
+      const ipData = JSON.parse(body);
+      selfTest.proxyResult = { ok: true, ip: ipData.ip, country: ipData.country_code };
+    } catch {
+      selfTest.proxyResult = { ok: true, ip: body.trim().substring(0, 100) };
+    }
+  } catch (err) {
+    if (browser) try { await browser.close(); } catch (_) {}
+    selfTest.proxyResult = { ok: false, error: err.message };
+  }
+  selfTest.proxyTestedAt = new Date().toISOString();
+  console.log(`[self-test] Proxy test result:`, JSON.stringify(selfTest.proxyResult));
+}
+
 // --- Setup page: configure .env from the browser ---
 app.get('/setup', (_req, res) => {
   // Reload config from disk in case .env was written after server started
@@ -448,6 +494,260 @@ app.get('/api/test-proxy', async (_req, res) => {
   }
 });
 
+// --- Dashboard: auto-refreshing status page with one-tap actions ---
+app.get('/dashboard', (_req, res) => {
+  res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Car Offers — Dashboard</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; padding: 16px; }
+    h1 { font-size: 1.4rem; text-align: center; margin: 8px 0 16px; color: #38bdf8; }
+    .card { background: #1e293b; border-radius: 12px; padding: 16px; max-width: 480px; margin: 0 auto 12px; }
+    .card h2 { font-size: 1rem; color: #94a3b8; margin-bottom: 8px; }
+    .row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 0.85rem; border-bottom: 1px solid #334155; }
+    .row:last-child { border-bottom: none; }
+    .label { color: #94a3b8; }
+    .val { color: #f1f5f9; font-weight: 500; }
+    .ok { color: #4ade80; }
+    .fail { color: #f87171; }
+    .pending { color: #fbbf24; }
+    button { width: 100%; margin-top: 12px; padding: 14px; border: none; border-radius: 8px; color: #fff; font-size: 1rem; font-weight: 600; cursor: pointer; }
+    .btn-blue { background: #0ea5e9; }
+    .btn-green { background: #059669; }
+    .btn-orange { background: #d97706; }
+    button:disabled { background: #334155; cursor: not-allowed; }
+    #log { margin-top: 8px; font-size: 0.8rem; color: #94a3b8; text-align: center; min-height: 20px; }
+    .offer-big { font-size: 2rem; font-weight: 700; color: #4ade80; text-align: center; margin: 8px 0; }
+    .error-big { font-size: 1rem; color: #f87171; text-align: center; margin: 8px 0; word-break: break-word; }
+  </style>
+</head>
+<body>
+  <h1>Car Offers Dashboard</h1>
+
+  <div class="card" id="proxyCard">
+    <h2>Proxy Status</h2>
+    <div id="proxyInfo"><span class="pending">Loading...</span></div>
+    <button class="btn-green" id="retestBtn" onclick="retestProxy()">Retest Proxy</button>
+  </div>
+
+  <div class="card">
+    <h2>Run Carvana Offer (Test VIN)</h2>
+    <div class="row"><span class="label">VIN</span><span class="val">1HGCV2F9XNA008352</span></div>
+    <div class="row"><span class="label">Vehicle</span><span class="val">2022 Honda Accord Touring</span></div>
+    <div class="row"><span class="label">Mileage</span><span class="val">48,000</span></div>
+    <div class="row"><span class="label">Zip</span><span class="val">06880</span></div>
+    <button class="btn-blue" id="runBtn" onclick="runCarvana()">Get Carvana Offer</button>
+    <div id="log"></div>
+  </div>
+
+  <div class="card" id="resultCard" style="display:none;">
+    <h2>Last Carvana Result</h2>
+    <div id="resultContent"></div>
+  </div>
+
+  <div class="card">
+    <a href="/car-offers/setup" style="color:#38bdf8;text-decoration:none;font-size:0.9rem;">Setup Page &rarr;</a>
+  </div>
+
+  <script>
+    async function loadStatus() {
+      try {
+        const resp = await fetch('/car-offers/api/status');
+        const data = await resp.json();
+        renderProxy(data.proxy);
+        if (data.lastCarvanaRun) renderResult(data.lastCarvanaRun);
+      } catch (e) {
+        document.getElementById('proxyInfo').innerHTML = '<span class="fail">Failed to load: ' + e.message + '</span>';
+      }
+    }
+
+    function renderProxy(p) {
+      if (!p) return;
+      let html = '';
+      html += row('Host', p.host || '(not set)');
+      html += row('Port', p.port || '(not set)');
+      html += row('Password', p.pass_set ? '<span class="ok">Set (' + p.pass_length + ' chars)</span>' : '<span class="fail">NOT SET</span>');
+      if (p.test_result) {
+        if (p.test_result.ok) {
+          html += row('Test', '<span class="ok">PASS — IP: ' + (p.test_result.ip || '?') + ' (' + (p.test_result.country || '?') + ')</span>');
+        } else {
+          html += row('Test', '<span class="fail">FAIL — ' + esc(p.test_result.error || 'unknown') + '</span>');
+        }
+        html += row('Tested', p.tested_at ? new Date(p.tested_at).toLocaleString() : 'never');
+      } else {
+        html += row('Test', '<span class="pending">Not tested yet</span>');
+      }
+      document.getElementById('proxyInfo').innerHTML = html;
+    }
+
+    function renderResult(r) {
+      const card = document.getElementById('resultCard');
+      const content = document.getElementById('resultContent');
+      card.style.display = 'block';
+      if (r.offer) {
+        content.innerHTML = '<div class="offer-big">' + esc(r.offer) + '</div>' +
+          row('VIN', r.vin || '') + row('Completed', r.completed_at ? new Date(r.completed_at).toLocaleString() : '');
+      } else if (r.error) {
+        content.innerHTML = '<div class="error-big">' + esc(r.error) + '</div>' +
+          row('VIN', r.vin || '') + row('Completed', r.completed_at ? new Date(r.completed_at).toLocaleString() : '');
+      }
+    }
+
+    function row(label, value) {
+      return '<div class="row"><span class="label">' + esc(label) + '</span><span class="val">' + value + '</span></div>';
+    }
+
+    function esc(s) {
+      const d = document.createElement('div');
+      d.textContent = s;
+      return d.innerHTML;
+    }
+
+    async function retestProxy() {
+      const btn = document.getElementById('retestBtn');
+      btn.disabled = true; btn.textContent = 'Testing...';
+      try {
+        await fetch('/car-offers/api/retest-proxy');
+        // Poll status every 5s for up to 30s
+        for (let i = 0; i < 6; i++) {
+          await new Promise(r => setTimeout(r, 5000));
+          await loadStatus();
+        }
+      } catch (e) {
+        document.getElementById('proxyInfo').innerHTML += '<br><span class="fail">' + e.message + '</span>';
+      }
+      btn.disabled = false; btn.textContent = 'Retest Proxy';
+    }
+
+    async function runCarvana() {
+      const btn = document.getElementById('runBtn');
+      const log = document.getElementById('log');
+      btn.disabled = true; btn.textContent = 'Running...';
+      log.innerHTML = '<span class="pending">Launching browser, navigating Carvana... (1-3 min)</span>';
+      try {
+        const resp = await fetch('/car-offers/api/auto-run');
+        const data = await resp.json();
+        if (!data.ok) {
+          log.innerHTML = '<span class="fail">' + esc(data.error) + '</span>';
+          btn.disabled = false; btn.textContent = 'Get Carvana Offer';
+          return;
+        }
+        log.innerHTML = '<span class="pending">Request sent. Polling for results...</span>';
+        // Poll status every 10s for up to 4 min
+        for (let i = 0; i < 24; i++) {
+          await new Promise(r => setTimeout(r, 10000));
+          const st = await (await fetch('/car-offers/api/status')).json();
+          if (st.lastCarvanaRun && st.lastCarvanaRun.completed_at) {
+            renderResult(st.lastCarvanaRun);
+            log.innerHTML = '<span class="ok">Done!</span>';
+            break;
+          }
+          log.innerHTML = '<span class="pending">Still running... (' + ((i + 1) * 10) + 's)</span>';
+        }
+      } catch (e) {
+        log.innerHTML = '<span class="fail">Error: ' + esc(e.message) + '</span>';
+      }
+      btn.disabled = false; btn.textContent = 'Get Carvana Offer';
+    }
+
+    // Load on page open + refresh every 30s
+    loadStatus();
+    setInterval(loadStatus, 30000);
+  </script>
+</body>
+</html>`);
+});
+
+// --- Status endpoint (shows proxy test + last run results) ---
+app.get('/api/status', (_req, res) => {
+  try { config.reloadConfig(); } catch (_) {}
+  res.json({
+    service: {
+      startedAt: selfTest.startedAt,
+      uptime_seconds: Math.floor(process.uptime()),
+      node_version: process.version,
+    },
+    proxy: {
+      configured: !!(config.PROXY_HOST && config.PROXY_PASS),
+      host: config.PROXY_HOST,
+      port: config.PROXY_PORT,
+      user: config.PROXY_USER,
+      pass_set: !!config.PROXY_PASS,
+      pass_length: (config.PROXY_PASS || '').length,
+      test_result: selfTest.proxyResult,
+      tested_at: selfTest.proxyTestedAt,
+    },
+    lastCarvanaRun: selfTest.lastCarvanaRun,
+  });
+});
+
+// --- Auto-run: trigger the test VIN Carvana offer automatically ---
+// GET /api/auto-run — runs the test VIN (2022 Honda Accord) through Carvana
+// This lets us trigger a test without any manual form filling
+app.get('/api/auto-run', async (_req, res) => {
+  const testVin = _req.query.vin || '1HGCV2F9XNA008352';
+  const testMileage = _req.query.mileage || '48000';
+  const testZip = _req.query.zip || '06880';
+
+  // Don't run if proxy isn't configured
+  try { config.reloadConfig(); } catch (_) {}
+  if (!config.PROXY_HOST || !config.PROXY_PASS) {
+    return res.json({
+      ok: false,
+      error: 'Proxy not configured. Go to /car-offers/setup and enter the proxy password first.',
+    });
+  }
+
+  let getCarvanaOffer;
+  try {
+    ({ getCarvanaOffer } = require('./lib/carvana'));
+  } catch (loadErr) {
+    return res.json({ ok: false, error: `Carvana module not available: ${loadErr.message}` });
+  }
+
+  console.log(`[auto-run] Starting Carvana offer for VIN=${testVin} mileage=${testMileage} zip=${testZip}`);
+  res.json({
+    ok: true,
+    message: `Running Carvana offer for VIN ${testVin}. Check /car-offers/api/status for results (takes 1-3 min).`,
+    started_at: new Date().toISOString(),
+  });
+
+  // Run in background (don't block the HTTP response)
+  try {
+    const result = await getCarvanaOffer({
+      vin: testVin,
+      mileage: testMileage,
+      zip: testZip,
+      email: config.PROJECT_EMAIL || 'caroffers.tool@gmail.com',
+    });
+    selfTest.lastCarvanaRun = {
+      ...result,
+      vin: testVin,
+      mileage: testMileage,
+      zip: testZip,
+      completed_at: new Date().toISOString(),
+    };
+    console.log(`[auto-run] Carvana result:`, JSON.stringify(selfTest.lastCarvanaRun));
+  } catch (err) {
+    selfTest.lastCarvanaRun = {
+      error: err.message,
+      vin: testVin,
+      completed_at: new Date().toISOString(),
+    };
+    console.error(`[auto-run] Carvana error:`, err.message);
+  }
+});
+
+// --- Retest proxy endpoint ---
+app.get('/api/retest-proxy', async (_req, res) => {
+  res.json({ ok: true, message: 'Proxy retest started. Check /car-offers/api/status in 15-20s.' });
+  await runProxyTest();
+});
+
 // --- API endpoint ---
 app.post('/api/carvana', async (req, res) => {
   const { vin, mileage, zip } = req.body || {};
@@ -482,4 +782,12 @@ app.post('/api/carvana', async (req, res) => {
 const port = config.PORT;
 app.listen(port, '0.0.0.0', () => {
   console.log(`Car Offer Tool running on http://0.0.0.0:${port}`);
+
+  // Run proxy self-test 5 seconds after startup (gives time for .env to be ready)
+  setTimeout(() => {
+    console.log('[startup] Running proxy self-test...');
+    runProxyTest().catch((err) => {
+      console.error('[startup] Proxy self-test error:', err.message);
+    });
+  }, 5000);
 });

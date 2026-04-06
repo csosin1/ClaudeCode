@@ -1,6 +1,53 @@
 # Change Log
 # Webhook test 1775397948
 
+## 2026-04-06 Car Offers: Dashboard + Auto-Run + Self-Test
+- What was built: Added dashboard page, startup proxy self-test, and auto-run endpoint to car-offers
+- Files modified:
+  - `car-offers/server.js` — Added `/dashboard` (status page with one-tap actions), `/api/status` (JSON health), `/api/auto-run` (triggers test VIN), `/api/retest-proxy`, startup self-test
+- Tests added: None (infrastructure chat owns QA tests)
+- What the dashboard shows: proxy health (IP, country, pass/fail), one-tap "Get Carvana Offer" for test VIN, auto-polling for results
+- How to use: Visit http://159.223.127.125/car-offers/dashboard from phone
+
+### INFRASTRUCTURE CHANGE PROPOSALS (for infrastructure chat)
+
+**Proposal 1: Add QA test for car-offers dashboard**
+Add to `tests/qa-smoke.spec.ts`:
+```typescript
+test.describe('Car Offers Dashboard', () => {
+  test('dashboard loads', async ({ page }) => {
+    await page.goto('/car-offers/dashboard');
+    await expect(page.locator('h1')).toContainText('Car Offers Dashboard');
+  });
+  test('status API returns JSON', async ({ page }) => {
+    const resp = await page.request.get('/car-offers/api/status');
+    expect(resp.ok()).toBeTruthy();
+    const data = await resp.json();
+    expect(data.service).toBeTruthy();
+    expect(data.proxy).toBeTruthy();
+  });
+});
+```
+
+**Proposal 2: Add car-offers error log to diagnostics**
+In `deploy/auto_deploy_general.sh`, add to the diagnostics step:
+```bash
+echo "  \"car_offers_error_log\": \"$(tail -5 /var/log/car-offers/error.log 2>/dev/null | tr '\n' ' ' || echo 'no log')\","
+```
+This would let us see recent server errors from debug.json.
+
+**Proposal 3: npm install on every deploy (not just first time)**
+Currently the deploy script only runs `npm install` if `node_modules/express` is missing. This means new dependencies (like `playwright` which was added later) don't get installed on redeploy. Change the condition to check `package.json` mtime:
+```bash
+# npm install if package.json is newer than node_modules
+if [ "$REPO_DIR/car-offers/package.json" -nt /opt/car-offers/node_modules/.package-lock.json ] || [ ! -d /opt/car-offers/node_modules/express ]; then
+    echo "$(date): npm install for car-offers..." >> "$LOG"
+    cd /opt/car-offers && "$NPM_BIN" install --production >> "$LOG" 2>&1
+fi
+```
+
+---
+
 ## 2026-04-05 Goal 1: Carvana Offer Automation
 - What was built: Full Carvana "Sell My Car" automation — stealth browser launcher, Carvana flow script, CLI entry point, and Express web UI for iPhone use
 - Files created:
