@@ -15,7 +15,9 @@ Deploy the gym-intelligence Streamlit app to the droplet as a persistent process
 - nginx reverse proxy with WebSocket support
 
 ## Builder Output
-(pending)
+- Modified `gym-intelligence/app.py`: added baseUrlPath docstring, default-to-Setup-page when API key missing
+- Appended full infrastructure proposals to `CHANGES.md` covering: deploy script (venv + systemd), nginx (WebSocket proxy), landing page card, QA tests
+- All infra changes use lessons learned: absolute paths in systemd, verify-before-flag, fast sync first, lazy deps
 
 ## Reviewer Verdict
 (pending)

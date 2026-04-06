@@ -1,4 +1,8 @@
-"""Streamlit web UI for gym intelligence tool."""
+"""Streamlit web UI for gym intelligence tool.
+
+Deployed behind nginx at /gym-intelligence/ — Streamlit's server.baseUrlPath
+is set via CLI flag in the systemd unit (--server.baseUrlPath=/gym-intelligence).
+"""
 
 import csv
 import io
@@ -85,11 +89,14 @@ init_db()
 
 # ---------------------------------------------------------------------------
 # Navigation — include Setup page
+# Default to Setup if API key isn't configured yet (first-run experience)
 # ---------------------------------------------------------------------------
 PAGES = ["Market Overview", "Chain Explorer", "Competitive Analysis", "Admin / Refresh", "Setup"]
+_default_page = "Setup" if not _get_api_key() else "Market Overview"
 page = st.selectbox(
     "Navigate",
     PAGES,
+    index=PAGES.index(_default_page),
     label_visibility="collapsed",
 )
 
