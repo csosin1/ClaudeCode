@@ -34,3 +34,18 @@
 - **What went wrong:** server.js did `require('./lib/carvana')` at the top level, which loads playwright-extra. If npm install hasn't completed on the droplet, Node crashes on startup and PM2 loops forever. The Express server never comes up.
 - **Root cause:** Eager loading of a module that depends on Playwright, which may not be installed yet during first deploy.
 - **What to do differently:** Lazy-load heavy dependencies (Playwright, Puppeteer, etc.) inside the route handler that uses them, not at module load time. Return a 503 with a clear message if deps aren't ready yet.
+
+## 2026-04-06 Node.js Not in PATH on Droplet
+- **What went wrong:** Deploy script used bare `node`, `npm`, `npx` commands. On the droplet, Node.js was not installed in the default PATH. All npm install commands silently failed ("command not found") but the `.npm_installed` flag was still set. The systemd service used `/usr/bin/node` which didn't exist. Express server never started → persistent 502 for hours.
+- **Root cause:** Node.js wasn't installed on the droplet at all until the deploy script installed it via nodesource. The script assumed `node` was available.
+- **What to do differently:** Never assume runtime binaries are in PATH on the droplet. Always discover the binary path first (check /usr/local/bin, /usr/bin, nvm paths, `command -v`). Use absolute paths for systemd ExecStart. Only set success flags AFTER verifying the operation actually worked (e.g., check `node_modules/express` exists after npm install). Add a nodesource fallback installer.
+
+## 2026-04-06 WebFetch QA Results Are Unreliable
+- **What went wrong:** WebFetch reported QA runs as "passed" when they were actually failing. Made multiple decisions based on false positive results. User reported receiving failure emails while I was reporting success.
+- **Root cause:** WebFetch has a 15-minute cache and returns stale/incorrect data. GitHub Actions pages require authentication to view full details, so WebFetch gets limited/wrong information.
+- **What to do differently:** Never trust WebFetch for QA results. Use the diagnostics-to-issue-comment pipeline instead: QA workflow fetches debug.json and posts server state to GitHub issue #3, which can be read via authenticated MCP tools. This is the only reliable way to get server diagnostics from the sandbox.
+
+## 2026-04-06 Deploy Script Self-Update Requires Two Deploys
+- **What went wrong:** Updated the deploy script with Node.js discovery code, but the fix didn't take effect on the first deploy. The old script was already loaded in memory; it copies the new script to /opt/ (STEP 0) but continues running the old logic.
+- **Root cause:** The self-update mechanism copies the new script for the NEXT run. The currently-executing bash process still has the old script in memory.
+- **What to do differently:** After any critical deploy script fix, always push a second trivial commit to trigger a follow-up deploy that will execute the new script. The pattern is: push fix → deploys (copies new script) → push trigger → deploys (runs new script).

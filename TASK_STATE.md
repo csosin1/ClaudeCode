@@ -4,7 +4,7 @@ CLAUDE.md version: 1.0
 Status:            qa
 Spec approved:     yes
 Rollback tag:      rollback-20260406-pre-car-offers (local only — push blocked)
-Resume hint:       QA passed for infrastructure. User needs to enter proxy password at /car-offers/setup, then test a real Carvana offer.
+Resume hint:       502 FIXED. Server is running (port 3100 listening, systemd active). Node.js was not in PATH — fixed via auto-discovery + nodesource install. User needs to enter proxy password at /car-offers/setup, then test a real Carvana offer.
 
 ## Spec
 Get one real Carvana offer for a 2022 Honda Accord Touring (VIN 1HGCV2F9XNA008352), zip 06880, ~48k miles. Playwright automates the sell-my-car flow. Express server lets user trigger from iPhone.
@@ -19,11 +19,10 @@ Get one real Carvana offer for a 2022 Honda Accord Touring (VIN 1HGCV2F9XNA00835
 PASS WITH NOTES — rate limiting, stricter validation, helmet for later.
 
 ## QA Result
-Run: #27 (Fix deploy: static files sync first, heavy setup runs after)
-Verdict: PASS
-Tests: All passed (1m 21s)
-Failed tests: none
-Fix cycles used: 2 (deploy blocking fix + lazy-load fix)
+Run: #36 (Node.js path fix deployed, server is running)
+Verdict: PENDING — server is up (port 3100 listening), awaiting full QA pass confirmation
+Diagnostics: Node v22.22.2 at /usr/bin/node, npm 10.9.7, express installed, systemd active
+Fix cycles used: 5 (deploy blocking + lazy-load + deadlock + Node PATH + trigger)
 
 ## Blockers
 - User needs to enter proxy password at http://159.223.127.125/car-offers/setup
