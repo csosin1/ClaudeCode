@@ -255,7 +255,7 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
     await screenshot(page, '02-vin-entered');
 
     // Submit VIN — try button click or Enter key
-    const submitSelectors = [
+    const vinSubmitSelectors = [
       'button[type="submit"]',
       'button:has-text("Get Offer")',
       'button:has-text("Next")',
@@ -265,7 +265,7 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
     ];
 
     let submitted = false;
-    for (const sel of submitSelectors) {
+    for (const sel of vinSubmitSelectors) {
       try {
         const btn = await page.waitForSelector(sel, { timeout: 3000 });
         if (btn) {
@@ -295,246 +295,192 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
       return { error: 'blocked' };
     }
 
-    // --- Step 3: Vehicle confirmation — extract make/model/year ---
-    console.log('[carvana] Step 3: Checking vehicle confirmation...');
-    let vehicleDetails = {};
-    try {
-      // Look for vehicle info text on the page
-      const bodyText = await page.textContent('body');
-      // Try to extract year/make/model from page text
-      const carMatch = bodyText.match(/(\d{4})\s+([\w-]+)\s+([\w-]+)/);
-      if (carMatch) {
-        vehicleDetails = {
-          year: carMatch[1],
-          make: carMatch[2],
-          model: carMatch[3],
-        };
-        console.log(`  [carvana] Vehicle: ${carMatch[1]} ${carMatch[2]} ${carMatch[3]}`);
-      }
-    } catch {
-      // Non-critical
-    }
+    // --- Steps 3-7: Navigate through Carvana's multi-step wizard ---
+    // The flow is URL-based: /getoffer/vehicle, /getoffer/mileage, etc.
+    // Instead of hardcoded steps, we adaptively handle whatever page appears.
+    console.log('[carvana] Steps 3-7: Navigating wizard...');
 
-    // --- Step 4: Enter mileage ---
-    console.log('[carvana] Step 4: Entering mileage...');
-    checkTimeout();
-
-    const mileageSelectors = [
-      'input[placeholder*="ileage"]',
-      'input[placeholder*="miles"]',
-      'input[name="mileage"]',
-      'input[data-testid="mileage-input"]',
-      'input[aria-label*="ileage"]',
-      'input[type="number"]',
+    const submitSelectors = [
+      'button[type="submit"]',
+      'button:has-text("Get Offer")',
+      'button:has-text("Next")',
+      'button:has-text("Continue")',
+      'button:has-text("Get My Offer")',
+      'button:has-text("Get Started")',
+      'button:has-text("Submit")',
+      'button:has-text("Confirm")',
+      'button:has-text("Yes")',
+      'button:has-text("See Offer")',
+      'button:has-text("View Offer")',
     ];
 
-    let mileageInput = null;
-    for (const sel of mileageSelectors) {
-      try {
-        mileageInput = await page.waitForSelector(sel, { timeout: 5000 });
-        if (mileageInput) {
-          console.log(`  [carvana] Found mileage input with: ${sel}`);
-          break;
-        }
-      } catch {
-        continue;
-      }
-    }
-
-    if (!mileageInput) {
-      try {
-        const byPlaceholder = page.getByPlaceholder(/mile/i);
-        await byPlaceholder.waitFor({ timeout: 5000 });
-        mileageInput = await byPlaceholder.elementHandle();
-      } catch {
-        // Continue — mileage may appear on a later step
-      }
-    }
-
-    if (mileageInput) {
-      await mileageInput.click();
-      for (const char of String(mileage)) {
-        await mileageInput.type(char, { delay: 0 });
-        await new Promise((r) => setTimeout(r, Math.floor(Math.random() * 100) + 50));
-      }
-      await humanDelay(1000, 2000);
-
-      // Submit mileage
-      for (const sel of submitSelectors) {
-        try {
-          const btn = await page.waitForSelector(sel, { timeout: 3000 });
-          if (btn) {
-            await btn.click();
-            break;
-          }
-        } catch {
-          continue;
-        }
-      }
-      await humanDelay(3000, 5000);
-      await screenshot(page, '04-mileage');
-    } else {
-      console.log('  [carvana] No mileage input found — may be on a different step');
-    }
-
-    checkTimeout();
-
-    // --- Step 5: Condition questions ---
-    console.log('[carvana] Step 5: Answering condition questions...');
-
-    // Look for condition-related buttons/options and select "Good" or positive options
-    const conditionKeywords = ['good', 'excellent', 'no', 'none', 'clean'];
-    for (const keyword of conditionKeywords) {
-      try {
-        const btns = await page.$$(`button:has-text("${keyword}"), label:has-text("${keyword}"), [role="radio"]:has-text("${keyword}")`);
-        for (const btn of btns) {
-          if (await btn.isVisible()) {
-            await humanDelay(1000, 2000);
-            await btn.click();
-            console.log(`  [carvana] Selected condition option: ${keyword}`);
-          }
-        }
-      } catch {
-        continue;
-      }
-    }
-
-    // Click through any "Next" / "Continue" buttons for condition pages
-    for (let i = 0; i < 5; i++) {
+    // Generic "click through the wizard" loop — handles up to 15 pages
+    for (let step = 0; step < 15; step++) {
       checkTimeout();
-      let clicked = false;
-      for (const sel of submitSelectors) {
-        try {
-          const btn = await page.waitForSelector(sel, { timeout: 3000 });
-          if (btn && (await btn.isVisible())) {
-            await humanDelay(1500, 3000);
-            await btn.click();
-            clicked = true;
-            break;
-          }
-        } catch {
-          continue;
-        }
-      }
-      if (!clicked) break;
-      await humanDelay(2000, 4000);
+      const currentUrl = page.url();
+      console.log(`[carvana] Wizard step ${step}: URL = ${currentUrl}`);
+      await screenshot(page, `wizard-${step}`);
 
-      // Check for more condition questions
-      const hasCondition = await page.$('button:has-text("Good"), button:has-text("Excellent"), button:has-text("None")');
-      if (hasCondition) {
-        try {
-          await hasCondition.click();
-        } catch {
-          // ignore
-        }
-      } else {
-        break;
-      }
-    }
-
-    await screenshot(page, '05-condition');
-    checkTimeout();
-
-    // --- Step 6: Enter zip code ---
-    console.log('[carvana] Step 6: Entering zip code...');
-
-    const zipSelectors = [
-      'input[placeholder*="ip"]',
-      'input[placeholder*="zip"]',
-      'input[name="zip"]',
-      'input[name="zipCode"]',
-      'input[data-testid="zip-input"]',
-      'input[aria-label*="ip"]',
-      'input[maxlength="5"]',
-    ];
-
-    let zipInput = null;
-    for (const sel of zipSelectors) {
+      // Check if we've reached the offer page (contains dollar amount)
       try {
-        zipInput = await page.waitForSelector(sel, { timeout: 5000 });
-        if (zipInput) {
-          console.log(`  [carvana] Found zip input with: ${sel}`);
-          break;
+        const bodyText = await page.textContent('body');
+        const dollarMatch = bodyText.match(/\$\s?[\d,]{3,}/g);
+        if (dollarMatch && dollarMatch.length > 0) {
+          const amounts = dollarMatch.map((s) => parseInt(s.replace(/[$,\s]/g, ''), 10));
+          const maxAmount = Math.max(...amounts);
+          if (maxAmount > 500) {
+            console.log(`[carvana] OFFER FOUND on wizard step ${step}: $${maxAmount.toLocaleString()}`);
+            break; // Exit wizard loop — we have an offer
+          }
         }
       } catch {
-        continue;
+        // Continue
       }
-    }
 
-    if (zipInput) {
-      await zipInput.click();
-      await zipInput.fill(''); // Clear any existing value
-      for (const char of String(zip)) {
-        await zipInput.type(char, { delay: 0 });
-        await new Promise((r) => setTimeout(r, Math.floor(Math.random() * 100) + 50));
+      if (await isBlocked(page)) {
+        console.log('[carvana] Blocked during wizard navigation');
+        await screenshot(page, 'blocked-wizard');
+        return { error: 'blocked', details: vehicleDetails };
       }
-      await humanDelay(1000, 2000);
 
+      // Try to detect and fill the current page's form
+      let interacted = false;
+
+      // Look for a mileage input
+      const mileageInput = await page.$('input[placeholder*="ileage"], input[placeholder*="miles"], input[name="mileage"], input[data-testid*="mileage"], input[aria-label*="ileage"]');
+      if (mileageInput && await mileageInput.isVisible()) {
+        console.log(`  [carvana] Found mileage input — entering ${mileage}`);
+        await mileageInput.click();
+        await mileageInput.fill('');
+        for (const char of String(mileage)) {
+          await mileageInput.type(char, { delay: 0 });
+          await new Promise((r) => setTimeout(r, Math.floor(Math.random() * 80) + 40));
+        }
+        interacted = true;
+        await humanDelay(1000, 2000);
+      }
+
+      // Look for a zip code input
+      const zipInput = await page.$('input[placeholder*="ip"], input[placeholder*="zip"], input[name="zip"], input[name="zipCode"], input[data-testid*="zip"], input[maxlength="5"][inputmode="numeric"]');
+      if (zipInput && await zipInput.isVisible()) {
+        console.log(`  [carvana] Found zip input — entering ${zip}`);
+        await zipInput.click();
+        await zipInput.fill('');
+        for (const char of String(zip)) {
+          await zipInput.type(char, { delay: 0 });
+          await new Promise((r) => setTimeout(r, Math.floor(Math.random() * 80) + 40));
+        }
+        interacted = true;
+        await humanDelay(1000, 2000);
+      }
+
+      // Look for an email input
+      const emailInput = await page.$('input[type="email"], input[placeholder*="mail"], input[name="email"]');
+      if (emailInput && await emailInput.isVisible()) {
+        console.log(`  [carvana] Found email input — entering ${offerEmail}`);
+        await emailInput.click();
+        await emailInput.fill('');
+        for (const char of offerEmail) {
+          await emailInput.type(char, { delay: 0 });
+          await new Promise((r) => setTimeout(r, Math.floor(Math.random() * 60) + 30));
+        }
+        interacted = true;
+        await humanDelay(1000, 2000);
+      }
+
+      // Look for condition/selection buttons (good, excellent, no, none, clean, etc.)
+      const conditionKeywords = ['good', 'excellent', 'great', 'no', 'none', 'clean', 'no accidents', 'no damage'];
+      for (const keyword of conditionKeywords) {
+        try {
+          const btns = await page.$$(`button:has-text("${keyword}"), label:has-text("${keyword}"), [role="radio"]:has-text("${keyword}"), [role="option"]:has-text("${keyword}")`);
+          for (const btn of btns) {
+            if (await btn.isVisible()) {
+              await humanDelay(800, 1500);
+              await btn.click();
+              console.log(`  [carvana] Selected option: "${keyword}"`);
+              interacted = true;
+            }
+          }
+        } catch {
+          continue;
+        }
+      }
+
+      // Look for "sell" option (Carvana asks: sell, trade-in, or not sure)
+      const sellOptions = ['sell', 'just sell', 'sell my car', 'not sure'];
+      for (const keyword of sellOptions) {
+        try {
+          const btns = await page.$$(`button:has-text("${keyword}"), label:has-text("${keyword}"), [role="radio"]:has-text("${keyword}"), a:has-text("${keyword}")`);
+          for (const btn of btns) {
+            if (await btn.isVisible()) {
+              await humanDelay(800, 1500);
+              await btn.click();
+              console.log(`  [carvana] Selected: "${keyword}"`);
+              interacted = true;
+              break;
+            }
+          }
+          if (interacted) break;
+        } catch {
+          continue;
+        }
+      }
+
+      // Try to click a submit/next/continue button
+      let clickedSubmit = false;
       for (const sel of submitSelectors) {
         try {
-          const btn = await page.waitForSelector(sel, { timeout: 3000 });
-          if (btn) {
+          const btn = await page.waitForSelector(sel, { timeout: 2000 });
+          if (btn && await btn.isVisible()) {
+            await randomMouseMove(page, sel).catch(() => {});
+            await humanDelay(800, 1500);
             await btn.click();
+            clickedSubmit = true;
+            console.log(`  [carvana] Clicked: ${sel}`);
             break;
           }
         } catch {
           continue;
         }
       }
-      await humanDelay(3000, 5000);
-      await screenshot(page, '06-zip');
-    }
 
-    checkTimeout();
+      // If we didn't interact at all, try pressing Enter as last resort
+      if (!interacted && !clickedSubmit) {
+        // Maybe we're on a confirmation page — look for any clickable element
+        try {
+          const anyButton = await page.$('button:visible');
+          if (anyButton) {
+            const btnText = await anyButton.textContent();
+            console.log(`  [carvana] Clicking visible button: "${btnText.trim().substring(0, 50)}"`);
+            await anyButton.click();
+            clickedSubmit = true;
+          }
+        } catch {
+          // Try Enter
+          await page.keyboard.press('Enter');
+          console.log('  [carvana] Pressed Enter (no buttons found)');
+        }
+      }
 
-    // --- Step 7: Enter email ---
-    console.log('[carvana] Step 7: Entering email...');
+      // Wait for page navigation or content update
+      await humanDelay(3000, 6000);
 
-    const emailSelectors = [
-      'input[type="email"]',
-      'input[placeholder*="mail"]',
-      'input[name="email"]',
-      'input[data-testid="email-input"]',
-      'input[aria-label*="mail"]',
-    ];
-
-    let emailInput = null;
-    for (const sel of emailSelectors) {
-      try {
-        emailInput = await page.waitForSelector(sel, { timeout: 5000 });
-        if (emailInput) {
-          console.log(`  [carvana] Found email input with: ${sel}`);
+      // Check if URL changed (wizard progressed to next step)
+      const newUrl = page.url();
+      if (newUrl !== currentUrl) {
+        console.log(`  [carvana] Page navigated: ${newUrl}`);
+      } else if (!interacted && !clickedSubmit) {
+        console.log('  [carvana] No progress on this step — may be stuck');
+        // Take a diagnostic screenshot and try one more time before giving up
+        if (step > 3) {
+          console.log('  [carvana] Multiple stuck steps — proceeding to offer check');
           break;
         }
-      } catch {
-        continue;
       }
-    }
-
-    if (emailInput) {
-      await emailInput.click();
-      for (const char of offerEmail) {
-        await emailInput.type(char, { delay: 0 });
-        await new Promise((r) => setTimeout(r, Math.floor(Math.random() * 80) + 40));
-      }
-      await humanDelay(1000, 2000);
-
-      for (const sel of submitSelectors) {
-        try {
-          const btn = await page.waitForSelector(sel, { timeout: 3000 });
-          if (btn) {
-            await btn.click();
-            break;
-          }
-        } catch {
-          continue;
-        }
-      }
-      await humanDelay(3000, 5000);
-      await screenshot(page, '07-email');
     }
 
     checkTimeout();
+    await screenshot(page, '08-pre-offer');
 
     // --- Step 8: Wait for offer ---
     console.log('[carvana] Step 8: Waiting for offer calculation...');
