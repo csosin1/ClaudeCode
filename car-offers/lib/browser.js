@@ -65,18 +65,20 @@ async function launchBrowser(options = {}) {
 
   // Configure residential proxy if fully available (host + port + user + password)
   // Skip proxy if password is missing — direct connection as fallback
-  if (config.PROXY_HOST && config.PROXY_PORT && config.PROXY_PASS) {
+  if (config.PROXY_HOST && config.PROXY_PASS) {
     const sessionId = Math.random().toString(36).substring(7);
     const stickyUsername = config.PROXY_USER ? `${config.PROXY_USER}-session-${sessionId}` : '';
+    // Decodo uses ports 10001-10007 — override if .env has old port 7000
+    const proxyPort = (config.PROXY_PORT === '7000') ? '10001' : (config.PROXY_PORT || '10001');
 
     launchOptions.proxy = {
-      server: `http://${config.PROXY_HOST}:${config.PROXY_PORT}`,
+      server: `http://${config.PROXY_HOST}:${proxyPort}`,
     };
     if (stickyUsername) {
       launchOptions.proxy.username = stickyUsername;
       launchOptions.proxy.password = config.PROXY_PASS;
     }
-    console.log('[browser] Using proxy:', config.PROXY_HOST);
+    console.log(`[browser] Using proxy: ${config.PROXY_HOST}:${proxyPort}`);
   } else {
     console.log('[browser] No proxy configured — using direct connection');
   }

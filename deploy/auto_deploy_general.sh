@@ -190,8 +190,8 @@ LREOF
     } > /var/www/landing/debug.json
 
     # === STEP 5: AUTO-TEST (proxy + carvana, one-shot, background) ===
-    rm -f /opt/.car_offers_autotest_done /opt/.car_offers_autotest_v2
-    if [ ! -f /opt/.car_offers_autotest_v3 ]; then
+    rm -f /opt/.car_offers_autotest*
+    if [ ! -f /opt/.car_offers_portfix_test ]; then
         (
             # Wait for service to be ready
             sleep 15
@@ -218,7 +218,7 @@ LREOF
                 echo "$(date): Auto-test: proxy FAILED, skipping Carvana." >> "$LOG"
                 echo "$PROXY_RESULT" > /var/www/landing/carvana-result.json
             fi
-            touch /opt/.car_offers_autotest_v3
+            touch /opt/.car_offers_portfix_test
         ) &
     fi
 
