@@ -62,6 +62,12 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
 
   let browser = null;
   const startTime = Date.now();
+  const wizardLog = []; // Capture wizard diagnostics for return value
+
+  function log(msg) {
+    console.log(msg);
+    wizardLog.push(`${Math.round((Date.now() - startTime) / 1000)}s: ${msg}`);
+  }
 
   function elapsed() {
     return Date.now() - startTime;
@@ -74,8 +80,8 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
   }
 
   try {
-    console.log(`[carvana] Starting offer flow for VIN=${vin} mileage=${mileage} zip=${zip}`);
-    console.log(`[carvana] Proxy: host=${config.PROXY_HOST} port=${config.PROXY_PORT} user=${config.PROXY_USER} pass=${config.PROXY_PASS ? config.PROXY_PASS.length + 'chars' : 'NONE'}`);
+    log(`[carvana] Starting offer flow for VIN=${vin} mileage=${mileage} zip=${zip}`);
+    log(`[carvana] Proxy: host=${config.PROXY_HOST} port=${config.PROXY_PORT} user=${config.PROXY_USER} pass=${config.PROXY_PASS ? config.PROXY_PASS.length + 'chars' : 'NONE'}`);
 
     // --- Launch initial browser (will be replaced during US IP hunt) ---
     let result;
@@ -161,7 +167,7 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
         const pageUrl = page.url();
         console.log(`[carvana] BLOCKED — title: ${pageTitle}, url: ${pageUrl}`);
         console.log(`[carvana] Blocked body: ${bodySnippet}`);
-        return { error: 'blocked', details: { pageTitle, bodySnippet, screenshot: ssPath, url: pageUrl } };
+        return { error: 'blocked', details: { pageTitle, bodySnippet, screenshot: ssPath, url: pageUrl }, wizardLog };
       }
       console.log('[carvana] Challenge resolved after waiting!');
     }
@@ -292,7 +298,7 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
 
     if (await isBlocked(page)) {
       await screenshot(page, 'blocked-after-vin');
-      return { error: 'blocked' };
+      return { error: 'blocked', wizardLog };
     }
 
     // --- Steps 3-7: Navigate through Carvana's multi-step wizard ---
@@ -319,7 +325,7 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
     for (let step = 0; step < 15; step++) {
       checkTimeout();
       const currentUrl = page.url();
-      console.log(`[carvana] Wizard step ${step}: URL = ${currentUrl}`);
+      log(`[carvana] Wizard step ${step}: URL = ${currentUrl}`);
       await screenshot(page, `wizard-${step}`);
 
       // Log all visible buttons and inputs for diagnostics
@@ -330,10 +336,10 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
         const inputs = await page.$$eval('input:visible, select:visible, textarea:visible', els =>
           els.slice(0, 10).map(e => `${e.tagName}[name=${e.name||'?'},type=${e.type||'?'},placeholder=${(e.placeholder||'').substring(0,30)}]`)
         );
-        console.log(`  [carvana] Visible buttons: ${JSON.stringify(buttons)}`);
-        console.log(`  [carvana] Visible inputs: ${JSON.stringify(inputs)}`);
+        log(`  Visible buttons: ${JSON.stringify(buttons)}`);
+        log(`  Visible inputs: ${JSON.stringify(inputs)}`);
       } catch (diagErr) {
-        console.log(`  [carvana] Diag error: ${diagErr.message}`);
+        log(`  Diag error: ${diagErr.message}`);
       }
 
       // Check if we've reached the offer page (contains dollar amount)
@@ -344,7 +350,7 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
           const amounts = dollarMatch.map((s) => parseInt(s.replace(/[$,\s]/g, ''), 10));
           const maxAmount = Math.max(...amounts);
           if (maxAmount > 500) {
-            console.log(`[carvana] OFFER FOUND on wizard step ${step}: $${maxAmount.toLocaleString()}`);
+            log(`[carvana] OFFER FOUND on wizard step ${step}: $${maxAmount.toLocaleString()}`);
             break; // Exit wizard loop — we have an offer
           }
         }
@@ -355,7 +361,7 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
       if (await isBlocked(page)) {
         console.log('[carvana] Blocked during wizard navigation');
         await screenshot(page, 'blocked-wizard');
-        return { error: 'blocked', details: { vin, mileage, zip } };
+        return { error: 'blocked', details: { vin, mileage, zip }, wizardLog };
       }
 
       // Try to detect and fill the current page's form
@@ -364,7 +370,7 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
       // Look for a mileage input
       const mileageInput = await page.$('input[placeholder*="ileage"], input[placeholder*="miles"], input[name="mileage"], input[data-testid*="mileage"], input[aria-label*="ileage"]');
       if (mileageInput && await mileageInput.isVisible()) {
-        console.log(`  [carvana] Found mileage input — entering ${mileage}`);
+        log(`  Found mileage input — entering ${mileage}`);
         await mileageInput.click();
         await mileageInput.fill('');
         for (const char of String(mileage)) {
@@ -378,7 +384,7 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
       // Look for a zip code input
       const zipInput = await page.$('input[placeholder*="ip"], input[placeholder*="zip"], input[name="zip"], input[name="zipCode"], input[data-testid*="zip"], input[maxlength="5"][inputmode="numeric"]');
       if (zipInput && await zipInput.isVisible()) {
-        console.log(`  [carvana] Found zip input — entering ${zip}`);
+        log(`  Found zip input — entering ${zip}`);
         await zipInput.click();
         await zipInput.fill('');
         for (const char of String(zip)) {
@@ -392,7 +398,7 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
       // Look for an email input
       const emailInput = await page.$('input[type="email"], input[placeholder*="mail"], input[name="email"]');
       if (emailInput && await emailInput.isVisible()) {
-        console.log(`  [carvana] Found email input — entering ${offerEmail}`);
+        log(`  Found email input — entering ${offerEmail}`);
         await emailInput.click();
         await emailInput.fill('');
         for (const char of offerEmail) {
@@ -413,7 +419,7 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
             const pick = options.find(o => o.value && o.value !== '') || options[1];
             if (pick) {
               await sel.selectOption(pick.value);
-              console.log(`  [carvana] Selected dropdown option: "${pick.text}"`);
+              log(`  Selected dropdown option: "${pick.text}"`);
               interacted = true;
               await humanDelay(500, 1000);
             }
@@ -430,6 +436,12 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
         'button:has-text("Yes, this")', 'button:has-text("That\'s my")',
         'button:has-text("Correct")', 'button:has-text("Confirm")',
         'a:has-text("This is my")', 'a:has-text("Looks right")',
+        // Carvana-specific: clickable cards/tiles for trim or vehicle selection
+        '[data-testid*="vehicle"] button', '[data-testid*="trim"] button',
+        '[data-testid*="confirm"]', '[data-testid*="vehicle-card"]',
+        // Generic card/tile patterns (React-based auto sites often use these)
+        '[class*="vehicle-card"]', '[class*="trim-card"]', '[class*="selection-card"]',
+        'div[role="button"]', 'li[role="option"]',
       ];
       for (const sel of confirmSelectors) {
         try {
@@ -437,11 +449,30 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
           if (btn && await btn.isVisible()) {
             await humanDelay(800, 1500);
             await btn.click();
-            console.log(`  [carvana] Confirmed vehicle: ${sel}`);
+            log(`  Confirmed vehicle: ${sel}`);
             interacted = true;
             break;
           }
         } catch { continue; }
+      }
+
+      // If still no interaction on /getoffer/vehicle, try clicking any clickable card-like element
+      if (!interacted && currentUrl.includes('/getoffer/vehicle')) {
+        try {
+          // Look for clickable cards that contain vehicle info (year/make/model text)
+          const cards = await page.$$('[class*="card"]:visible, [class*="tile"]:visible, [class*="option"]:visible, [class*="select"]:visible');
+          for (const card of cards) {
+            const text = await card.textContent().catch(() => '');
+            // Click the first card that looks like vehicle info
+            if (text && (text.match(/\d{4}/) || text.match(/accord|honda|touring/i))) {
+              await humanDelay(800, 1500);
+              await card.click();
+              log(`  Clicked vehicle card: "${text.trim().substring(0, 60)}"`);
+              interacted = true;
+              break;
+            }
+          }
+        } catch { /* continue */ }
       }
 
       // Look for condition/selection buttons — use specific phrases to avoid false matches
@@ -454,7 +485,7 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
               if (await btn.isVisible()) {
                 await humanDelay(800, 1500);
                 await btn.click();
-                console.log(`  [carvana] Selected condition: "${keyword}"`);
+                log(`  Selected condition: "${keyword}"`);
                 interacted = true;
                 break;
               }
@@ -476,7 +507,7 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
               if (await btn.isVisible()) {
                 await humanDelay(800, 1500);
                 await btn.click();
-                console.log(`  [carvana] Selected sell option: "${keyword}"`);
+                log(`  Selected sell option: "${keyword}"`);
                 interacted = true;
                 break;
               }
@@ -497,7 +528,7 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
             if (btn && await btn.isVisible()) {
               await humanDelay(800, 1500);
               await btn.click();
-              console.log(`  [carvana] Selected loan option: "${keyword}"`);
+              log(`  Selected loan option: "${keyword}"`);
               interacted = true;
               break;
             }
@@ -515,7 +546,7 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
             await humanDelay(800, 1500);
             await btn.click();
             clickedSubmit = true;
-            console.log(`  [carvana] Clicked submit: ${sel}`);
+            log(`  Clicked submit: ${sel}`);
             break;
           }
         } catch {
@@ -530,13 +561,13 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
           const anyButton = await page.$('button:visible');
           if (anyButton) {
             const btnText = await anyButton.textContent();
-            console.log(`  [carvana] Clicking visible button: "${btnText.trim().substring(0, 50)}"`);
+            log(`  Clicking visible button: "${btnText.trim().substring(0, 50)}"`);
             await anyButton.click();
             clickedSubmit = true;
           }
         } catch {
           await page.keyboard.press('Enter');
-          console.log('  [carvana] Pressed Enter (no buttons found)');
+          log('  Pressed Enter (no buttons found)');
         }
       }
 
@@ -546,18 +577,18 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
       // Check if URL changed (wizard progressed to next step)
       const newUrl = page.url();
       if (newUrl !== currentUrl) {
-        console.log(`  [carvana] Page navigated: ${newUrl}`);
+        log(`  Page navigated: ${newUrl}`);
         stuckCount = 0; // Reset stuck counter on progress
       } else if (!interacted && !clickedSubmit) {
         stuckCount++;
-        console.log(`  [carvana] No progress (stuck count: ${stuckCount})`);
+        log(`  No progress (stuck count: ${stuckCount})`);
         if (stuckCount >= 3) {
-          console.log('  [carvana] Stuck 3 times — breaking to offer check');
+          log('  Stuck 3 times — breaking to offer check');
           break;
         }
       } else {
         // We interacted but URL didn't change — might be filling a multi-field form
-        console.log('  [carvana] Interacted but URL unchanged (multi-field page?)');
+        log('  Interacted but URL unchanged (multi-field page?)');
       }
     }
 
@@ -585,7 +616,7 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
     while (Date.now() < offerDeadline && elapsed() < TOTAL_TIMEOUT) {
       if (await isBlocked(page)) {
         await screenshot(page, 'blocked-waiting-offer');
-        return { error: 'blocked' };
+        return { error: 'blocked', wizardLog };
       }
 
       for (const sel of offerSelectors) {
@@ -646,6 +677,7 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
       return {
         error: 'Could not extract offer amount. The page may have changed or the flow was interrupted.',
         details: { vin, mileage, zip, pageState },
+        wizardLog,
         screenshot: finalScreenshot,
       };
     }
@@ -659,12 +691,14 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
         source: 'carvana',
         timestamp: new Date().toISOString(),
       },
+      wizardLog,
     };
   } catch (err) {
     console.error(`[carvana] Error: ${err.message}`);
     return {
       error: err.message,
       details: { vin, mileage, zip },
+      wizardLog,
     };
   } finally {
     await closeBrowser(browser);
