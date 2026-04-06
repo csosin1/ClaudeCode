@@ -1,22 +1,33 @@
-=== Fetched at Mon Apr  6 20:26:55 UTC 2026 ===
+=== Fetched at Mon Apr  6 20:39:02 UTC 2026 ===
 
 === Startup Results ===
 {
     "proxyResult": {
         "ok": true,
-        "ip": "68.193.77.79",
+        "ip": "32.217.39.171",
         "method": "curl",
         "port": "7000"
     },
-    "proxyTestedAt": "2026-04-06T20:26:13.633Z",
-    "startedAt": "2026-04-06T20:26:05.749Z",
-    "lastCarvanaRun": null,
+    "proxyTestedAt": "2026-04-06T20:35:33.024Z",
+    "startedAt": "2026-04-06T20:35:25.247Z",
+    "lastCarvanaRun": {
+        "error": "page.content: Target page, context or browser has been closed",
+        "details": {
+            "vin": "1HGCV2F9XNA008352",
+            "mileage": "48000",
+            "zip": "06880"
+        },
+        "vin": "1HGCV2F9XNA008352",
+        "mileage": "48000",
+        "zip": "06880",
+        "completed_at": "2026-04-06T20:38:45.609Z"
+    },
     "networkDiag": {
-        "timestamp": "2026-04-06T20:26:10.766Z",
+        "timestamp": "2026-04-06T20:35:30.263Z",
         "tests": {
             "dns_resolve": {
                 "ok": true,
-                "output": "dataroute0.com.\n149.88.97.66\n138.199.35.66\n89.222.99.194\n212.11.41.34\n169.150.204.216\n37.19.211.193\n37.19.211.219"
+                "output": "dataroute0.com.\n169.150.204.216\n89.222.99.194\n138.199.35.66\n149.88.97.66\n212.11.41.34\n37.19.211.219\n37.19.211.193"
             },
             "tcp_proxy": {
                 "ok": true,
@@ -24,11 +35,11 @@
             },
             "curl_httpbin_geo": {
                 "ok": true,
-                "output": "{\n  \"origin\": \"68.193.77.79\"\n}"
+                "output": "{\n  \"origin\": \"32.217.39.171\"\n}"
             },
             "curl_decodo_geo": {
                 "ok": true,
-                "output": "{\n    \"browser\": {\n        \"name\": \"curl\",\n        \"version\": \"8.5.0\"\n    },\n    \"platform\": {\n        \"name\": \"\",\n        \"os\": \"\",\n        \"type\": \"desktop\"\n    },\n    \"engine\": {\n        \"name\": \"\",\n        \"version\": \"\"\n    },\n    \"isp\": {\n        \"asn\": 5650,\n        \"isp\": \"Frontier Communications\",\n        \"organization\": \"Frontier Communications\",\n        \"domain\": \"\"\n    },\n    \"city\": {\n        \"name\": \"Stamford\",\n        \"code\": \"CT\",\n        \"zip_code\": \"06902\",\n        \"state\": \"Con"
+                "output": "{\n    \"browser\": {\n        \"name\": \"curl\",\n        \"version\": \"8.5.0\"\n    },\n    \"platform\": {\n        \"name\": \"\",\n        \"os\": \"\",\n        \"type\": \"desktop\"\n    },\n    \"engine\": {\n        \"name\": \"\",\n        \"version\": \"\"\n    },\n    \"isp\": {\n        \"asn\": 46690,\n        \"isp\": \"Frontier Communications\",\n        \"organization\": \"Frontier Communications\",\n        \"domain\": \"\"\n    },\n    \"city\": {\n        \"name\": \"Jewett City\",\n        \"code\": \"CT\",\n        \"zip_code\": \"06351\",\n        \"state\": "
             },
             "curl_httpbin_direct": {
                 "ok": true,
@@ -44,17 +55,17 @@
             }
         }
     },
-    "networkDiagAt": "2026-04-06T20:26:10.766Z",
+    "networkDiagAt": "2026-04-06T20:35:30.263Z",
     "playwrightProxy": {
         "ok": true,
-        "ip": "47.165.83.188",
-        "testedAt": "2026-04-06T20:26:14.640Z"
+        "ip": "47.165.82.9",
+        "testedAt": "2026-04-06T20:35:34.683Z"
     }
 }
 
 === Debug Config ===
 {
-    "timestamp": "2026-04-06T20:26:55.921Z",
+    "timestamp": "2026-04-06T20:39:02.339Z",
     "proxy_host": "gate.decodo.com",
     "proxy_port": "10001",
     "proxy_user": "spjax0kgms",
@@ -62,14 +73,14 @@
     "proxy_pass_length": 18,
     "project_email": "caroffers.tool@gmail.com",
     "node_version": "v22.22.2",
-    "uptime_seconds": 50
+    "uptime_seconds": 217
 }
 
 === Status ===
 {
     "service": {
-        "startedAt": "2026-04-06T20:26:05.749Z",
-        "uptime_seconds": 50,
+        "startedAt": "2026-04-06T20:35:25.247Z",
+        "uptime_seconds": 217,
         "node_version": "v22.22.2"
     },
     "proxy": {
@@ -81,18 +92,18 @@
         "pass_length": 18,
         "test_result": {
             "ok": true,
-            "ip": "68.193.77.79",
+            "ip": "32.217.39.171",
             "method": "curl",
             "port": "7000"
         },
-        "tested_at": "2026-04-06T20:26:13.633Z"
+        "tested_at": "2026-04-06T20:35:33.024Z"
     },
     "networkDiag": {
-        "timestamp": "2026-04-06T20:26:10.766Z",
+        "timestamp": "2026-04-06T20:35:30.263Z",
         "tests": {
             "dns_resolve": {
                 "ok": true,
-                "output": "dataroute0.com.\n149.88.97.66\n138.199.35.66\n89.222.99.194\n212.11.41.34\n169.150.204.216\n37.19.211.193\n37.19.211.219"
+                "output": "dataroute0.com.\n169.150.204.216\n89.222.99.194\n138.199.35.66\n149.88.97.66\n212.11.41.34\n37.19.211.219\n37.19.211.193"
             },
             "tcp_proxy": {
                 "ok": true,
@@ -100,11 +111,11 @@
             },
             "curl_httpbin_geo": {
                 "ok": true,
-                "output": "{\n  \"origin\": \"68.193.77.79\"\n}"
+                "output": "{\n  \"origin\": \"32.217.39.171\"\n}"
             },
             "curl_decodo_geo": {
                 "ok": true,
-                "output": "{\n    \"browser\": {\n        \"name\": \"curl\",\n        \"version\": \"8.5.0\"\n    },\n    \"platform\": {\n        \"name\": \"\",\n        \"os\": \"\",\n        \"type\": \"desktop\"\n    },\n    \"engine\": {\n        \"name\": \"\",\n        \"version\": \"\"\n    },\n    \"isp\": {\n        \"asn\": 5650,\n        \"isp\": \"Frontier Communications\",\n        \"organization\": \"Frontier Communications\",\n        \"domain\": \"\"\n    },\n    \"city\": {\n        \"name\": \"Stamford\",\n        \"code\": \"CT\",\n        \"zip_code\": \"06902\",\n        \"state\": \"Con"
+                "output": "{\n    \"browser\": {\n        \"name\": \"curl\",\n        \"version\": \"8.5.0\"\n    },\n    \"platform\": {\n        \"name\": \"\",\n        \"os\": \"\",\n        \"type\": \"desktop\"\n    },\n    \"engine\": {\n        \"name\": \"\",\n        \"version\": \"\"\n    },\n    \"isp\": {\n        \"asn\": 46690,\n        \"isp\": \"Frontier Communications\",\n        \"organization\": \"Frontier Communications\",\n        \"domain\": \"\"\n    },\n    \"city\": {\n        \"name\": \"Jewett City\",\n        \"code\": \"CT\",\n        \"zip_code\": \"06351\",\n        \"state\": "
             },
             "curl_httpbin_direct": {
                 "ok": true,
@@ -120,14 +131,25 @@
             }
         }
     },
-    "networkDiagAt": "2026-04-06T20:26:10.766Z",
+    "networkDiagAt": "2026-04-06T20:35:30.263Z",
     "workingPort": null,
     "playwrightProxy": {
         "ok": true,
-        "ip": "47.165.83.188",
-        "testedAt": "2026-04-06T20:26:14.640Z"
+        "ip": "47.165.82.9",
+        "testedAt": "2026-04-06T20:35:34.683Z"
     },
-    "lastCarvanaRun": null
+    "lastCarvanaRun": {
+        "error": "page.content: Target page, context or browser has been closed",
+        "details": {
+            "vin": "1HGCV2F9XNA008352",
+            "mileage": "48000",
+            "zip": "06880"
+        },
+        "vin": "1HGCV2F9XNA008352",
+        "mileage": "48000",
+        "zip": "06880",
+        "completed_at": "2026-04-06T20:38:45.609Z"
+    }
 }
 
 === Browser Diagnostic ===
