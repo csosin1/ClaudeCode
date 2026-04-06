@@ -159,6 +159,35 @@ def api_snapshot_dates():
     return jsonify([r["snapshot_date"] for r in rows])
 
 
+@bp.route("/api/chains-table")
+def api_chains_table():
+    """All chains ordered by location count, optionally filtered by country."""
+    country = request.args.get("country", "")
+    conn = get_connection()
+
+    if country and country != "All Europe":
+        rows = conn.execute("""
+            SELECT c.canonical_name, c.competitive_classification, c.location_count,
+                   COUNT(l.id) as region_count
+            FROM chains c
+            JOIN locations l ON l.chain_id = c.id AND l.active = 1 AND l.country = ?
+            WHERE c.location_count > 0
+            GROUP BY c.id
+            ORDER BY region_count DESC
+        """, (country,)).fetchall()
+    else:
+        rows = conn.execute("""
+            SELECT canonical_name, competitive_classification, location_count,
+                   location_count as region_count
+            FROM chains
+            WHERE location_count > 0
+            ORDER BY location_count DESC
+        """).fetchall()
+
+    conn.close()
+    return jsonify([dict(r) for r in rows])
+
+
 @bp.route("/api/market-data")
 def api_market_data():
     snapshot_date = request.args.get("date", "")

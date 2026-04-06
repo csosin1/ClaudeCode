@@ -101,6 +101,20 @@ label{font-size:.85rem;color:var(--text-dim);font-weight:600}
 .md-content li{margin:4px 0}
 .md-content strong{color:#fff}
 .md-content p{margin:8px 0}
+.country-btn{
+  padding:8px 14px;border:1px solid var(--border);border-radius:20px;
+  background:var(--card);color:var(--text-dim);font-size:.85rem;cursor:pointer;
+  transition:all .15s;
+}
+.country-btn.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+.gym-table{width:100%;border-collapse:collapse;font-size:.9rem}
+.gym-table th{text-align:left;padding:10px 8px;color:var(--text-dim);font-weight:600;border-bottom:2px solid var(--border);font-size:.8rem;text-transform:uppercase}
+.gym-table td{padding:10px 8px;border-bottom:1px solid rgba(255,255,255,.06)}
+.gym-table tr:active{background:rgba(233,69,96,.1)}
+.gym-table .chain-name{font-weight:600;color:#fff}
+.gym-table .count{font-variant-numeric:tabular-nums;text-align:right;color:var(--accent);font-weight:700}
+.bar-cell{position:relative;min-width:60px}
+.bar-fill{position:absolute;left:0;top:50%;transform:translateY(-50%);height:18px;background:rgba(233,69,96,.25);border-radius:3px}
 .hidden{display:none}
 .spinner{display:inline-block;width:18px;height:18px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite;vertical-align:middle;margin-right:6px}
 @keyframes spin{to{transform:rotate(360deg)}}
@@ -117,25 +131,17 @@ label{font-size:.85rem;color:var(--text-dim);font-weight:600}
 
 <!-- ===== TAB 1: MARKET OVERVIEW ===== -->
 <div id="tab-market" class="tab-content active">
-  <div class="card">
-    <label>Country</label>
-    <select id="mkt-country">
-      <option value="All Europe">All Europe</option>
-      <option value="NL">Netherlands</option>
-      <option value="BE">Belgium</option>
-      <option value="FR">France</option>
-      <option value="ES">Spain</option>
-      <option value="LU">Luxembourg</option>
-      <option value="DE">Germany</option>
-    </select>
-    <label>Min Locations</label>
-    <div class="slider-row">
-      <input type="range" id="mkt-min" min="1" max="50" value="5">
-      <span class="val" id="mkt-min-val">5</span>
-    </div>
+  <div style="display:flex;gap:6px;padding:12px 12px 0;flex-wrap:wrap" id="country-btns">
+    <button class="country-btn active" data-c="All Europe">All Europe</button>
+    <button class="country-btn" data-c="NL">NL</button>
+    <button class="country-btn" data-c="BE">BE</button>
+    <button class="country-btn" data-c="FR">FR</button>
+    <button class="country-btn" data-c="ES">ES</button>
+    <button class="country-btn" data-c="LU">LU</button>
+    <button class="country-btn" data-c="DE">DE</button>
   </div>
-  <div class="chart-wrap"><canvas id="mkt-chart"></canvas></div>
-  <div id="mkt-cards"></div>
+  <div id="mkt-summary" style="padding:8px 12px;color:var(--text-dim);font-size:.85rem"></div>
+  <div id="mkt-table-wrap" style="padding:0 12px 12px"></div>
 </div>
 
 <!-- ===== TAB 2: CHAIN EXPLORER ===== -->
@@ -241,86 +247,52 @@ function classBadge(c) {
   return `<span class="badge badge-direct">${(c || 'unknown').replace(/_/g, ' ')}</span>`;
 }
 
-// ---- TAB 1: Market Overview ----
-let mktChart = null;
-let snapshotDates = [];
+// ---- TAB 1: Market Table ----
+let currentCountry = 'All Europe';
+
+document.querySelectorAll('.country-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.country-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentCountry = btn.dataset.c;
+    loadTable();
+  });
+});
 
 async function initMarket() {
-  snapshotDates = (await api('snapshot-dates')) || [];
-  loadMarketData();
+  loadTable();
 }
 
-const mktMin = document.getElementById('mkt-min');
-const mktMinVal = document.getElementById('mkt-min-val');
-mktMin.addEventListener('input', () => { mktMinVal.textContent = mktMin.value; });
-mktMin.addEventListener('change', loadMarketData);
-document.getElementById('mkt-country').addEventListener('change', loadMarketData);
+async function loadTable() {
+  const wrap = document.getElementById('mkt-table-wrap');
+  const summary = document.getElementById('mkt-summary');
+  wrap.innerHTML = '<p style="color:var(--text-dim)">Loading...</p>';
 
-async function loadMarketData() {
-  const mktCards = document.getElementById('mkt-cards');
-  if (!snapshotDates.length) {
-    mktCards.innerHTML = '<div class="card" style="text-align:center;padding:30px"><h3 style="margin-bottom:10px">No data yet</h3><p style="color:var(--text-dim)">Go to the <strong>Admin</strong> tab and tap <strong>Collect Gym Data from OSM</strong> to pull gym locations from OpenStreetMap.</p></div>';
+  const data = (await api('chains-table?country=' + encodeURIComponent(currentCountry))) || [];
+  if (!data.length) {
+    wrap.innerHTML = '<div class="card" style="text-align:center;padding:30px"><h3>No data yet</h3><p style="color:var(--text-dim)">Go to Admin tab → Collect Gym Data from OSM</p></div>';
+    summary.textContent = '';
     return;
   }
-  const date = snapshotDates[0];
-  const country = document.getElementById('mkt-country').value;
-  const min = mktMin.value;
-  const data = (await api(`market-data?date=${encodeURIComponent(date)}&country=${encodeURIComponent(country)}&min_locations=${min}`)) || [];
-  if (!data.length) { mktCards.innerHTML = '<div class="card" style="text-align:center;padding:20px;color:var(--text-dim)">No competitor data for this selection.</div>'; return; }
 
-  // Chart
-  const labels = data.map(d => d.canonical_name);
-  const values = data.map(d => d.total_locations);
-  const shares = data.map(d => d.market_share);
+  const totalGyms = data.reduce((a, d) => a + d.region_count, 0);
+  summary.textContent = `${data.length} chains · ${totalGyms.toLocaleString()} gyms · ${currentCountry}`;
 
-  if (mktChart) mktChart.destroy();
-  const ctx = document.getElementById('mkt-chart').getContext('2d');
-  mktChart = new Chart(ctx, {
-    type: 'bar',
-    data: {
-      labels,
-      datasets: [{
-        label: 'Locations',
-        data: values,
-        backgroundColor: 'rgba(233,69,96,0.7)',
-        borderColor: 'rgba(233,69,96,1)',
-        borderWidth: 1
-      }]
-    },
-    options: {
-      indexAxis: 'y',
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          callbacks: {
-            afterLabel: (ctx) => `Market share: ${shares[ctx.dataIndex]}%`
-          }
-        }
-      },
-      scales: {
-        x: { ticks: { color: '#aab' }, grid: { color: 'rgba(255,255,255,.05)' } },
-        y: { ticks: { color: '#eee', font: { size: 11 } }, grid: { display: false } }
-      }
-    }
+  const maxCount = data[0].region_count;
+  let html = '<table class="gym-table"><thead><tr><th>#</th><th>Chain</th><th style="text-align:right">Gyms</th><th></th></tr></thead><tbody>';
+
+  data.forEach((d, i) => {
+    const pct = maxCount > 0 ? (d.region_count / maxCount * 100) : 0;
+    html += `<tr>
+      <td style="color:var(--text-dim);font-size:.8rem">${i + 1}</td>
+      <td class="chain-name">${esc(d.canonical_name)}</td>
+      <td class="count">${d.region_count.toLocaleString()}</td>
+      <td class="bar-cell"><div class="bar-fill" style="width:${pct}%"></div></td>
+    </tr>`;
   });
-  // Dynamic height
-  document.getElementById('mkt-chart').parentElement.style.height = Math.max(250, labels.length * 32) + 'px';
 
-  // Cards
-  mktCards.innerHTML = data.map(d => `
-    <div class="card">
-      <div class="expand-toggle" onclick="this.classList.toggle('open');this.nextElementSibling.classList.toggle('open')">
-        <span><strong>${esc(d.canonical_name)}</strong></span>
-        <span style="color:var(--accent);font-weight:700">${d.market_share}%</span>
-      </div>
-      <div class="expand-body">
-        <p><strong>${d.total_locations}</strong> locations &middot; ${tierBadge(d.price_tier)} &middot; ${classBadge(d.competitive_classification)}</p>
-        <p>18-mo cost: ${d.normalized_18mo_cost ? '\u20AC' + d.normalized_18mo_cost.toFixed(0) : 'N/A'} &middot; Model: ${d.membership_model || 'unknown'}</p>
-      </div>
-    </div>
-  `).join('');
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
 }
 
 // ---- TAB 2: Chain Explorer ----
