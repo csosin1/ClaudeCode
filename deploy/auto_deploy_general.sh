@@ -217,8 +217,8 @@ LREOF
     } > /var/www/landing/debug.json
 
     # === STEP 5: ONE-SHOT CARVANA TEST (runs in background, writes result to static file) ===
-    rm -f /opt/.carvana_test_v1 /opt/.carvana_test_v2  # clear old flags to retry
-    if [ ! -f /opt/.carvana_test_v3 ]; then
+    rm -f /opt/.carvana_test_v1 /opt/.carvana_test_v2 /opt/.carvana_test_v3  # clear old flags
+    if [ ! -f /opt/.carvana_test_v4 ]; then
         echo "$(date): Triggering Carvana test offer in background..." >> "$LOG"
         (
             # Wait for Playwright to be installed (background install from STEP 3)
@@ -249,7 +249,7 @@ LREOF
             echo "$RESULT" > /var/www/landing/carvana-result.json
             echo "$(date): Carvana test result written." >> "$LOG"
             echo "$(date): Result: $RESULT" >> "$LOG"
-            touch /opt/.carvana_test_v3
+            touch /opt/.carvana_test_v4
         ) &
     fi
 
