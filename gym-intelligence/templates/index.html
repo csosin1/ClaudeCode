@@ -260,6 +260,17 @@ document.querySelectorAll('.country-btn').forEach(btn => {
 });
 
 async function initMarket() {
+  // Show per-country counts on buttons
+  const counts = (await api('country-counts')) || {};
+  const total = Object.values(counts).reduce((a, v) => a + v, 0);
+  document.querySelectorAll('.country-btn').forEach(btn => {
+    const c = btn.dataset.c;
+    if (c === 'All Europe') {
+      btn.textContent = total ? `All (${total.toLocaleString()})` : 'All Europe';
+    } else if (counts[c]) {
+      btn.textContent = `${c} (${counts[c].toLocaleString()})`;
+    }
+  });
   loadTable();
 }
 
