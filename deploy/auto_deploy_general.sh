@@ -177,6 +177,110 @@ LREOF
         fi
     fi
 
+    # --- gym-intelligence (Streamlit on port 8502) ---
+    if [ -d "$REPO_DIR/gym-intelligence" ]; then
+        mkdir -p /opt/gym-intelligence
+        mkdir -p /var/log/gym-intelligence
+
+        # Sync code (preserve venv, .env, *.db)
+        rsync -a --delete \
+            --exclude='venv' \
+            --exclude='*.db' \
+            --exclude='.env' \
+            --exclude='__pycache__' \
+            "$REPO_DIR/gym-intelligence/" /opt/gym-intelligence/
+
+        # .env (one-time — user fills in API key via /gym-intelligence/ Setup page)
+        if [ ! -f /opt/gym-intelligence/.env ]; then
+            cat > /opt/gym-intelligence/.env << 'ENVEOF'
+ANTHROPIC_API_KEY=
+ENVEOF
+        fi
+
+        # One-time: Python venv + pip install
+        if [ ! -f /opt/.gym-intelligence-setup ]; then
+            echo "$(date): Setting up gym-intelligence venv..." >> "$LOG"
+
+            # Find python3
+            PYTHON_BIN=""
+            for candidate in /usr/bin/python3 /usr/local/bin/python3; do
+                if [ -x "$candidate" ]; then
+                    PYTHON_BIN="$candidate"
+                    break
+                fi
+            done
+            if [ -z "$PYTHON_BIN" ]; then
+                PYTHON_BIN="$(command -v python3 2>/dev/null || true)"
+            fi
+            if [ -z "$PYTHON_BIN" ] || [ ! -x "$PYTHON_BIN" ]; then
+                echo "$(date): python3 not found, installing..." >> "$LOG"
+                apt-get update >> "$LOG" 2>&1
+                apt-get install -y python3 python3-venv python3-pip >> "$LOG" 2>&1
+                PYTHON_BIN="$(command -v python3 2>/dev/null || echo /usr/bin/python3)"
+            fi
+
+            # Ensure python3-venv is available
+            if ! "$PYTHON_BIN" -m venv --help > /dev/null 2>&1; then
+                apt-get install -y python3-venv >> "$LOG" 2>&1
+            fi
+
+            # Create venv
+            "$PYTHON_BIN" -m venv /opt/gym-intelligence/venv >> "$LOG" 2>&1
+
+            # Install dependencies
+            /opt/gym-intelligence/venv/bin/pip install --upgrade pip >> "$LOG" 2>&1
+            /opt/gym-intelligence/venv/bin/pip install -r /opt/gym-intelligence/requirements.txt >> "$LOG" 2>&1
+
+            # Verify streamlit installed
+            if /opt/gym-intelligence/venv/bin/python -c "import streamlit" 2>/dev/null; then
+                touch /opt/.gym-intelligence-setup
+                echo "$(date): gym-intelligence venv setup complete." >> "$LOG"
+            else
+                echo "$(date): ERROR — gym-intelligence pip install failed (streamlit missing)." >> "$LOG"
+            fi
+        fi
+
+        # systemd service (always rewrite to pick up changes)
+        cat > /etc/systemd/system/gym-intelligence.service << 'SVCEOF'
+[Unit]
+Description=Gym Intelligence (Streamlit on port 8502)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/gym-intelligence
+ExecStart=/opt/gym-intelligence/venv/bin/python -m streamlit run app.py --server.port=8502 --server.baseUrlPath=/gym-intelligence --server.headless=true --server.enableCORS=false --server.enableXsrfProtection=false
+Restart=always
+RestartSec=5
+Environment=HOME=/root
+StandardOutput=append:/var/log/gym-intelligence/app.log
+StandardError=append:/var/log/gym-intelligence/app.log
+
+[Install]
+WantedBy=multi-user.target
+SVCEOF
+        systemctl daemon-reload
+        systemctl enable gym-intelligence >> "$LOG" 2>&1
+        systemctl restart gym-intelligence >> "$LOG" 2>&1
+        echo "$(date): gym-intelligence service restarted." >> "$LOG"
+
+        # Observability (one-time)
+        if [ ! -f /opt/.gym_intelligence_logs_initialized ]; then
+            touch /var/log/gym-intelligence/app.log
+            cat > /etc/logrotate.d/gym-intelligence << 'LREOF'
+/var/log/gym-intelligence/*.log {
+    weekly
+    rotate 4
+    compress
+    missingok
+    notifempty
+    create 0644 root root
+}
+LREOF
+            touch /opt/.gym_intelligence_logs_initialized
+        fi
+    fi
+
     # === STEP 4: LIGHTWEIGHT DIAGNOSTICS ===
     mkdir -p /var/www/landing
     {
@@ -184,7 +288,9 @@ LREOF
         echo "  \"timestamp\": \"$(date -Iseconds)\","
         echo "  \"node_version\": \"$("$NODE_BIN" --version 2>&1 || echo 'NOT_FOUND')\","
         echo "  \"car_offers_status\": \"$(systemctl is-active car-offers 2>&1)\","
-        echo "  \"port_3100\": $(ss -tlnp | grep -q ':3100' && echo true || echo false)"
+        echo "  \"port_3100\": $(ss -tlnp | grep -q ':3100' && echo true || echo false),"
+        echo "  \"gym_intelligence_status\": \"$(systemctl is-active gym-intelligence 2>&1)\","
+        echo "  \"port_8502\": $(ss -tlnp | grep -q ':8502' && echo true || echo false)"
         echo "}"
     } > /var/www/landing/debug.json
 
