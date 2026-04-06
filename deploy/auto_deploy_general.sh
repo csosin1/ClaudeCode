@@ -295,6 +295,9 @@ c.close()
                 echo "$(date): Collection script finished." >> "$LOG"
             fi
         fi
+        # Write DB status for monitoring
+        cd /opt/gym-intelligence
+        /opt/gym-intelligence/venv/bin/python check_db.py >> "$LOG" 2>&1 || true
     fi
 
     # === STEP 4: LIGHTWEIGHT DIAGNOSTICS ===
