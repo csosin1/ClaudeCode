@@ -19,3 +19,18 @@
 - **What went wrong:** Orchestrator polled GitHub Actions results via WebFetch in a loop. The WebFetch cache returned stale "in progress" results for ~6 minutes. Multiple fetch+sleep cycles burned context window for no progress.
 - **Root cause:** WebFetch has a 15-minute cache, so repeated requests to the same URL return stale data.
 - **What to do differently:** After pushing to main, wait at least 90 seconds before checking once. If still in progress, wait another 90 seconds. If a third check still shows in progress, add a cache-busting query parameter to the URL. Don't poll more than 3 times.
+
+## 2026-04-06 Deploy Script Blocking: Heavy Setup Before Static Sync
+- **What went wrong:** The one-time car-offers setup (apt-get, npm install, Playwright install) was placed at the TOP of auto_deploy_general.sh, BEFORE `git fetch` and static file sync. This blocked ALL deploys for 5+ minutes while system packages installed. Landing page, carvana hub, and games couldn't update.
+- **Root cause:** Treated one-time setup as a prerequisite that had to run first. Didn't realize it would block the fast static sync that other projects depend on.
+- **What to do differently:** Always put fast static file sync (landing page, games, hubs) FIRST in the deploy script. Heavy one-time setup and npm install go AFTER static files are deployed. Deploy must complete the fast path in 2-3 seconds regardless of what heavy setup is pending.
+
+## 2026-04-06 Skipped QA and Rollback Tag
+- **What went wrong:** Pushed to main without creating a rollback tag first. Didn't have Builder write QA tests. Didn't check GitHub Actions after deploy. User had to report the 502.
+- **Root cause:** Rushed to show results, skipped the CLAUDE.md workflow (tag → deploy → QA → verify).
+- **What to do differently:** ALWAYS: (1) create rollback tag before deploy, (2) Builder must write Playwright tests as part of every build, (3) check GitHub Actions QA results after every push to main, (4) never tell the user "it should work" — verify with QA first.
+
+## 2026-04-06 Lazy-Load Heavy Dependencies in Express Servers
+- **What went wrong:** server.js did `require('./lib/carvana')` at the top level, which loads playwright-extra. If npm install hasn't completed on the droplet, Node crashes on startup and PM2 loops forever. The Express server never comes up.
+- **Root cause:** Eager loading of a module that depends on Playwright, which may not be installed yet during first deploy.
+- **What to do differently:** Lazy-load heavy dependencies (Playwright, Puppeteer, etc.) inside the route handler that uses them, not at module load time. Return a 503 with a clear message if deps aren't ready yet.
