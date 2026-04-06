@@ -4,9 +4,6 @@ on:
   push:
     branches: [main]
 
-permissions:
-  contents: write
-
 jobs:
   qa:
     runs-on: ubuntu-latest
@@ -42,19 +39,6 @@ jobs:
           curl -sf http://159.223.127.125/debug.json 2>/dev/null || echo '{"error":"debug.json not available"}'
           curl -sf http://159.223.127.125/debug.json >> $GITHUB_STEP_SUMMARY 2>/dev/null || echo '{"error":"debug.json not available"}' >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-
-      - name: Save test results to repo
-        if: always()
-        run: |
-          mkdir -p results
-          curl -sf http://159.223.127.125/car-offers/api/debug --max-time 10 > results/app-debug.json 2>/dev/null || echo '{"error":"app not responding"}' > results/app-debug.json
-          curl -sf http://159.223.127.125/proxy-test.json > results/proxy-test.json 2>/dev/null || echo '{"status":"not ready"}' > results/proxy-test.json
-          curl -sf http://159.223.127.125/carvana-result.json > results/carvana-result.json 2>/dev/null || echo '{"status":"not ready"}' > results/carvana-result.json
-          curl -sf http://159.223.127.125/debug.json > results/debug.json 2>/dev/null || echo '{}' > results/debug.json
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add results/
-          git diff --cached --quiet || git commit -m "results: QA run #${{ github.run_number }} [skip ci]" && git push || true
 
       - name: Upload screenshots
         if: always()
