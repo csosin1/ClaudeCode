@@ -6,15 +6,15 @@
         "method": "curl",
         "port": "10001"
     },
-    "proxyTestedAt": "2026-04-06T19:03:21.245Z",
-    "startedAt": "2026-04-06T19:03:03.817Z",
+    "proxyTestedAt": "2026-04-06T19:06:05.019Z",
+    "startedAt": "2026-04-06T19:05:47.108Z",
     "lastCarvanaRun": null,
     "networkDiag": {
-        "timestamp": "2026-04-06T19:03:08.836Z",
+        "timestamp": "2026-04-06T19:05:52.121Z",
         "tests": {
             "dns_resolve": {
                 "ok": true,
-                "output": "dataroute0.com.\n37.19.211.193\n149.88.97.66\n37.19.211.219\n169.150.204.216\n89.222.99.194\n212.11.41.34\n138.199.35.66"
+                "output": "dataroute0.com.\n149.88.97.66\n37.19.211.219\n212.11.41.34\n138.199.35.66\n169.150.204.216\n37.19.211.193\n89.222.99.194"
             },
             "tcp_proxy": {
                 "ok": true,
@@ -43,12 +43,12 @@
             }
         }
     },
-    "networkDiagAt": "2026-04-06T19:03:08.836Z"
+    "networkDiagAt": "2026-04-06T19:05:52.121Z"
 }
 
 === Debug Config ===
 {
-    "timestamp": "2026-04-06T19:03:42.624Z",
+    "timestamp": "2026-04-06T19:06:26.028Z",
     "proxy_host": "gate.decodo.com",
     "proxy_port": "10001",
     "proxy_user": "spjax0kgms",
@@ -62,7 +62,7 @@
 === Status ===
 {
     "service": {
-        "startedAt": "2026-04-06T19:03:03.817Z",
+        "startedAt": "2026-04-06T19:05:47.108Z",
         "uptime_seconds": 39,
         "node_version": "v22.22.2"
     },
@@ -79,14 +79,14 @@
             "method": "curl",
             "port": "10001"
         },
-        "tested_at": "2026-04-06T19:03:21.245Z"
+        "tested_at": "2026-04-06T19:06:05.019Z"
     },
     "networkDiag": {
-        "timestamp": "2026-04-06T19:03:08.836Z",
+        "timestamp": "2026-04-06T19:05:52.121Z",
         "tests": {
             "dns_resolve": {
                 "ok": true,
-                "output": "dataroute0.com.\n37.19.211.193\n149.88.97.66\n37.19.211.219\n169.150.204.216\n89.222.99.194\n212.11.41.34\n138.199.35.66"
+                "output": "dataroute0.com.\n149.88.97.66\n37.19.211.219\n212.11.41.34\n138.199.35.66\n169.150.204.216\n37.19.211.193\n89.222.99.194"
             },
             "tcp_proxy": {
                 "ok": true,
@@ -115,7 +115,7 @@
             }
         }
     },
-    "networkDiagAt": "2026-04-06T19:03:08.836Z",
+    "networkDiagAt": "2026-04-06T19:05:52.121Z",
     "workingPort": null,
     "playwrightProxy": null,
     "lastCarvanaRun": null
