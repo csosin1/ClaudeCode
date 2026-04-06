@@ -67,22 +67,15 @@ KNOWN_CHAINS = {
 }
 
 
-def build_overpass_query(country_code: str) -> str:
-    """Build Overpass QL query for gym locations in a country."""
+def build_overpass_queries(country_code: str) -> list[tuple[str, str]]:
+    """Build separate Overpass queries per tag type to avoid 504 timeouts."""
     bbox = COUNTRY_BBOXES[country_code]
     bbox_str = f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}"
-    return f"""
-[out:json][timeout:300];
-(
-  node["leisure"="fitness_centre"]({bbox_str});
-  way["leisure"="fitness_centre"]({bbox_str});
-  node["leisure"="sports_centre"]["name"]({bbox_str});
-  way["leisure"="sports_centre"]["name"]({bbox_str});
-  node["amenity"="gym"]({bbox_str});
-  way["amenity"="gym"]({bbox_str});
-);
-out center body;
-"""
+    return [
+        ("fitness_centre", f'[out:json][timeout:90];(node["leisure"="fitness_centre"]({bbox_str});way["leisure"="fitness_centre"]({bbox_str}););out center body;'),
+        ("sports_centre", f'[out:json][timeout:90];(node["leisure"="sports_centre"]["name"]({bbox_str});way["leisure"="sports_centre"]["name"]({bbox_str}););out center body;'),
+        ("amenity=gym", f'[out:json][timeout:90];(node["amenity"="gym"]({bbox_str});way["amenity"="gym"]({bbox_str}););out center body;'),
+    ]
 
 
 def query_overpass(query: str, max_retries: int = 3, progress_cb=None) -> dict:
@@ -200,15 +193,36 @@ def normalize_chain_name(name: str, brand: str | None, operator: str | None) -> 
 
 
 def collect_country(country_code: str, progress_cb=None) -> list[dict]:
-    """Collect all gym locations for a country."""
+    """Collect all gym locations for a country using split queries."""
     logger.info("Collecting gyms for %s", country_code)
-    query = build_overpass_query(country_code)
-    data = query_overpass(query, progress_cb=progress_cb)
-    elements = data.get("elements", [])
-    logger.info("Got %d raw elements for %s", len(elements), country_code)
+    queries = build_overpass_queries(country_code)
+    all_elements = []
+    seen_ids = set()
+
+    for tag_label, query in queries:
+        try:
+            data = query_overpass(query, progress_cb=progress_cb)
+            elements = data.get("elements", [])
+            # Deduplicate
+            new = 0
+            for el in elements:
+                eid = el.get("id")
+                if eid not in seen_ids:
+                    seen_ids.add(eid)
+                    all_elements.append(el)
+                    new += 1
+            if progress_cb:
+                progress_cb(f"    {tag_label}: {new} new elements")
+            time.sleep(3)  # Be polite between queries
+        except Exception as e:
+            if progress_cb:
+                progress_cb(f"    {tag_label}: FAILED — {e}")
+            logger.error("Query %s failed for %s: %s", tag_label, country_code, e)
+
+    logger.info("Got %d total elements for %s", len(all_elements), country_code)
 
     locations = []
-    for el in elements:
+    for el in all_elements:
         loc = extract_location(el, country_code)
         if loc:
             locations.append(loc)

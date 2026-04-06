@@ -277,8 +277,8 @@ SVCEOF
 LREOF
             touch /opt/.gym_intelligence_logs_initialized
         fi
-        # One-time test: verify Overpass API works from droplet
-        if [ ! -f /opt/.gym-intelligence-test-done ] && [ -f /opt/gym-intelligence/test_collect.py ]; then
+        # Test: verify Overpass API works from droplet (re-run each deploy until success)
+        if [ -f /opt/gym-intelligence/test_collect.py ] && ! grep -q '"status": "success"' /opt/gym-intelligence/test_results.json 2>/dev/null; then
             echo "$(date): Running gym-intelligence Overpass API test..." >> "$LOG"
             cd /opt/gym-intelligence
             /opt/gym-intelligence/venv/bin/python test_collect.py >> "$LOG" 2>&1
@@ -287,7 +287,7 @@ LREOF
                 cp /opt/gym-intelligence/test_results.json /var/www/landing/gym-test.json
                 echo "$(date): Test results at /gym-test.json" >> "$LOG"
             fi
-            touch /opt/.gym-intelligence-test-done
+            echo "$(date): Overpass test complete." >> "$LOG"
         fi
     fi
 
