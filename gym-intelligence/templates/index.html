@@ -215,8 +215,14 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
 
 // ---- Utility ----
 async function api(path) {
-  const r = await fetch(API + path);
-  return r.json();
+  try {
+    const r = await fetch(API + path);
+    if (!r.ok) return null;
+    return await r.json();
+  } catch(e) {
+    console.warn('API error:', path, e);
+    return null;
+  }
 }
 
 function esc(s) {
@@ -240,7 +246,7 @@ let mktChart = null;
 let snapshotDates = [];
 
 async function initMarket() {
-  snapshotDates = await api('snapshot-dates');
+  snapshotDates = (await api('snapshot-dates')) || [];
   loadMarketData();
 }
 
@@ -463,10 +469,10 @@ document.getElementById('analysis-select').addEventListener('change', async func
 let refreshPollId = null;
 
 async function loadAdmin() {
-  const status = await api('status');
+  const status = (await api('status')) || { last_refresh: 'N/A', total_locations: 0, api_key_set: false };
   document.getElementById('admin-status').innerHTML = `
-    <div class="stat-card"><div class="val">${status.last_refresh}</div><div class="lbl">Last Refresh</div></div>
-    <div class="stat-card"><div class="val">${status.total_locations.toLocaleString()}</div><div class="lbl">Active Locations</div></div>
+    <div class="stat-card"><div class="val">${status.last_refresh || 'Never'}</div><div class="lbl">Last Refresh</div></div>
+    <div class="stat-card"><div class="val">${(status.total_locations || 0).toLocaleString()}</div><div class="lbl">Active Locations</div></div>
   `;
   document.getElementById('key-status').textContent = status.api_key_set
     ? 'Key configured: ' + status.api_key_preview
@@ -560,9 +566,9 @@ async function startRefresh() {
 }
 
 async function pollRefresh() {
-  const data = await api('refresh-status');
+  const data = (await api('refresh-status')) || { log: [], running: false };
   const logBox = document.getElementById('refresh-log');
-  logBox.textContent = data.log.join('\n') || 'Waiting...';
+  logBox.textContent = (data.log || []).join('\n') || 'Waiting...';
   logBox.scrollTop = logBox.scrollHeight;
   if (!data.running) {
     clearInterval(refreshPollId);
@@ -590,7 +596,7 @@ async function saveKey() {
 }
 
 // ---- Init ----
-initMarket();
+initMarket().catch(e => console.warn('initMarket error:', e));
 </script>
 </body>
 </html>
