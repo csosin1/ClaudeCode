@@ -1,0 +1,7 @@
+streamlit>=1.30.0
+plotly>=5.18.0
+anthropic>=0.40.0
+apscheduler>=3.10.4
+httpx>=0.25.0
+thefuzz[speedup]>=0.20.0
+pandas>=2.1.0
