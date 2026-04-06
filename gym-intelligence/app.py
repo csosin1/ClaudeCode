@@ -351,12 +351,27 @@ def api_collect_only():
     def run():
         global _refresh_running
         try:
+            progress("Checking dependencies...")
+            import httpx as _hx
+            progress("  httpx OK")
+            from thefuzz import fuzz as _f
+            progress("  thefuzz OK")
             import collect
-            progress("=== Data Collection (no API key needed) ===")
+            progress("  collect module OK")
+            progress("=== Starting Data Collection ===")
+            progress("This queries OpenStreetMap for 6 European countries.")
+            progress("Each country takes 30-120 seconds.")
+            progress("")
             collect.run_collection(progress_cb=progress)
-            progress("Collection complete! Go to Market tab to see results.")
+            progress("")
+            progress("Collection complete! Tap Market tab to see results.")
+        except ImportError as e:
+            progress(f"MISSING DEPENDENCY: {e}")
+            progress("The venv may need to reinstall. Try redeploying.")
         except Exception as e:
+            import traceback
             progress(f"Collection FAILED: {e}")
+            progress(traceback.format_exc())
         finally:
             with _refresh_lock:
                 _refresh_running = False

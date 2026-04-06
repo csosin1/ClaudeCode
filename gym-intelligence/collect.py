@@ -85,18 +85,26 @@ out center body;
 """
 
 
-def query_overpass(query: str, max_retries: int = 5) -> dict:
+def query_overpass(query: str, max_retries: int = 3, progress_cb=None) -> dict:
     """Query Overpass API with retry and exponential backoff."""
+    def log(msg):
+        logger.info(msg)
+        if progress_cb:
+            progress_cb(msg)
+
     for attempt in range(max_retries):
         try:
-            logger.info("Overpass query attempt %d/%d", attempt + 1, max_retries)
-            with httpx.Client(timeout=360) as client:
+            log(f"  Querying Overpass API (attempt {attempt + 1}/{max_retries})...")
+            with httpx.Client(timeout=120) as client:
                 resp = client.post(OVERPASS_URL, data={"data": query})
                 resp.raise_for_status()
-                return resp.json()
+                data = resp.json()
+                element_count = len(data.get("elements", []))
+                log(f"  Got {element_count} raw elements from Overpass")
+                return data
         except (httpx.HTTPError, httpx.TimeoutException, json.JSONDecodeError) as e:
             wait = 2 ** (attempt + 1)
-            logger.warning("Overpass attempt %d failed: %s. Retrying in %ds", attempt + 1, e, wait)
+            log(f"  Overpass attempt {attempt + 1} failed: {e}. Retrying in {wait}s...")
             if attempt < max_retries - 1:
                 time.sleep(wait)
     raise RuntimeError(f"Overpass API failed after {max_retries} attempts")
@@ -191,11 +199,11 @@ def normalize_chain_name(name: str, brand: str | None, operator: str | None) -> 
     return cleaned
 
 
-def collect_country(country_code: str) -> list[dict]:
+def collect_country(country_code: str, progress_cb=None) -> list[dict]:
     """Collect all gym locations for a country."""
     logger.info("Collecting gyms for %s", country_code)
     query = build_overpass_query(country_code)
-    data = query_overpass(query)
+    data = query_overpass(query, progress_cb=progress_cb)
     elements = data.get("elements", [])
     logger.info("Got %d raw elements for %s", len(elements), country_code)
 
@@ -315,7 +323,7 @@ def run_collection(progress_cb=None):
             cname = country_names.get(country_code, country_code)
             log(f"Collecting {cname} ({i}/{len(country_list)})...")
             try:
-                locations = collect_country(country_code)
+                locations = collect_country(country_code, progress_cb=progress_cb)
                 seen = upsert_locations(conn, locations, today)
                 all_seen.update(seen)
                 total_locations += len(locations)
