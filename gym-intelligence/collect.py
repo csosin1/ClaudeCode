@@ -78,7 +78,7 @@ def build_overpass_queries(country_code: str) -> list[tuple[str, str]]:
     ]
 
 
-def query_overpass(query: str, max_retries: int = 3, progress_cb=None) -> dict:
+def query_overpass(query: str, max_retries: int = 5, progress_cb=None) -> dict:
     """Query Overpass API with retry and exponential backoff."""
     def log(msg):
         logger.info(msg)
@@ -96,8 +96,9 @@ def query_overpass(query: str, max_retries: int = 3, progress_cb=None) -> dict:
                 log(f"  Got {element_count} raw elements from Overpass")
                 return data
         except (httpx.HTTPError, httpx.TimeoutException, json.JSONDecodeError) as e:
-            wait = 2 ** (attempt + 1)
-            log(f"  Overpass attempt {attempt + 1} failed: {e}. Retrying in {wait}s...")
+            is_rate_limit = "429" in str(e)
+            wait = (30 if is_rate_limit else 10) * (attempt + 1)
+            log(f"  Attempt {attempt + 1} failed: {'rate limited' if is_rate_limit else e}. Waiting {wait}s...")
             if attempt < max_retries - 1:
                 time.sleep(wait)
     raise RuntimeError(f"Overpass API failed after {max_retries} attempts")
@@ -213,7 +214,7 @@ def collect_country(country_code: str, progress_cb=None) -> list[dict]:
                     new += 1
             if progress_cb:
                 progress_cb(f"    {tag_label}: {new} new elements")
-            time.sleep(3)  # Be polite between queries
+            time.sleep(15)  # Wait between queries to avoid rate limiting
         except Exception as e:
             if progress_cb:
                 progress_cb(f"    {tag_label}: FAILED — {e}")
@@ -343,9 +344,9 @@ def run_collection(progress_cb=None):
                 total_locations += len(locations)
                 log(f"  {cname}: {len(locations)} gyms found ({total_locations} total)")
 
-                # Pause between countries to be kind to Overpass
+                # Pause between countries to avoid rate limiting
                 if i < len(country_list):
-                    time.sleep(10)
+                    time.sleep(30)
             except Exception as e:
                 log(f"  {cname}: FAILED — {e}")
                 logger.error("Failed to collect %s: %s", country_code, e)
