@@ -31,6 +31,30 @@ jobs:
         env:
           BASE_URL: http://159.223.127.125
 
+      - name: Fetch server diagnostics
+        if: always()
+        run: |
+          curl -sf http://159.223.127.125/debug.json > /tmp/debug.json 2>/dev/null || echo '{"error":"debug.json not available"}' > /tmp/debug.json
+          echo "### Server Diagnostics" >> $GITHUB_STEP_SUMMARY
+          echo '```json' >> $GITHUB_STEP_SUMMARY
+          cat /tmp/debug.json >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Post diagnostics to issue
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const diag = fs.readFileSync('/tmp/debug.json', 'utf8');
+            const runUrl = `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: 3,
+              body: `## QA Run #${process.env.GITHUB_RUN_NUMBER} — Server Diagnostics\n\n**Commit:** ${context.sha.slice(0,7)}\n**Run:** ${runUrl}\n\n\`\`\`json\n${diag}\n\`\`\``
+            });
+
       - name: Upload screenshots
         if: always()
         uses: actions/upload-artifact@v4
