@@ -177,15 +177,16 @@ LREOF
         fi
     fi
 
-    # === STEP 4: LIGHTWEIGHT DIAGNOSTICS ===
-    # Minimal health check — just enough for QA to verify server state
+    # === STEP 4: DIAGNOSTICS ===
     mkdir -p /var/www/landing
     {
         echo "{"
         echo "  \"timestamp\": \"$(date -Iseconds)\","
         echo "  \"node_version\": \"$("$NODE_BIN" --version 2>&1 || echo 'NOT_FOUND')\","
         echo "  \"car_offers_status\": \"$(systemctl is-active car-offers 2>&1)\","
-        echo "  \"port_3100\": $(ss -tlnp | grep -q ':3100' && echo true || echo false)"
+        echo "  \"port_3100\": $(ss -tlnp | grep -q ':3100' && echo true || echo false),"
+        echo "  \"service_log\": $(tail -20 /var/log/car-offers/error.log 2>/dev/null | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))' 2>/dev/null || echo '\"no log\"'),"
+        echo "  \"env_port\": \"$(grep PROXY_PORT /opt/car-offers/.env 2>/dev/null || echo 'not found')\""
         echo "}"
     } > /var/www/landing/debug.json
 
