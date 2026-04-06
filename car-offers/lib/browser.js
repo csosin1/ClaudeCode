@@ -98,20 +98,11 @@ async function launchBrowser(options = {}) {
     launchOptions.proxy = proxyConfig;
   }
 
-  // Launch with playwright-extra (stealth) — required for Carvana's PerimeterX
-  let browser;
-  let usedStealth = false;
-  try {
-    browser = await chromium.launch(launchOptions);
-    usedStealth = true;
-    console.log('[browser] STEALTH ACTIVE — launched via playwright-extra');
-  } catch (stealthErr) {
-    console.warn(`[browser] playwright-extra FAILED: ${stealthErr.message}`);
-    console.log('[browser] Falling back to regular playwright (NO STEALTH — may get blocked)');
-    const pw = require('playwright');
-    browser = await pw.chromium.launch(launchOptions);
-    console.log('[browser] Launched via regular playwright (no stealth)');
-  }
+  // Use regular playwright (stealth plugin crashes with proxy on port 7000)
+  // US residential IP from Decodo should be sufficient without stealth
+  const pw = require('playwright');
+  const browser = await pw.chromium.launch(launchOptions);
+  console.log('[browser] Launched via regular playwright');
 
   const context = await browser.newContext({
     userAgent: USER_AGENT,
