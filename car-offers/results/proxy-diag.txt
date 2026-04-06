@@ -6,15 +6,21 @@
         "method": "curl",
         "port": "10001"
     },
-    "proxyTestedAt": "2026-04-06T19:11:30.368Z",
-    "startedAt": "2026-04-06T19:11:17.262Z",
-    "lastCarvanaRun": null,
+    "proxyTestedAt": "2026-04-06T19:14:04.839Z",
+    "startedAt": "2026-04-06T19:13:53.503Z",
+    "lastCarvanaRun": {
+        "error": "blocked",
+        "vin": "1HGCV2F9XNA008352",
+        "mileage": "48000",
+        "zip": "06880",
+        "completed_at": "2026-04-06T19:14:12.565Z"
+    },
     "networkDiag": {
-        "timestamp": "2026-04-06T19:11:22.278Z",
+        "timestamp": "2026-04-06T19:13:58.521Z",
         "tests": {
             "dns_resolve": {
                 "ok": true,
-                "output": "dataroute0.com.\n37.19.211.193\n138.199.35.66\n37.19.211.219\n89.222.99.194\n169.150.204.216\n212.11.41.34\n149.88.97.66"
+                "output": "dataroute0.com.\n212.11.41.34\n149.88.97.66\n37.19.211.219\n89.222.99.194\n138.199.35.66\n169.150.204.216\n37.19.211.193"
             },
             "tcp_proxy": {
                 "ok": true,
@@ -42,17 +48,17 @@
             }
         }
     },
-    "networkDiagAt": "2026-04-06T19:11:22.278Z",
+    "networkDiagAt": "2026-04-06T19:13:58.521Z",
     "playwrightProxy": {
         "ok": true,
         "ip": "45.169.214.34",
-        "testedAt": "2026-04-06T19:11:31.777Z"
+        "testedAt": "2026-04-06T19:14:06.719Z"
     }
 }
 
 === Debug Config ===
 {
-    "timestamp": "2026-04-06T19:11:56.837Z",
+    "timestamp": "2026-04-06T19:17:53.239Z",
     "proxy_host": "gate.decodo.com",
     "proxy_port": "10001",
     "proxy_user": "spjax0kgms",
@@ -60,14 +66,14 @@
     "proxy_pass_length": 18,
     "project_email": "caroffers.tool@gmail.com",
     "node_version": "v22.22.2",
-    "uptime_seconds": 39
+    "uptime_seconds": 239
 }
 
 === Status ===
 {
     "service": {
-        "startedAt": "2026-04-06T19:11:17.262Z",
-        "uptime_seconds": 39,
+        "startedAt": "2026-04-06T19:13:53.503Z",
+        "uptime_seconds": 240,
         "node_version": "v22.22.2"
     },
     "proxy": {
@@ -83,14 +89,14 @@
             "method": "curl",
             "port": "10001"
         },
-        "tested_at": "2026-04-06T19:11:30.368Z"
+        "tested_at": "2026-04-06T19:14:04.839Z"
     },
     "networkDiag": {
-        "timestamp": "2026-04-06T19:11:22.278Z",
+        "timestamp": "2026-04-06T19:13:58.521Z",
         "tests": {
             "dns_resolve": {
                 "ok": true,
-                "output": "dataroute0.com.\n37.19.211.193\n138.199.35.66\n37.19.211.219\n89.222.99.194\n169.150.204.216\n212.11.41.34\n149.88.97.66"
+                "output": "dataroute0.com.\n212.11.41.34\n149.88.97.66\n37.19.211.219\n89.222.99.194\n138.199.35.66\n169.150.204.216\n37.19.211.193"
             },
             "tcp_proxy": {
                 "ok": true,
@@ -118,14 +124,20 @@
             }
         }
     },
-    "networkDiagAt": "2026-04-06T19:11:22.278Z",
+    "networkDiagAt": "2026-04-06T19:13:58.521Z",
     "workingPort": null,
     "playwrightProxy": {
         "ok": true,
         "ip": "45.169.214.34",
-        "testedAt": "2026-04-06T19:11:31.777Z"
+        "testedAt": "2026-04-06T19:14:06.719Z"
     },
-    "lastCarvanaRun": null
+    "lastCarvanaRun": {
+        "error": "blocked",
+        "vin": "1HGCV2F9XNA008352",
+        "mileage": "48000",
+        "zip": "06880",
+        "completed_at": "2026-04-06T19:14:12.565Z"
+    }
 }
 
 === Browser Diagnostic ===
