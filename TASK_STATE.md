@@ -1,26 +1,31 @@
 ## Current Task
-Name:              Replace Streamlit with lightweight Flask UI
+Name:              (none — ready for next task)
 CLAUDE.md version: 1.0
-Status:            building
-Spec approved:     yes
-Rollback tag:      rollback-pre-flask-rewrite
-Resume hint:       Builder rewriting app.py as Flask + static HTML. Same port 8502, same nginx config.
+Status:            done
+Spec approved:     n/a
+Rollback tag:      n/a
+Resume hint:       All infrastructure is current. Read CLAUDE.md, LESSONS.md, and RUNBOOK.md before starting any new task.
 
 ## Spec
-Replace Streamlit with Flask + static HTML/JS. Chart.js for charts, Leaflet for maps.
-All via CDN. Loads under 2s on mobile. Same 4 pages as tabs. Dark theme, mobile-first.
+n/a
 
 ## Builder Output
-(pending)
+n/a
 
 ## Reviewer Verdict
-(pending)
+n/a
 
 ## QA Result
-(pending)
+n/a
 
 ## Blockers
 None
 
 ## Cost
-(tracking)
+n/a
+
+## Completed Tasks
+- 2026-04-06: Gym Intelligence Flask migration (Streamlit → Flask + static HTML)
+- 2026-04-06: Infra overhaul — split deploy scripts, /status.json, Server Check workflow, first-deploy 502 fix
+- 2026-04-06: Cleanup — removed rogue workflows, diagnostic output, expanded .gitignore
+- 2026-04-05: Agent harness setup, closed-loop QA, session recovery, skills registry
