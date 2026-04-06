@@ -70,18 +70,22 @@ async function launchBrowser(options = {}) {
   ];
 
   // Build proxy config
-  // NOTE: This Decodo plan does NOT support username suffixes (-session-xxx, -country-us).
-  // Plain username only. IP rotation is random across all countries.
+  // Decodo geo-targeting: use port 7000 with user- prefix and country/zip params
+  // Format: user-USERNAME-country-us-zip-ZIPCODE on gate.decodo.com:7000
   let proxyConfig = null;
   if (config.PROXY_HOST && config.PROXY_PASS) {
-    const proxyPort = (config.PROXY_PORT === '7000') ? '10001' : (config.PROXY_PORT || '10001');
+    // Port 7000 is the standard Decodo residential rotating endpoint
+    // Ports 10001-10007 work but don't support advanced params
+    const proxyPort = '7000';
+    // user- prefix required when using parameters like country, zip, session
+    const proxyUser = `user-${config.PROXY_USER}-country-us-zip-06880`;
 
     proxyConfig = {
       server: `http://${config.PROXY_HOST}:${proxyPort}`,
-      username: config.PROXY_USER,
+      username: proxyUser,
       password: config.PROXY_PASS,
     };
-    console.log(`[browser] Using proxy: ${config.PROXY_HOST}:${proxyPort} user=${config.PROXY_USER}`);
+    console.log(`[browser] Using proxy: ${config.PROXY_HOST}:${proxyPort} user=${proxyUser}`);
   } else {
     console.log('[browser] No proxy configured — using direct connection');
   }

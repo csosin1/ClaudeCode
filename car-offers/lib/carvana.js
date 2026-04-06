@@ -83,94 +83,35 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
     browser = result.browser;
     page = result.page;
 
-    // --- Step 1: Get a US IP and navigate to sell-my-car ---
-    console.log('[carvana] Step 1: Getting US proxy IP...');
-
-    // Close initial browser and retry with new IPs until we get a US one
-    await closeBrowser(browser);
-    browser = null;
-
-    let proxyIp = null;
-    let attempts = 0;
-    const MAX_IP_ATTEMPTS = 15;
-
-    while (attempts < MAX_IP_ATTEMPTS) {
-      attempts++;
-      console.log(`[carvana] IP attempt ${attempts}/${MAX_IP_ATTEMPTS}...`);
-
-      try {
-        const freshResult = await launchBrowser();
-        browser = freshResult.browser;
-        const freshPage = freshResult.page;
-
-        // Check what IP we got
-        await freshPage.goto('http://httpbin.org/ip', { timeout: 15000 });
-        const ipText = await freshPage.textContent('body');
-        const ipMatch = ipText.match(/"origin":\s*"([^"]+)"/);
-        const currentIp = ipMatch ? ipMatch[1] : 'unknown';
-
-        // Check if it's a US IP using ip-api.com (free, no auth needed)
-        await freshPage.goto(`http://ip-api.com/json/${currentIp}?fields=country,countryCode`, { timeout: 15000 });
-        const geoText = await freshPage.textContent('body');
-        const geo = JSON.parse(geoText);
-
-        console.log(`[carvana] Got IP ${currentIp} — country: ${geo.country} (${geo.countryCode})`);
-
-        if (geo.countryCode === 'US') {
-          proxyIp = currentIp;
-          console.log(`[carvana] US IP found on attempt ${attempts}!`);
-
-          // Navigate to Carvana with this US IP
-          try {
-            await freshPage.goto(CARVANA_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
-          } catch (navErr) {
-            console.error(`[carvana] Navigation failed: ${navErr.message}`);
-            await screenshot(freshPage, '00-nav-failure').catch(() => {});
-            throw navErr;
-          }
-          await humanDelay(3000, 6000);
-          await screenshot(freshPage, '01-landing');
-
-          if (await isBlocked(freshPage)) {
-            const ssPath = await screenshot(freshPage, 'blocked');
-            const pageTitle = await freshPage.title().catch(() => 'unknown');
-            const bodySnippet = await freshPage.textContent('body').then(t => t.substring(0, 300)).catch(() => '');
-            console.log(`[carvana] BLOCKED even with US IP ${currentIp} — title: ${pageTitle}`);
-            // Try again with a different US IP
-            await closeBrowser(browser);
-            browser = null;
-            continue;
-          }
-
-          // Success — we have a US IP and the page loaded
-          result = freshResult;
-          page = freshPage;
-          browser = freshResult.browser;
-          break;
-        } else {
-          // Not US — close and try again
-          await closeBrowser(browser);
-          browser = null;
-        }
-      } catch (err) {
-        console.log(`[carvana] Attempt ${attempts} failed: ${err.message}`);
-        if (browser) { await closeBrowser(browser); browser = null; }
-      }
-
-      checkTimeout();
+    // --- Step 1: Verify US IP and navigate to sell-my-car ---
+    console.log('[carvana] Step 1: Verifying US proxy IP...');
+    try {
+      await page.goto('http://httpbin.org/ip', { timeout: 20000 });
+      const ipInfo = await page.textContent('body');
+      console.log(`[carvana] Proxy IP: ${ipInfo}`);
+    } catch (proxyErr) {
+      console.error(`[carvana] Proxy verification failed: ${proxyErr.message}`);
+      throw new Error(`Proxy connection failed: ${proxyErr.message}`);
     }
 
-    if (!proxyIp) {
-      return {
-        error: `Could not get a US proxy IP after ${MAX_IP_ATTEMPTS} attempts. This proxy plan may not include US IPs.`,
-        details: { vin, mileage, zip, attempts },
-      };
+    console.log('[carvana] Navigating to Carvana sell page...');
+    try {
+      await page.goto(CARVANA_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    } catch (navErr) {
+      console.error(`[carvana] Navigation failed: ${navErr.message}`);
+      await screenshot(page, '00-nav-failure').catch(() => {});
+      throw navErr;
     }
-    if (!browser) {
-      return {
-        error: `Got US IP ${proxyIp} but Carvana still blocked. May need stealth improvements.`,
-        details: { vin, mileage, zip, proxyIp, attempts },
-      };
+    await humanDelay(3000, 6000);
+    await screenshot(page, '01-landing');
+
+    if (await isBlocked(page)) {
+      const ssPath = await screenshot(page, 'blocked');
+      const pageTitle = await page.title().catch(() => 'unknown');
+      const bodySnippet = await page.textContent('body').then(t => t.substring(0, 500)).catch(() => '');
+      const pageUrl = page.url();
+      console.log(`[carvana] BLOCKED — title: ${pageTitle}, url: ${pageUrl}`);
+      return { error: 'blocked', details: { pageTitle, bodySnippet, screenshot: ssPath, url: pageUrl } };
     }
 
     // --- Step 2: Enter VIN ---

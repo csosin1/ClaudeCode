@@ -34,9 +34,11 @@ function saveResults() {
 async function runFullDiagnostic() {
   try { config.reloadConfig(); } catch (_) {}
   const host = config.PROXY_HOST || 'gate.decodo.com';
-  const port = (config.PROXY_PORT === '7000') ? '10001' : (config.PROXY_PORT || '10001');
+  const port = '7000'; // Decodo standard residential port (supports geo params)
   const user = config.PROXY_USER || '';
   const pass = config.PROXY_PASS || '';
+  // Decodo requires user- prefix when using advanced params (country, zip, session)
+  const geoUser = `user-${user}-country-us-zip-06880`;
   const diag = { timestamp: new Date().toISOString(), tests: {} };
 
   // Helper: run a shell command with timeout, return {ok, output/error}
@@ -57,43 +59,28 @@ async function runFullDiagnostic() {
   // Test 2: TCP connectivity to proxy port
   run('tcp_proxy', `timeout 5 bash -c 'echo > /dev/tcp/${host}/${port}' 2>&1 && echo "TCP OK" || echo "TCP FAIL"`, 10000);
 
-  // Test 3: curl to httpbin.org through proxy (simple, never blocks)
-  const proxyUrl = `http://${user}:${pass}@${host}:${port}`;
-  run('curl_httpbin_proxy', `curl -s --max-time 15 --proxy "${proxyUrl}" http://httpbin.org/ip 2>&1`);
+  // Test 3: curl through proxy WITH geo-targeting (US zip 06880) — port 7000
+  const geoProxyUrl = `http://${geoUser}:${pass}@${host}:${port}`;
+  run('curl_httpbin_geo', `curl -s --max-time 20 --proxy "${geoProxyUrl}" http://httpbin.org/ip 2>&1`);
 
-  // Test 4: curl to ip.decodo.com through proxy
-  run('curl_decodo_proxy', `curl -s --max-time 15 --proxy "${proxyUrl}" https://ip.decodo.com/json 2>&1`);
+  // Test 4: curl to ip.decodo.com through geo-targeted proxy
+  run('curl_decodo_geo', `curl -s --max-time 20 --proxy "${geoProxyUrl}" https://ip.decodo.com/json 2>&1`);
 
   // Test 5: curl to httpbin directly (no proxy — baseline)
   run('curl_httpbin_direct', `curl -s --max-time 10 http://httpbin.org/ip 2>&1`);
 
-  // Test 6: curl to example.com through proxy (HTTPS)
-  run('curl_example_proxy', `curl -s --max-time 15 --proxy "${proxyUrl}" https://example.com 2>&1 | head -5`);
+  // Test 6: curl to Carvana through geo-targeted proxy (check if Cloudflare passes)
+  run('curl_carvana_geo', `curl -s --max-time 20 -o /dev/null -w "%{http_code}" --proxy "${geoProxyUrl}" https://www.carvana.com/sell-my-car 2>&1`);
 
-  // Test 7: try with session suffix
-  const sessionProxy = `http://${user}-session-test123:${pass}@${host}:${port}`;
-  run('curl_session_proxy', `curl -s --max-time 15 --proxy "${sessionProxy}" http://httpbin.org/ip 2>&1`);
-
-  // Test 8: try other ports if main port failed
-  if (!diag.tests.curl_httpbin_proxy.ok) {
-    for (const altPort of ['10002', '10003', '10004', '10005', '10006', '10007']) {
-      if (altPort === port) continue;
-      const altProxy = `http://${user}:${pass}@${host}:${altPort}`;
-      run(`curl_port_${altPort}`, `curl -s --max-time 10 --proxy "${altProxy}" http://httpbin.org/ip 2>&1`);
-      if (diag.tests[`curl_port_${altPort}`].ok && diag.tests[`curl_port_${altPort}`].output.includes('origin')) {
-        diag.workingPort = altPort;
-        console.log(`[diag] FOUND WORKING PORT: ${altPort}`);
-        break;
-      }
-    }
-  }
+  // Test 7: plain proxy on port 10001 (no geo, for comparison)
+  const plainProxyUrl = `http://${user}:${pass}@${host}:10001`;
+  run('curl_httpbin_plain', `curl -s --max-time 15 --proxy "${plainProxyUrl}" http://httpbin.org/ip 2>&1`);
 
   selfTest.networkDiag = diag;
   selfTest.networkDiagAt = diag.timestamp;
 
-  // Determine overall proxy status from curl tests
-  // "Access denied" means curl got a response but auth failed — not a success
-  const httpbinResult = diag.tests.curl_httpbin_proxy;
+  // Determine overall proxy status from geo-targeted curl test
+  const httpbinResult = diag.tests.curl_httpbin_geo;
   if (httpbinResult && httpbinResult.ok && httpbinResult.output.includes('origin') && !httpbinResult.output.includes('Access denied')) {
     try {
       const parsed = JSON.parse(httpbinResult.output);
@@ -556,8 +543,8 @@ app.get('/api/startup-results', (_req, res) => {
 async function testPlaywrightProxy() {
   let browser = null;
   try {
-    const proxyPort = (config.PROXY_PORT === '7000') ? '10001' : (config.PROXY_PORT || '10001');
-    const proxyUser = config.PROXY_USER;
+    const proxyPort = '7000';
+    const proxyUser = `user-${config.PROXY_USER}-country-us-zip-06880`;
     const pw = require('playwright');
     browser = await pw.chromium.launch({
       headless: true,
