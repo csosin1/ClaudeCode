@@ -26,7 +26,9 @@ jobs:
       - name: Fetch diagnostic results
         run: |
           mkdir -p car-offers/results
-          echo "=== Startup Results ===" > car-offers/results/proxy-diag.txt
+          echo "=== Fetched at $(date -u) ===" > car-offers/results/proxy-diag.txt
+          echo "" >> car-offers/results/proxy-diag.txt
+          echo "=== Startup Results ===" >> car-offers/results/proxy-diag.txt
           curl -sf --max-time 15 "http://159.223.127.125/car-offers/api/startup-results?v=$(date +%s)" 2>&1 | python3 -m json.tool >> car-offers/results/proxy-diag.txt 2>&1 || echo "FETCH FAILED: startup-results not available" >> car-offers/results/proxy-diag.txt
           echo "" >> car-offers/results/proxy-diag.txt
 
