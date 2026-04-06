@@ -346,6 +346,7 @@ Reusable skills live in `SKILLS/`. Before building a feature, check if a relevan
 | Skill | File | Description |
 |-------|------|-------------|
 | residential-proxy | `SKILLS/residential-proxy.md` | Routes Playwright through Decodo residential proxies for bot-evasion automation. Includes stealth config, sticky sessions, human-like delays, and site-specific notes. |
+| anthropic-api | `SKILLS/anthropic-api.md` | Claude API integration for server-side AI features. Includes Python/Node patterns, classification, JSON extraction, batch processing, rate limiting, model selection, and .env setup. |
 
 When a project needs a skill, read the skill file first. It has everything: dependencies, code patterns, env vars, and known issues.
 
