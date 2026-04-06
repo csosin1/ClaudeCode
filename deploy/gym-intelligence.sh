@@ -159,11 +159,26 @@ print(countries)
 c.close()
 " 2>/dev/null || echo "0")
 
+echo "$(date): Countries in DB: $COUNTRY_COUNT/6" >> "$LOG"
 if [ "$COUNTRY_COUNT" -lt 6 ]; then
-    echo "$(date): Only $COUNTRY_COUNT/6 countries collected, running collection..." >> "$LOG"
+    echo "$(date): Missing countries — running collection (this may take 10+ minutes)..." >> "$LOG"
     cd "$PROJECT_DIR"
-    timeout 600 "$PROJECT_DIR/venv/bin/python" test_collect.py >> "$LOG" 2>&1
-    echo "$(date): Collection script finished." >> "$LOG"
+    # No timeout — Overpass rate limiting means this can take a while
+    "$PROJECT_DIR/venv/bin/python" test_collect.py >> "$LOG" 2>&1
+    # Report new counts
+    "$PROJECT_DIR/venv/bin/python" -c "
+import sys; sys.path.insert(0, '$PROJECT_DIR')
+from db import get_connection
+c = get_connection()
+for row in c.execute('SELECT country, COUNT(*) as n FROM locations WHERE active=1 GROUP BY country').fetchall():
+    print(f'  {row[\"country\"]}: {row[\"n\"]} locations')
+total = c.execute('SELECT COUNT(*) as n FROM locations WHERE active=1').fetchone()['n']
+print(f'Total: {total}')
+c.close()
+" >> "$LOG" 2>&1
+    echo "$(date): Collection finished." >> "$LOG"
+else
+    echo "$(date): All 6 countries present, skipping collection." >> "$LOG"
 fi
 
 # Write gym status to main diagnostics
