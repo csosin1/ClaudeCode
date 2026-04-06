@@ -9,6 +9,8 @@ app.use(express.urlencoded({ extended: false }));
 
 // --- Setup page: configure .env from the browser ---
 app.get('/setup', (_req, res) => {
+  // Reload config from disk in case .env was written after server started
+  try { config.reloadConfig(); } catch (_) {}
   const msg = _req.query.msg || '';
   res.send(`<!DOCTYPE html>
 <html lang="en">
@@ -96,19 +98,19 @@ app.get('/setup', (_req, res) => {
   ${msg === 'required' ? '<div class="alert alert-warn">Please configure your proxy and email first.</div>' : ''}
   <form class="card" method="POST" action="/api/setup">
     <label for="proxyHost">Proxy Host</label>
-    <input type="text" id="proxyHost" name="proxyHost" placeholder="proxy.example.com" value="${escapeAttr(config.PROXY_HOST)}">
+    <input type="text" id="proxyHost" name="proxyHost" placeholder="proxy.example.com" value="${escapeAttr(config.PROXY_HOST || 'gate.decodo.com')}">
 
     <label for="proxyPort">Proxy Port</label>
-    <input type="text" id="proxyPort" name="proxyPort" placeholder="12345" inputmode="numeric" value="${escapeAttr(config.PROXY_PORT)}">
+    <input type="text" id="proxyPort" name="proxyPort" placeholder="12345" inputmode="numeric" value="${escapeAttr(config.PROXY_PORT || '7000')}">
 
     <label for="proxyUser">Proxy Username</label>
-    <input type="text" id="proxyUser" name="proxyUser" placeholder="username" value="${escapeAttr(config.PROXY_USER)}">
+    <input type="text" id="proxyUser" name="proxyUser" placeholder="username" value="${escapeAttr(config.PROXY_USER || 'spjax0kgms')}">
 
     <label for="proxyPass">Proxy Password</label>
     <input type="password" id="proxyPass" name="proxyPass" placeholder="${config.PROXY_PASS ? '••••••••' : 'password'}" value="">
 
     <label for="projectEmail">Project Email</label>
-    <input type="email" id="projectEmail" name="projectEmail" placeholder="you@example.com" value="${escapeAttr(config.PROJECT_EMAIL)}">
+    <input type="email" id="projectEmail" name="projectEmail" placeholder="you@example.com (optional)" value="${escapeAttr(config.PROJECT_EMAIL)}">
 
     <button type="submit">Save Configuration</button>
   </form>
