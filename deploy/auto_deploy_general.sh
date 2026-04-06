@@ -1,7 +1,9 @@
 #!/bin/bash
 # General auto-deploy: watches main branch, syncs static files to the droplet.
-# Runs every 30s via systemd timer. Handles games, landing page, and nginx config.
-# CRITICAL: Static file sync MUST run first and fast (2-3s). Heavy setup runs after.
+# Webhook triggers instant deploy; 5-min timer as fallback.
+#
+# RULE 1: Update THIS SCRIPT first after git reset — breaks deadlock if old version is stuck.
+# RULE 2: Static file sync next (2-3s). Heavy setup (npm, apt-get) runs last and never blocks.
 
 REPO_DIR="/opt/site-deploy"
 LOG="/var/log/general-deploy.log"
@@ -14,24 +16,27 @@ git fetch origin main 2>/dev/null
 LOCAL=$(git rev-parse HEAD)
 REMOTE=$(git rev-parse origin/main)
 
-# Update nginx config if version changed (check every cycle)
-if [ -f "$REPO_DIR/deploy/NGINX_VERSION" ]; then
-    NEED=$(cat "$REPO_DIR/deploy/NGINX_VERSION")
-    HAVE=$(cat /opt/.nginx_version 2>/dev/null || echo "none")
-    if [ "$NEED" != "$HAVE" ]; then
-        echo "$(date): Updating nginx config (v$NEED)..." >> "$LOG"
-        mkdir -p /var/www/landing
-        cp "$REPO_DIR/deploy/landing.html" /var/www/landing/index.html 2>/dev/null || true
-        bash "$REPO_DIR/deploy/update_nginx.sh" >> "$LOG" 2>&1 || true
-        echo "$NEED" > /opt/.nginx_version
-    fi
-fi
-
 if [ "$LOCAL" != "$REMOTE" ]; then
-    echo "$(date): Main branch updated, syncing..." >> "$LOG"
+    echo "$(date): New code on main, deploying..." >> "$LOG"
     git reset --hard origin/main
 
-    # --- FAST STATIC SYNC (completes in seconds) ---
+    # === STEP 0: UPDATE THIS SCRIPT FIRST (breaks deadlock) ===
+    cp "$REPO_DIR/deploy/auto_deploy_general.sh" /opt/auto_deploy_general.sh 2>/dev/null || true
+
+    # === STEP 1: NGINX CONFIG (if version changed) ===
+    if [ -f "$REPO_DIR/deploy/NGINX_VERSION" ]; then
+        NEED=$(cat "$REPO_DIR/deploy/NGINX_VERSION")
+        HAVE=$(cat /opt/.nginx_version 2>/dev/null || echo "none")
+        if [ "$NEED" != "$HAVE" ]; then
+            echo "$(date): Updating nginx config (v$NEED)..." >> "$LOG"
+            mkdir -p /var/www/landing
+            cp "$REPO_DIR/deploy/landing.html" /var/www/landing/index.html 2>/dev/null || true
+            bash "$REPO_DIR/deploy/update_nginx.sh" >> "$LOG" 2>&1 || true
+            echo "$NEED" > /opt/.nginx_version
+        fi
+    fi
+
+    # === STEP 2: FAST STATIC SYNC (must complete in seconds) ===
 
     mkdir -p /var/www/landing
     cp "$REPO_DIR/deploy/landing.html" /var/www/landing/index.html 2>/dev/null || true
@@ -48,24 +53,19 @@ if [ "$LOCAL" != "$REMOTE" ]; then
 
     echo "$(date): Static files deployed." >> "$LOG"
 
-    # --- CAR-OFFERS (uses systemd, not PM2) ---
+    # === STEP 3: CAR-OFFERS (Express server via systemd) ===
 
     if [ -d "$REPO_DIR/car-offers" ]; then
         mkdir -p /opt/car-offers/data
 
-        # Create .env if it doesn't exist (pre-filled with Decodo proxy)
+        # .env (one-time, pre-filled with Decodo proxy — user adds password via web UI)
         if [ ! -f /opt/car-offers/.env ]; then
             cat > /opt/car-offers/.env << 'ENVEOF'
-# Decodo/Smartproxy residential proxy
 PROXY_HOST=gate.decodo.com
 PROXY_PORT=7000
 PROXY_USER=spjax0kgms
 PROXY_PASS=
-
-# Project email (leave blank to auto-generate disposable email)
 PROJECT_EMAIL=
-
-# Express server
 PORT=3100
 ENVEOF
         fi
@@ -77,17 +77,17 @@ ENVEOF
             --exclude='.env' \
             "$REPO_DIR/car-offers/" /opt/car-offers/
 
-        # npm install if needed (express + dotenv are tiny — installs in seconds)
+        # npm install (express + dotenv = seconds)
         if [ ! -f /opt/car-offers/.npm_installed ] || [ "$REPO_DIR/car-offers/package.json" -nt /opt/car-offers/.npm_installed ]; then
-            echo "$(date): Running npm install for car-offers..." >> "$LOG"
+            echo "$(date): npm install for car-offers..." >> "$LOG"
             cd /opt/car-offers && npm install --production >> "$LOG" 2>&1
             touch /opt/car-offers/.npm_installed
-            echo "$(date): npm install complete." >> "$LOG"
+            echo "$(date): npm install done." >> "$LOG"
         fi
 
-        # Install Playwright + system deps in background (heavy, don't block)
+        # Playwright + system deps — background (heavy, don't block server)
         if [ ! -f /opt/car-offers/.playwright_installed ]; then
-            echo "$(date): Installing Playwright in background..." >> "$LOG"
+            echo "$(date): Playwright installing in background..." >> "$LOG"
             (
                 apt-get update -qq >> "$LOG" 2>&1
                 apt-get install -y -qq \
@@ -96,13 +96,12 @@ ENVEOF
                     libpango-1.0-0 libcairo2 libasound2 libxshmfence1 >> "$LOG" 2>&1
                 cd /opt/car-offers && npx playwright install chromium --with-deps >> "$LOG" 2>&1
                 touch /opt/car-offers/.playwright_installed
-                echo "$(date): Playwright install complete." >> "$LOG"
+                echo "$(date): Playwright install done." >> "$LOG"
             ) &
         fi
 
-        # Create systemd service for car-offers (no PM2 needed)
-        if [ ! -f /etc/systemd/system/car-offers.service ]; then
-            cat > /etc/systemd/system/car-offers.service << 'SVCEOF'
+        # systemd service (no PM2)
+        cat > /etc/systemd/system/car-offers.service << 'SVCEOF'
 [Unit]
 Description=Car Offer Tool (Express on port 3100)
 After=network.target
@@ -114,15 +113,14 @@ ExecStart=/usr/bin/node server.js
 Restart=always
 RestartSec=5
 Environment=NODE_ENV=production
+StandardOutput=append:/var/log/car-offers/error.log
+StandardError=append:/var/log/car-offers/error.log
 
 [Install]
 WantedBy=multi-user.target
 SVCEOF
-            systemctl daemon-reload
-            systemctl enable car-offers
-        fi
-
-        # Start or restart the service
+        systemctl daemon-reload
+        systemctl enable car-offers >> "$LOG" 2>&1
         systemctl restart car-offers >> "$LOG" 2>&1
         echo "$(date): car-offers service restarted." >> "$LOG"
 
@@ -145,10 +143,7 @@ LREOF
         fi
     fi
 
-    # Update the running copy of this script
-    cp "$REPO_DIR/deploy/auto_deploy_general.sh" /opt/auto_deploy_general.sh 2>/dev/null || true
-
-    echo "$(date): General deploy complete." >> "$LOG"
+    echo "$(date): Deploy complete." >> "$LOG"
 else
-    echo "$(date): No changes." >> "$LOG"
+    : # No changes — silent
 fi
