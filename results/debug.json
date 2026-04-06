@@ -1,6 +1,8 @@
 {
-  "timestamp": "2026-04-06T18:16:30+00:00",
+  "timestamp": "2026-04-06T18:20:07+00:00",
   "node_version": "v22.22.2",
   "car_offers_status": "active",
-  "port_3100": false
+  "port_3100": false,
+  "service_log": "\nCar Offer Tool running on http://0.0.0.0:3100\nCar Offer Tool running on http://0.0.0.0:3100\nCar Offer Tool running on http://0.0.0.0:3100\n[browser] Using proxy: gate.decodo.com\n[test-proxy] Error: page.goto: Timeout 20000ms exceeded.\nCall log:\n  - navigating to \"https://ip.decodo.com/json\", waiting until \"load\"\n\nCar Offer Tool running on http://0.0.0.0:3100\nCar Offer Tool running on http://0.0.0.0:3100\n[browser] Using proxy: gate.decodo.com:10001\n[test-proxy] Error: page.goto: Timeout 20000ms exceeded.\nCall log:\n  - navigating to \"https://ip.decodo.com/json\", waiting until \"load\"\n\nCar Offer Tool running on http://0.0.0.0:3100\nCar Offer Tool running on http://0.0.0.0:3100\nCar Offer Tool running on http://0.0.0.0:3100\nCar Offer Tool running on http://0.0.0.0:3100\n",
+  "env_port": "PROXY_PORT=10001"
 }
