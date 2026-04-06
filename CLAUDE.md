@@ -15,6 +15,7 @@ The user prompts from an iPhone. Claude does everything — writes code, deploys
 - All server-side changes go through the deploy pipeline (push to `main` → auto-deploy)
 - All external downloads must happen in code that runs on the droplet, not here
 - All live-site testing runs via GitHub Actions, not from this sandbox
+- **To check server state**: trigger the "Server Check" workflow via GitHub API (see "Checking Server State" section below). Do NOT push empty "Trigger:" commits to main — use the workflow instead.
 - See "Production Environment" section for details
 
 **Infrastructure ownership — what you can and can't modify:**
@@ -402,11 +403,43 @@ Runtimes:        [auto-detected at setup]
 Process manager: [auto-detected at setup]
 ```
 
-**SSH is not available.** The Claude Code sandbox cannot reach the droplet via SSH or direct HTTP. All server-side changes — nginx config, cron jobs, log setup, directory creation — must be made through the auto-deploy pipeline by modifying files in `deploy/`. Never attempt SSH, scp, or direct server commands. Never create standalone "run this on the server" scripts. If something needs to happen on the droplet, put it in `deploy/auto_deploy_general.sh` (one-time gated with a flag file) or `deploy/update_nginx.sh` (triggered by bumping `NGINX_VERSION`).
+**SSH is not available.** The Claude Code sandbox cannot reach the droplet via SSH or direct HTTP. All server-side changes — nginx config, cron jobs, log setup, directory creation — must be made through the auto-deploy pipeline by modifying files in `deploy/`. Never attempt SSH, scp, or direct server commands. Never create standalone "run this on the server" scripts. If something needs to happen on the droplet, put it in your project's deploy script (`deploy/<project>.sh`) or propose changes to the main deploy script via `CHANGES.md`. To **read** server state without pushing, use the Server Check workflow (see "Checking Server State" section).
 
 **External downloads are blocked from the sandbox.** The sandbox network proxy only allows traffic to package registries, GitHub, and Anthropic domains. HTTP requests to any other host (SEC EDGAR, financial APIs, external data sources, the droplet IP) will fail with a 403. Code that downloads external data must run on the droplet, not in the sandbox. Write the download logic, push it via the deploy pipeline, and let it execute on the server where there are no network restrictions.
 
 Builders flag any library or runtime feature not listed here before using it.
+
+-----
+
+## Checking Server State
+
+The sandbox cannot reach the droplet, but you CAN reach GitHub. Use the **"Server Check"** workflow (`.github/workflows/check.yml`) to check server state without pushing to main.
+
+**How to use it:**
+
+1. Trigger the workflow via the GitHub MCP tool `mcp__github__create_workflow_dispatch` (or equivalent):
+   - Repository: `csosin1/ClaudeCode`
+   - Workflow: `check.yml`
+   - Branch: `main`
+   - Input `target`: `"all"`, `"car-offers"`, `"gym-intelligence"`, `"status"`, or a custom URL path like `"/car-offers/api/status"`
+
+2. Wait ~30 seconds for it to complete (it's fast — no Playwright install, just curl).
+
+3. Read the results from the workflow run summary via MCP tools.
+
+**What it reports:**
+- HTTP status of all endpoints
+- `status.json`: service status, recent logs, ports, disk, memory, deploy commit
+- `debug.json`: lightweight health check
+- Project-specific endpoints (API status, DB status, etc.)
+
+**Do NOT push empty "Trigger:" commits to main.** Every push to main triggers a full deploy + QA cycle. Use the workflow dispatch for read-only checks. Reserve pushes for actual code changes.
+
+**When to push vs when to check:**
+- "Is my service running?" → trigger Server Check workflow
+- "Did my code change deploy correctly?" → push to main, wait for QA
+- "What does the error log say?" → trigger Server Check workflow (reads from status.json)
+- "Is the proxy working?" → trigger Server Check with target `"/car-offers/api/status"`
 
 -----
 

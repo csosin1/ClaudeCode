@@ -1,0 +1,101 @@
+name: Server Check
+
+# Trigger via GitHub API / MCP: no push to main needed.
+# Project chats use this to check server state without cluttering git history.
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'What to check: "all", "car-offers", "gym-intelligence", "status", or a custom URL path like "/car-offers/api/status"'
+        required: false
+        default: 'all'
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+
+    steps:
+      - name: Check server status
+        run: |
+          BASE="http://159.223.127.125"
+          TARGET="${{ github.event.inputs.target }}"
+
+          echo "## Server Check: $TARGET" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          check_url() {
+            local label="$1"
+            local url="$2"
+            echo "--- Checking $label ($url) ---"
+            STATUS=$(curl -sf -o /dev/null -w '%{http_code}' --max-time 10 "$url" 2>/dev/null || echo "000")
+            if [ "$STATUS" = "200" ]; then
+              echo "✅ $label: $STATUS"
+              echo "- ✅ **$label**: $STATUS" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "❌ $label: $STATUS"
+              echo "- ❌ **$label**: $STATUS" >> $GITHUB_STEP_SUMMARY
+            fi
+          }
+
+          fetch_json() {
+            local label="$1"
+            local url="$2"
+            echo ""
+            echo "--- $label ---"
+            BODY=$(curl -sf --max-time 10 "$url" 2>/dev/null || echo '{"error":"request failed"}')
+            echo "$BODY"
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### $label" >> $GITHUB_STEP_SUMMARY
+            echo '```json' >> $GITHUB_STEP_SUMMARY
+            echo "$BODY" | python3 -m json.tool 2>/dev/null || echo "$BODY" >> $GITHUB_STEP_SUMMARY
+            echo "$BODY" | python3 -m json.tool >> $GITHUB_STEP_SUMMARY 2>/dev/null || true
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          }
+
+          # Custom URL path
+          if [[ "$TARGET" == /* ]]; then
+            check_url "Custom: $TARGET" "$BASE$TARGET"
+            echo ""
+            echo "--- Response body ---"
+            curl -sf --max-time 10 "$BASE$TARGET" 2>/dev/null || echo "(no response)"
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            curl -sf --max-time 10 "$BASE$TARGET" >> $GITHUB_STEP_SUMMARY 2>/dev/null || echo "(no response)" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+
+          # Status check (always)
+          if [ "$TARGET" = "all" ] || [ "$TARGET" = "status" ]; then
+            fetch_json "status.json" "$BASE/status.json"
+            fetch_json "debug.json" "$BASE/debug.json"
+          fi
+
+          # Car-offers
+          if [ "$TARGET" = "all" ] || [ "$TARGET" = "car-offers" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Car Offers" >> $GITHUB_STEP_SUMMARY
+            check_url "Car Offers main page" "$BASE/car-offers/"
+            check_url "Car Offers dashboard" "$BASE/car-offers/dashboard"
+            check_url "Car Offers API status" "$BASE/car-offers/api/status"
+            fetch_json "Car Offers /api/status" "$BASE/car-offers/api/status"
+          fi
+
+          # Gym Intelligence
+          if [ "$TARGET" = "all" ] || [ "$TARGET" = "gym-intelligence" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Gym Intelligence" >> $GITHUB_STEP_SUMMARY
+            check_url "Gym Intelligence main page" "$BASE/gym-intelligence/"
+            # Check if DB status endpoint exists
+            DB_STATUS=$(curl -sf --max-time 10 "$BASE/gym-db-status.json" 2>/dev/null)
+            if [ -n "$DB_STATUS" ]; then
+              fetch_json "Gym DB Status" "$BASE/gym-db-status.json"
+            fi
+          fi
+
+          echo ""
+          echo "--- Done ---"
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "_Check completed at $(date -u)_" >> $GITHUB_STEP_SUMMARY
