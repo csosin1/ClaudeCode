@@ -69,7 +69,7 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
 
   try {
     console.log(`[carvana] Starting offer flow for VIN=${vin} mileage=${mileage} zip=${zip}`);
-    console.log(`[carvana] Proxy configured: ${!!(config.PROXY_HOST && config.PROXY_PASS)}`);
+    console.log(`[carvana] Proxy: host=${config.PROXY_HOST} port=${config.PROXY_PORT} user=${config.PROXY_USER} pass=${config.PROXY_PASS ? config.PROXY_PASS.length + 'chars' : 'NONE'}`);
 
     // --- Launch browser ---
     let result;

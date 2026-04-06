@@ -70,20 +70,18 @@ async function launchBrowser(options = {}) {
   ];
 
   // Build proxy config
-  // NOTE: Decodo session suffix (-session-xxx) causes auth failure.
-  // But country targeting (-country-us) is needed for US-only sites.
+  // NOTE: This Decodo plan does NOT support username suffixes (-session-xxx, -country-us).
+  // Plain username only. IP rotation is random across all countries.
   let proxyConfig = null;
   if (config.PROXY_HOST && config.PROXY_PASS) {
     const proxyPort = (config.PROXY_PORT === '7000') ? '10001' : (config.PROXY_PORT || '10001');
-    // Append -country-us for US residential IPs (Carvana is US-only)
-    const proxyUser = config.PROXY_USER ? `${config.PROXY_USER}-country-us` : '';
 
     proxyConfig = {
       server: `http://${config.PROXY_HOST}:${proxyPort}`,
-      username: proxyUser,
+      username: config.PROXY_USER,
       password: config.PROXY_PASS,
     };
-    console.log(`[browser] Using proxy: ${config.PROXY_HOST}:${proxyPort} user=${proxyUser}`);
+    console.log(`[browser] Using proxy: ${config.PROXY_HOST}:${proxyPort} user=${config.PROXY_USER}`);
   } else {
     console.log('[browser] No proxy configured — using direct connection');
   }
@@ -96,22 +94,19 @@ async function launchBrowser(options = {}) {
     launchOptions.proxy = proxyConfig;
   }
 
-  // Try playwright-extra (stealth) first, fall back to regular playwright
+  // Launch with playwright-extra (stealth) — required for Carvana's PerimeterX
   let browser;
+  let usedStealth = false;
   try {
     browser = await chromium.launch(launchOptions);
-    console.log('[browser] Launched via playwright-extra (stealth)');
+    usedStealth = true;
+    console.log('[browser] STEALTH ACTIVE — launched via playwright-extra');
   } catch (stealthErr) {
-    console.warn(`[browser] playwright-extra launch failed: ${stealthErr.message}`);
-    console.log('[browser] Falling back to regular playwright...');
-    try {
-      const pw = require('playwright');
-      browser = await pw.chromium.launch(launchOptions);
-      console.log('[browser] Launched via regular playwright');
-    } catch (fallbackErr) {
-      console.error(`[browser] Regular playwright also failed: ${fallbackErr.message}`);
-      throw new Error(`Browser launch failed. Stealth: ${stealthErr.message}. Fallback: ${fallbackErr.message}`);
-    }
+    console.warn(`[browser] playwright-extra FAILED: ${stealthErr.message}`);
+    console.log('[browser] Falling back to regular playwright (NO STEALTH — may get blocked)');
+    const pw = require('playwright');
+    browser = await pw.chromium.launch(launchOptions);
+    console.log('[browser] Launched via regular playwright (no stealth)');
   }
 
   const context = await browser.newContext({
