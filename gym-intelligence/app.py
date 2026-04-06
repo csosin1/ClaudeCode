@@ -82,35 +82,45 @@ _refresh_log: list[str] = []
 
 def _run_refresh():
     global _refresh_running
+
+    def progress(msg):
+        _refresh_log.append(msg)
+
     try:
         import collect
         import classify
         import analyze
 
-        _refresh_log.append("Step 1/3: Data Collection — running...")
+        # Step 1: Collection (no API key needed)
+        progress("=== Step 1/3: Data Collection ===")
         try:
-            collect.run_collection()
-            _refresh_log[-1] = "Step 1/3: Data Collection — done"
+            collect.run_collection(progress_cb=progress)
         except Exception as e:
-            _refresh_log[-1] = f"Step 1/3: Data Collection — FAILED: {e}"
+            progress(f"Collection FAILED: {e}")
 
-        _refresh_log.append("Step 2/3: Chain Classification — running...")
-        try:
-            classify.run_classification()
-            _refresh_log[-1] = "Step 2/3: Chain Classification — done"
-        except Exception as e:
-            _refresh_log[-1] = f"Step 2/3: Chain Classification — FAILED: {e}"
+        # Step 2: Classification (needs API key)
+        _load_env()
+        api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+        if not api_key:
+            progress("=== Step 2/3: Classification — SKIPPED (no API key) ===")
+            progress("=== Step 3/3: Analysis — SKIPPED (no API key) ===")
+            progress("Done. Set your API key in Admin tab to enable classification & analysis.")
+        else:
+            progress("=== Step 2/3: Chain Classification ===")
+            try:
+                classify.run_classification(progress_cb=progress)
+            except Exception as e:
+                progress(f"Classification FAILED: {e}")
 
-        _refresh_log.append("Step 3/3: Quarterly Analysis — running...")
-        try:
-            analyze.run_analysis()
-            _refresh_log[-1] = "Step 3/3: Quarterly Analysis — done"
-        except Exception as e:
-            _refresh_log[-1] = f"Step 3/3: Quarterly Analysis — FAILED: {e}"
+            progress("=== Step 3/3: Quarterly Analysis ===")
+            try:
+                analyze.run_analysis(progress_cb=progress)
+            except Exception as e:
+                progress(f"Analysis FAILED: {e}")
 
-        _refresh_log.append("Pipeline complete.")
+            progress("Pipeline complete.")
     except Exception as e:
-        _refresh_log.append(f"Pipeline error: {e}")
+        progress(f"Pipeline error: {e}")
     finally:
         with _refresh_lock:
             _refresh_running = False
