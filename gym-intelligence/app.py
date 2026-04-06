@@ -159,6 +159,19 @@ def api_snapshot_dates():
     return jsonify([r["snapshot_date"] for r in rows])
 
 
+@bp.route("/api/country-counts")
+def api_country_counts():
+    """Total gym counts per country."""
+    conn = get_connection()
+    rows = conn.execute("""
+        SELECT country, COUNT(*) as cnt
+        FROM locations WHERE active = 1
+        GROUP BY country ORDER BY cnt DESC
+    """).fetchall()
+    conn.close()
+    return jsonify({r["country"]: r["cnt"] for r in rows})
+
+
 @bp.route("/api/chains-table")
 def api_chains_table():
     """All chains ordered by location count, optionally filtered by country."""
