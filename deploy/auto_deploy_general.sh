@@ -217,19 +217,30 @@ LREOF
     } > /var/www/landing/debug.json
 
     # === STEP 5: ONE-SHOT CARVANA TEST (runs in background, writes result to static file) ===
-    rm -f /opt/.carvana_test_v1  # clear old flag to retry
-    if [ ! -f /opt/.carvana_test_v2 ]; then
+    rm -f /opt/.carvana_test_v1 /opt/.carvana_test_v2  # clear old flags to retry
+    if [ ! -f /opt/.carvana_test_v3 ]; then
         echo "$(date): Triggering Carvana test offer in background..." >> "$LOG"
         (
-            # Wait for service to be fully up and npm install to finish
-            sleep 15
-            # Verify service is responding before calling the heavy endpoint
+            # Wait for Playwright to be installed (background install from STEP 3)
+            echo "$(date): Waiting for Playwright install to finish..." >> "$LOG"
+            for i in $(seq 1 60); do
+                if [ -f /opt/car-offers/.playwright_installed ]; then
+                    echo "$(date): Playwright ready." >> "$LOG"
+                    break
+                fi
+                sleep 10
+            done
+            # Also wait for service to be up
+            sleep 5
             for i in 1 2 3 4 5; do
                 if curl -sf http://127.0.0.1:3100/ > /dev/null 2>&1; then
                     break
                 fi
                 sleep 5
             done
+            # Restart service so it picks up newly installed playwright
+            systemctl restart car-offers >> "$LOG" 2>&1
+            sleep 5
             echo "$(date): Calling Carvana API..." >> "$LOG"
             RESULT=$(curl -sf -X POST http://127.0.0.1:3100/api/carvana \
                 -H 'Content-Type: application/json' \
@@ -238,7 +249,7 @@ LREOF
             echo "$RESULT" > /var/www/landing/carvana-result.json
             echo "$(date): Carvana test result written." >> "$LOG"
             echo "$(date): Result: $RESULT" >> "$LOG"
-            touch /opt/.carvana_test_v2
+            touch /opt/.carvana_test_v3
         ) &
     fi
 
