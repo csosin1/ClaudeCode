@@ -1,0 +1,11 @@
+.env
+*.db
+node_modules/
+package.json
+package-lock.json
+qa-report.md
+__pycache__/
+*.pyc
+*.db
+.playwright-mcp/
+carvana_abs/filing_cache/

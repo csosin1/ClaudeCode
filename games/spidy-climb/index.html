@@ -1,0 +1,1225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Spidy Climb - Sawyer's Game!</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    background: #0a0a2e;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100%;
+    width: 100%;
+    font-family: 'Segoe UI', Arial, sans-serif;
+    overflow: hidden;
+    touch-action: none;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+    position: fixed;
+    top: 0; left: 0;
+  }
+  #gameWrapper {
+    position: relative;
+    border: 3px solid #ff1744;
+    border-radius: 8px;
+    box-shadow: 0 0 30px rgba(255, 23, 68, 0.5), 0 0 60px rgba(255, 23, 68, 0.2);
+    max-width: 100vw;
+    max-height: 100vh;
+  }
+  canvas { display: block; background: #1a1a3e; border-radius: 5px; touch-action: none; }
+  #startScreen, #deathScreen {
+    position: absolute;
+    top: 0; left: 0; width: 100%; height: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    background: rgba(10, 10, 46, 0.92);
+    z-index: 10;
+    border-radius: 5px;
+  }
+  #startScreen h1 {
+    font-size: min(52px, 10vw);
+    color: #ff1744;
+    text-shadow: 0 0 20px rgba(255, 23, 68, 0.7);
+    margin-bottom: 10px;
+  }
+  #startScreen .subtitle {
+    font-size: 22px;
+    color: #64b5f6;
+    margin-bottom: 30px;
+  }
+  #startScreen .instructions {
+    color: #aaa;
+    font-size: 16px;
+    line-height: 1.8;
+    text-align: center;
+    margin-bottom: 30px;
+  }
+  #startScreen .instructions span { color: #fff; font-weight: bold; }
+  .btn {
+    padding: 18px 55px;
+    font-size: min(24px, 5vw);
+    font-weight: bold;
+    color: #fff;
+    background: #ff1744;
+    border: none;
+    border-radius: 50px;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    box-shadow: 0 0 20px rgba(255, 23, 68, 0.5);
+    transition: all 0.2s;
+  }
+  .btn:hover {
+    background: #ff5252;
+    box-shadow: 0 0 30px rgba(255, 23, 68, 0.8);
+    transform: scale(1.05);
+  }
+  #deathScreen { display: none; }
+  #deathScreen h2 {
+    font-size: min(42px, 9vw);
+    color: #ff1744;
+    text-shadow: 0 0 20px rgba(255, 23, 68, 0.7);
+    margin-bottom: 10px;
+  }
+  #deathMessage {
+    font-size: min(20px, 4.2vw);
+    color: #ffd54f;
+    margin: 15px 20px;
+    text-align: center;
+    line-height: 1.5;
+  }
+  #deathScore {
+    font-size: 26px;
+    color: #64b5f6;
+    margin-bottom: 5px;
+  }
+  #deathHighScore {
+    font-size: 18px;
+    color: #aaa;
+    margin-bottom: 25px;
+  }
+  #hud {
+    position: absolute;
+    top: 10px; left: 15px; right: 15px;
+    display: flex;
+    justify-content: space-between;
+    z-index: 5;
+    pointer-events: none;
+  }
+  #hud span {
+    color: #fff;
+    font-size: 18px;
+    font-weight: bold;
+    text-shadow: 0 0 8px rgba(0,0,0,0.8);
+  }
+  #livesDisplay.flash {
+    animation: livesFlash 0.6s ease;
+  }
+  @keyframes livesFlash {
+    0%, 100% { color: #fff; }
+    25% { color: #ff4081; text-shadow: 0 0 15px #ff4081; }
+    50% { color: #fff; text-shadow: 0 0 20px #fff; }
+    75% { color: #ff4081; text-shadow: 0 0 15px #ff4081; }
+  }
+  #levelBanner {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 40px;
+    font-weight: bold;
+    color: #ffd54f;
+    text-shadow: 0 0 20px rgba(255, 213, 79, 0.8);
+    z-index: 6;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+</style>
+</head>
+<body>
+<div id="gameWrapper">
+  <canvas id="game"></canvas>
+  <div id="hud">
+    <span id="scoreDisplay">Score: 0</span>
+    <span id="levelDisplay">Level: 1</span>
+    <span id="livesDisplay">Lives: ❤️❤️❤️</span>
+  </div>
+  <div id="levelBanner"></div>
+  <div id="startScreen">
+    <h1>SPIDY CLIMB</h1>
+    <div class="subtitle">Sawyer's Super Spider Adventure!</div>
+    <div class="instructions" id="instructionsText">
+    </div>
+    <button class="btn" onclick="startGame()">SWING IN!</button>
+  </div>
+  <div id="deathScreen">
+    <h2>OH NO!</h2>
+    <div id="deathMessage"></div>
+    <div id="deathScore"></div>
+    <div id="deathHighScore"></div>
+    <button class="btn" onclick="startGame()">TRY AGAIN!</button>
+  </div>
+</div>
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const W = 480, H = 640;
+canvas.width = W;
+canvas.height = H;
+
+// ============ RESPONSIVE SCALING ============
+let canvasScale = 1;
+let canvasOffsetX = 0;
+let canvasOffsetY = 0;
+
+function resizeCanvas() {
+  const wrapper = document.getElementById('gameWrapper');
+  const maxW = window.innerWidth;
+  const maxH = window.innerHeight;
+  const ratio = W / H;
+  let displayW, displayH;
+  if (maxW / maxH < ratio) {
+    displayW = maxW;
+    displayH = maxW / ratio;
+  } else {
+    displayH = maxH;
+    displayW = maxH * ratio;
+  }
+  canvas.style.width = displayW + 'px';
+  canvas.style.height = displayH + 'px';
+  canvasScale = displayW / W;
+  const rect = canvas.getBoundingClientRect();
+  canvasOffsetX = rect.left;
+  canvasOffsetY = rect.top;
+}
+window.addEventListener('resize', resizeCanvas);
+window.addEventListener('orientationchange', () => setTimeout(resizeCanvas, 100));
+resizeCanvas();
+
+// ============ DETECT MOBILE ============
+const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || ('ontouchstart' in window);
+
+// Set instructions based on device
+const instrEl = document.getElementById('instructionsText');
+if (isMobile) {
+  instrEl.innerHTML =
+    '<span>Drag your finger</span> to move Spidy<br>' +
+    'Spidy follows your finger!<br><br>' +
+    'Dodge villains &amp; obstacles!<br>' +
+    'Collect webs for bonus points!<br>' +
+    'Collect hearts to restore lives!';
+} else {
+  instrEl.innerHTML =
+    '<span>Arrow Keys</span> to move Spidy<br><br>' +
+    'Dodge villains &amp; obstacles!<br>' +
+    'Collect webs for bonus points!<br>' +
+    'Collect hearts to restore lives!';
+}
+
+// ============ TOUCH CONTROLS ============
+let touchActive = false;
+let touchTargetX = 0;
+let touchTargetY = 0;
+
+function getTouchGamePos(touch) {
+  return {
+    x: (touch.clientX - canvasOffsetX) / canvasScale,
+    y: (touch.clientY - canvasOffsetY) / canvasScale
+  };
+}
+
+canvas.addEventListener('touchstart', function(e) {
+  e.preventDefault();
+  touchActive = true;
+  const pos = getTouchGamePos(e.touches[0]);
+  touchTargetX = pos.x;
+  touchTargetY = pos.y;
+}, { passive: false });
+
+canvas.addEventListener('touchmove', function(e) {
+  e.preventDefault();
+  if (e.touches.length > 0) {
+    const pos = getTouchGamePos(e.touches[0]);
+    touchTargetX = pos.x;
+    touchTargetY = pos.y;
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchend', function(e) {
+  e.preventDefault();
+  touchActive = false;
+}, { passive: false });
+
+canvas.addEventListener('touchcancel', function(e) {
+  touchActive = false;
+}, { passive: false });
+
+// Prevent iOS rubber-band scrolling
+document.addEventListener('touchmove', function(e) { e.preventDefault(); }, { passive: false });
+
+// Game state
+let spidy, obstacles, collectibles, particles, buildings, floatingTexts;
+let score, level, lives, highScore, gameRunning, frameCount;
+let keys = {};
+let levelBannerTimer = 0;
+let invincibleTimer = 0;
+let scrollSpeed, baseScrollSpeed;
+
+const deathMessages = [
+  "Sawyer! Even Spider-Man falls off buildings sometimes... but usually on PURPOSE!",
+  "Hey Sawyer, was that a spider or a splat-er?",
+  "Sawyer's spidy-sense was on a coffee break!",
+  "Whoa Sawyer! That villain didn't even break a sweat! You got this next time!",
+  "Sawyer, that building was clearly greased... totally not your fault!",
+  "Plot twist: Sawyer's Spidy forgot his sticky gloves at home!",
+  "Sawyer! Quick, tell everyone that was just a practice round!",
+  "Even superheroes need a warm-up, right Sawyer? Let's call that one a warm-up!",
+  "Sawyer's Spidy just set the world record for... fastest fall!",
+  "Oops! Sawyer, your Spidy was too busy being awesome and forgot to dodge!",
+  "Breaking News: Sawyer's Spidy discovers gravity is REAL!",
+  "Don't worry Sawyer, that villain cheated! I saw it! (I didn't see it)",
+  "Sawyer! Your web-shooters must have been out of web-juice!",
+  "Legend says Sawyer's Spidy will return stronger... like RIGHT NOW!",
+  "Hey Sawyer, that obstacle came out of NOWHERE! ...ok it was there the whole time",
+];
+
+const villainTypes = [
+  { name: 'Goblin', bodyColor: '#22cc44', accentColor: '#116622', shape: 'diamond', speed: 1.5 },
+  { name: 'Venom', bodyColor: '#222222', accentColor: '#bb33ff', shape: 'circle', speed: 2 },
+  { name: 'Doc Ock', bodyColor: '#ff8800', accentColor: '#cc5500', shape: 'octagon', speed: 1.2 },
+  { name: 'Electro', bodyColor: '#ffee00', accentColor: '#00ccff', shape: 'star', speed: 2.5 },
+  { name: 'Rhino', bodyColor: '#aaaaaa', accentColor: '#666666', shape: 'square', speed: 3 },
+];
+
+// Building layout: two tall buildings flanking the screen, full coverage
+// Left building and right building with an alley gap that has a back wall
+const BLDG_LEFT_W = 180;   // left building width
+const BLDG_RIGHT_W = 180;  // right building width
+const ALLEY_X = BLDG_LEFT_W;
+const ALLEY_W = W - BLDG_LEFT_W - BLDG_RIGHT_W; // the gap
+
+function initBuildings() {
+  buildings = {
+    leftColor: 'hsl(225, 25%, 18%)',
+    rightColor: 'hsl(215, 22%, 20%)',
+    alleyColor: 'hsl(230, 30%, 12%)',
+    windowRows: [],
+  };
+  // Pre-generate window light states
+  for (let row = 0; row < 80; row++) {
+    let cols = [];
+    for (let col = 0; col < 20; col++) {
+      cols.push(Math.random() > 0.35);
+    }
+    buildings.windowRows.push(cols);
+  }
+}
+
+function resetGame() {
+  spidy = {
+    x: W / 2,
+    y: H - 100,
+    w: 28,
+    h: 40,
+    vx: 0,
+    vy: 0,
+    speed: 4,
+    frame: 0,
+  };
+  obstacles = [];
+  collectibles = [];
+  particles = [];
+  floatingTexts = [];
+  score = 0;
+  level = 1;
+  lives = 3;
+  frameCount = 0;
+  baseScrollSpeed = 1;
+  scrollSpeed = baseScrollSpeed;
+  invincibleTimer = 0;
+  initBuildings();
+}
+
+function startGame() {
+  document.getElementById('startScreen').style.display = 'none';
+  document.getElementById('deathScreen').style.display = 'none';
+  resetGame();
+  gameRunning = true;
+  showLevelBanner("GO SAWYER!");
+  requestAnimationFrame(gameLoop);
+}
+
+function showLevelBanner(text) {
+  const banner = document.getElementById('levelBanner');
+  banner.textContent = text;
+  banner.style.opacity = '1';
+  levelBannerTimer = 90;
+}
+
+function addFloatingText(x, y, text, color) {
+  floatingTexts.push({ x, y, text, color, life: 60, maxLife: 60 });
+}
+
+function spawnObstacle() {
+  const lvl = Math.min(level, 10);
+  const roll = Math.random();
+
+  if (roll < 0.4) {
+    // Static obstacle (girder, pipe, etc.)
+    const side = Math.random() < 0.5 ? 0 : 1;
+    obstacles.push({
+      type: 'static',
+      x: side === 0 ? Math.random() * (W * 0.4) : W * 0.6 + Math.random() * (W * 0.4) - 40,
+      y: -40,
+      w: 50 + Math.random() * 40,
+      h: 15 + Math.random() * 10,
+      color: '#78909c',
+      label: ['GIRDER', 'PIPE', 'VENT', 'BRICK'][Math.floor(Math.random() * 4)],
+    });
+  } else if (roll < 0.75) {
+    // Moving villain
+    const vType = villainTypes[Math.min(Math.floor(Math.random() * (1 + lvl * 0.4)), villainTypes.length - 1)];
+    const side = Math.random() < 0.5;
+    obstacles.push({
+      type: 'villain',
+      x: side ? -30 : W + 30,
+      y: -30 - Math.random() * 100,
+      w: 45,
+      h: 45,
+      vx: (side ? 1 : -1) * vType.speed * (0.8 + Math.random() * 0.4 + lvl * 0.1),
+      bodyColor: vType.bodyColor,
+      accentColor: vType.accentColor,
+      shape: vType.shape,
+      name: vType.name,
+    });
+  } else {
+    // Dropping obstacle
+    obstacles.push({
+      type: 'dropping',
+      x: 30 + Math.random() * (W - 60),
+      y: -30,
+      w: 25,
+      h: 25,
+      vy: 1.5 + lvl * 0.3,
+      color: '#e53935',
+      label: ['BOMB', 'ROCK', 'FIRE'][Math.floor(Math.random() * 3)],
+    });
+  }
+}
+
+function spawnCollectible() {
+  collectibles.push({
+    x: 30 + Math.random() * (W - 60),
+    y: -20,
+    w: 20,
+    h: 20,
+    type: Math.random() < 0.8 ? 'web' : 'heart',
+    bobOffset: Math.random() * Math.PI * 2,
+  });
+}
+
+function addParticles(x, y, color, count) {
+  for (let i = 0; i < count; i++) {
+    particles.push({
+      x, y,
+      vx: (Math.random() - 0.5) * 6,
+      vy: (Math.random() - 0.5) * 6,
+      life: 30 + Math.random() * 20,
+      maxLife: 50,
+      color,
+      size: 2 + Math.random() * 4,
+    });
+  }
+}
+
+// ============ DRAWING FUNCTIONS ============
+
+function drawSpidy() {
+  const { x, y, w, h } = spidy;
+  const blinking = invincibleTimer > 0 && Math.floor(frameCount / 4) % 2;
+  if (blinking) return;
+
+  ctx.save();
+  ctx.translate(x, y);
+
+  const wave = Math.sin(frameCount * 0.15) * 4;
+
+  // -- LEGS (blue, behind body) --
+  ctx.strokeStyle = '#1565c0';
+  ctx.lineWidth = 4;
+  ctx.lineCap = 'round';
+  // Left leg
+  ctx.beginPath();
+  ctx.moveTo(-5, h/2 - 8);
+  ctx.lineTo(-10, h/2 - 2);
+  ctx.lineTo(-8, h/2 + 6 - wave);
+  ctx.stroke();
+  // Right leg
+  ctx.beginPath();
+  ctx.moveTo(5, h/2 - 8);
+  ctx.lineTo(10, h/2 - 2);
+  ctx.lineTo(8, h/2 + 6 + wave);
+  ctx.stroke();
+
+  // -- ARMS (blue, behind body) --
+  // Left arm
+  ctx.beginPath();
+  ctx.moveTo(-w/2 + 2, -4);
+  ctx.lineTo(-w/2 - 6, -10 + wave);
+  ctx.lineTo(-w/2 - 10, -16 + wave);
+  ctx.stroke();
+  // Right arm
+  ctx.beginPath();
+  ctx.moveTo(w/2 - 2, -4);
+  ctx.lineTo(w/2 + 6, -10 - wave);
+  ctx.lineTo(w/2 + 10, -16 - wave);
+  ctx.stroke();
+
+  // -- BODY (torso) --
+  // Blue sides
+  ctx.fillStyle = '#1565c0';
+  ctx.beginPath();
+  ctx.moveTo(-w/2, -10);
+  ctx.lineTo(-w/2 - 3, 0);
+  ctx.lineTo(-w/2, 10);
+  ctx.lineTo(-4, 12);
+  ctx.lineTo(-4, -12);
+  ctx.closePath();
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(w/2, -10);
+  ctx.lineTo(w/2 + 3, 0);
+  ctx.lineTo(w/2, 10);
+  ctx.lineTo(4, 12);
+  ctx.lineTo(4, -12);
+  ctx.closePath();
+  ctx.fill();
+
+  // Red center torso
+  ctx.fillStyle = '#e53935';
+  ctx.beginPath();
+  ctx.moveTo(-6, -12);
+  ctx.lineTo(6, -12);
+  ctx.lineTo(8, 12);
+  ctx.lineTo(-8, 12);
+  ctx.closePath();
+  ctx.fill();
+
+  // Web pattern on red torso
+  ctx.strokeStyle = '#1a1a1a';
+  ctx.lineWidth = 0.7;
+  for (let i = -2; i <= 2; i++) {
+    ctx.beginPath();
+    ctx.moveTo(-8, i * 5);
+    ctx.lineTo(8, i * 5);
+    ctx.stroke();
+  }
+  for (let i = -1; i <= 1; i++) {
+    ctx.beginPath();
+    ctx.moveTo(0, -12);
+    ctx.lineTo(i * 6, 12);
+    ctx.stroke();
+  }
+
+  // -- HEAD --
+  // Red head base
+  ctx.fillStyle = '#e53935';
+  ctx.beginPath();
+  ctx.arc(0, -16, 10, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Web pattern on head
+  ctx.strokeStyle = '#1a1a1a';
+  ctx.lineWidth = 0.6;
+  // Horizontal arcs on head
+  for (let i = -1; i <= 1; i++) {
+    ctx.beginPath();
+    ctx.arc(0, -16, 10, Math.PI * 0.1, Math.PI * 0.9);
+    ctx.stroke();
+  }
+  // Radial lines from center of face
+  for (let a = 0; a < Math.PI * 2; a += Math.PI / 4) {
+    ctx.beginPath();
+    ctx.moveTo(0, -16);
+    ctx.lineTo(Math.cos(a) * 10, -16 + Math.sin(a) * 10);
+    ctx.stroke();
+  }
+
+  // -- EYES (big white angular Spider-Man eyes) --
+  ctx.fillStyle = '#ffffff';
+  ctx.strokeStyle = '#000000';
+  ctx.lineWidth = 1.8;
+
+  // Left eye - angular/pointed shape
+  ctx.beginPath();
+  ctx.moveTo(-8, -19);
+  ctx.lineTo(-3, -21);
+  ctx.lineTo(-1, -17);
+  ctx.lineTo(-3, -13);
+  ctx.lineTo(-8, -15);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  // Right eye - angular/pointed shape (mirrored)
+  ctx.beginPath();
+  ctx.moveTo(8, -19);
+  ctx.lineTo(3, -21);
+  ctx.lineTo(1, -17);
+  ctx.lineTo(3, -13);
+  ctx.lineTo(8, -15);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+function drawBuildings() {
+  const b = buildings;
+  const scrollY = (frameCount * scrollSpeed * 0.5) % 20;
+
+  // Left building
+  ctx.fillStyle = b.leftColor;
+  ctx.fillRect(0, 0, BLDG_LEFT_W, H);
+
+  // Right building
+  ctx.fillStyle = b.rightColor;
+  ctx.fillRect(W - BLDG_RIGHT_W, 0, BLDG_RIGHT_W, H);
+
+  // Alley back wall (darker)
+  ctx.fillStyle = b.alleyColor;
+  ctx.fillRect(BLDG_LEFT_W, 0, ALLEY_W, H);
+
+  // Building edges - subtle highlights
+  ctx.fillStyle = 'rgba(255,255,255,0.06)';
+  ctx.fillRect(BLDG_LEFT_W - 3, 0, 3, H);
+  ctx.fillRect(W - BLDG_RIGHT_W, 0, 3, H);
+
+  // Dark edge lines
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.fillRect(BLDG_LEFT_W - 1, 0, 1, H);
+  ctx.fillRect(W - BLDG_RIGHT_W, 0, 1, H);
+
+  // Windows on left building
+  const winSize = 8;
+  const winGapX = 22;
+  const winGapY = 20;
+  for (let wy = 0; wy < H + 20; wy++) {
+    const row = Math.floor((wy + scrollY) / winGapY);
+    if ((wy + scrollY) % winGapY < winSize && row >= 0) {
+      const rowData = b.windowRows[((row % b.windowRows.length) + b.windowRows.length) % b.windowRows.length];
+      for (let col = 0; col < 7; col++) {
+        if (rowData[col]) {
+          const wx = 12 + col * winGapX;
+          ctx.fillStyle = 'rgba(255, 235, 59, 0.25)';
+          ctx.fillRect(wx, wy, winSize, winSize);
+        }
+      }
+    }
+  }
+
+  // Windows on right building
+  for (let wy = 0; wy < H + 20; wy++) {
+    const row = Math.floor((wy + scrollY) / winGapY);
+    if ((wy + scrollY) % winGapY < winSize && row >= 0) {
+      const rowData = b.windowRows[((row % b.windowRows.length) + b.windowRows.length) % b.windowRows.length];
+      for (let col = 0; col < 7; col++) {
+        if (rowData[col + 10]) {
+          const wx = (W - BLDG_RIGHT_W) + 12 + col * winGapX;
+          ctx.fillStyle = 'rgba(255, 235, 59, 0.25)';
+          ctx.fillRect(wx, wy, winSize, winSize);
+        }
+      }
+    }
+  }
+
+  // Alley details - pipes on walls
+  ctx.fillStyle = 'rgba(100, 100, 120, 0.3)';
+  ctx.fillRect(BLDG_LEFT_W + 5, 0, 3, H);
+  ctx.fillRect(W - BLDG_RIGHT_W - 8, 0, 3, H);
+}
+
+function drawStars() {
+  // Stars only visible in the alley gap (sky peeking through from above)
+  // Actually keep stars subtle everywhere for ambiance
+  ctx.fillStyle = '#fff';
+  for (let i = 0; i < 50; i++) {
+    const sx = (i * 97 + frameCount * 0.02 * (i % 3 + 1)) % W;
+    const sy = (i * 151) % H;
+    const size = (i % 3 === 0) ? 2 : 1;
+    const alpha = 0.15 + 0.15 * Math.sin(frameCount * 0.03 + i);
+    // Only show in alley area at reduced opacity
+    if (sx > BLDG_LEFT_W && sx < W - BLDG_RIGHT_W) {
+      ctx.globalAlpha = alpha * 2;
+    } else {
+      ctx.globalAlpha = alpha * 0.3;
+    }
+    ctx.fillRect(sx, sy, size, size);
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawVillainShape(o) {
+  const cx = o.x;
+  const cy = o.y;
+  const sz = o.w / 2;
+
+  // Glow outline
+  ctx.shadowColor = o.accentColor;
+  ctx.shadowBlur = 12;
+
+  // Colored outline ring
+  ctx.strokeStyle = o.accentColor;
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.arc(cx, cy, sz + 4, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+
+  // Fill the main body shape
+  ctx.fillStyle = o.bodyColor;
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = 2;
+
+  if (o.shape === 'diamond') {
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - sz);
+    ctx.lineTo(cx + sz, cy);
+    ctx.lineTo(cx, cy + sz);
+    ctx.lineTo(cx - sz, cy);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    // Face
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(cx - 6, cy - 5, 5, 5);
+    ctx.fillRect(cx + 1, cy - 5, 5, 5);
+    ctx.fillStyle = '#000';
+    ctx.fillRect(cx - 5, cy - 4, 3, 3);
+    ctx.fillRect(cx + 2, cy - 4, 3, 3);
+    // Mouth
+    ctx.fillStyle = '#000';
+    ctx.fillRect(cx - 5, cy + 3, 10, 2);
+  } else if (o.shape === 'circle') {
+    ctx.beginPath();
+    ctx.arc(cx, cy, sz, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    // Venom eyes (white angular)
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.moveTo(cx - 10, cy - 6);
+    ctx.lineTo(cx - 3, cy - 10);
+    ctx.lineTo(cx - 1, cy - 2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(cx + 10, cy - 6);
+    ctx.lineTo(cx + 3, cy - 10);
+    ctx.lineTo(cx + 1, cy - 2);
+    ctx.closePath();
+    ctx.fill();
+    // Teeth
+    ctx.fillStyle = '#fff';
+    for (let t = -8; t <= 8; t += 4) {
+      ctx.beginPath();
+      ctx.moveTo(cx + t, cy + 6);
+      ctx.lineTo(cx + t + 2, cy + 10);
+      ctx.lineTo(cx + t + 4, cy + 6);
+      ctx.closePath();
+      ctx.fill();
+    }
+  } else if (o.shape === 'octagon') {
+    const a = sz * 0.4;
+    ctx.beginPath();
+    ctx.moveTo(cx - a, cy - sz);
+    ctx.lineTo(cx + a, cy - sz);
+    ctx.lineTo(cx + sz, cy - a);
+    ctx.lineTo(cx + sz, cy + a);
+    ctx.lineTo(cx + a, cy + sz);
+    ctx.lineTo(cx - a, cy + sz);
+    ctx.lineTo(cx - sz, cy + a);
+    ctx.lineTo(cx - sz, cy - a);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    // Goggles
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(cx - 6, cy - 3, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(cx + 6, cy - 3, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#000';
+    ctx.beginPath();
+    ctx.arc(cx - 6, cy - 3, 3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(cx + 6, cy - 3, 3, 0, Math.PI * 2);
+    ctx.fill();
+    // Tentacle lines
+    ctx.strokeStyle = o.accentColor;
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 4; i++) {
+      const angle = (i / 4) * Math.PI + Math.PI * 0.75 + Math.sin(frameCount * 0.1 + i) * 0.2;
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(angle) * sz * 0.7, cy + Math.sin(angle) * sz * 0.7);
+      ctx.lineTo(cx + Math.cos(angle) * (sz + 12), cy + Math.sin(angle) * (sz + 12));
+      ctx.stroke();
+    }
+  } else if (o.shape === 'star') {
+    ctx.beginPath();
+    for (let i = 0; i < 10; i++) {
+      const angle = (i / 10) * Math.PI * 2 - Math.PI / 2;
+      const r = i % 2 === 0 ? sz : sz * 0.5;
+      ctx.lineTo(cx + Math.cos(angle) * r, cy + Math.sin(angle) * r);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    // Lightning bolt eyes
+    ctx.fillStyle = '#00ccff';
+    ctx.fillRect(cx - 7, cy - 5, 4, 6);
+    ctx.fillRect(cx + 3, cy - 5, 4, 6);
+  } else { // square (Rhino)
+    ctx.fillRect(cx - sz, cy - sz, sz * 2, sz * 2);
+    ctx.strokeRect(cx - sz, cy - sz, sz * 2, sz * 2);
+    // Horn
+    ctx.fillStyle = '#888';
+    ctx.beginPath();
+    ctx.moveTo(cx - 3, cy - sz);
+    ctx.lineTo(cx, cy - sz - 10);
+    ctx.lineTo(cx + 3, cy - sz);
+    ctx.closePath();
+    ctx.fill();
+    // Eyes
+    ctx.fillStyle = '#ff0000';
+    ctx.fillRect(cx - 8, cy - 5, 6, 5);
+    ctx.fillRect(cx + 2, cy - 5, 6, 5);
+  }
+
+  // Name label below
+  ctx.font = 'bold 11px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#fff';
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = 3;
+  ctx.strokeText(o.name, cx, cy + sz + 14);
+  ctx.fillText(o.name, cx, cy + sz + 14);
+  ctx.textAlign = 'left';
+}
+
+function drawObstacles() {
+  obstacles.forEach(o => {
+    if (o.type === 'static') {
+      // Solid colored girder/obstacle
+      ctx.fillStyle = o.color;
+      ctx.fillRect(o.x, o.y, o.w, o.h);
+      // Highlight
+      ctx.fillStyle = 'rgba(255,255,255,0.15)';
+      ctx.fillRect(o.x, o.y, o.w, 3);
+      // Shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.3)';
+      ctx.fillRect(o.x, o.y + o.h - 2, o.w, 2);
+      // Label
+      ctx.font = 'bold 9px Arial';
+      ctx.fillStyle = '#ccc';
+      ctx.textAlign = 'center';
+      ctx.fillText(o.label, o.x + o.w / 2, o.y + o.h / 2 + 3);
+      ctx.textAlign = 'left';
+    } else if (o.type === 'villain') {
+      drawVillainShape(o);
+    } else if (o.type === 'dropping') {
+      // Solid dropping obstacle
+      ctx.fillStyle = o.color;
+      ctx.beginPath();
+      ctx.arc(o.x, o.y, o.w / 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      // Inner detail
+      ctx.fillStyle = '#ff8a80';
+      ctx.beginPath();
+      ctx.arc(o.x - 3, o.y - 3, o.w / 5, 0, Math.PI * 2);
+      ctx.fill();
+      // Label
+      ctx.font = 'bold 9px Arial';
+      ctx.fillStyle = '#fff';
+      ctx.textAlign = 'center';
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = 2;
+      ctx.strokeText(o.label, o.x, o.y + 4);
+      ctx.fillText(o.label, o.x, o.y + 4);
+      ctx.textAlign = 'left';
+      // Warning line
+      ctx.strokeStyle = 'rgba(255, 0, 0, 0.15)';
+      ctx.setLineDash([4, 4]);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(o.x, o.y + o.w / 2);
+      ctx.lineTo(o.x, H);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  });
+}
+
+function drawCollectibles() {
+  collectibles.forEach(c => {
+    const bob = Math.sin(frameCount * 0.08 + c.bobOffset) * 3;
+    const cy = c.y + bob;
+
+    if (c.type === 'web') {
+      // Draw a web collectible as a white web shape
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 1.5;
+      ctx.fillStyle = 'rgba(255,255,255,0.15)';
+      const r = 10;
+      // Outer circle
+      ctx.beginPath();
+      ctx.arc(c.x, cy, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      // Inner circles
+      ctx.beginPath();
+      ctx.arc(c.x, cy, r * 0.6, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(c.x, cy, r * 0.3, 0, Math.PI * 2);
+      ctx.stroke();
+      // Radial lines
+      for (let a = 0; a < Math.PI * 2; a += Math.PI / 3) {
+        ctx.beginPath();
+        ctx.moveTo(c.x, cy);
+        ctx.lineTo(c.x + Math.cos(a) * r, cy + Math.sin(a) * r);
+        ctx.stroke();
+      }
+    } else {
+      // Heart collectible - draw a solid heart shape
+      ctx.fillStyle = '#ff4081';
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 1.5;
+      const s = 10;
+      ctx.beginPath();
+      ctx.moveTo(c.x, cy + s * 0.4);
+      ctx.bezierCurveTo(c.x, cy - s * 0.2, c.x - s, cy - s * 0.6, c.x - s, cy);
+      ctx.bezierCurveTo(c.x - s, cy + s * 0.4, c.x, cy + s * 0.8, c.x, cy + s);
+      ctx.bezierCurveTo(c.x, cy + s * 0.8, c.x + s, cy + s * 0.4, c.x + s, cy);
+      ctx.bezierCurveTo(c.x + s, cy - s * 0.6, c.x, cy - s * 0.2, c.x, cy + s * 0.4);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      // Glow
+      ctx.shadowColor = '#ff4081';
+      ctx.shadowBlur = 8;
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+
+    // Sparkle
+    const sparkAlpha = 0.3 + 0.3 * Math.sin(frameCount * 0.1 + c.bobOffset);
+    ctx.fillStyle = `rgba(255, 255, 255, ${sparkAlpha})`;
+    ctx.fillRect(c.x - 1 + Math.sin(frameCount * 0.15) * 5, cy - 8, 2, 2);
+  });
+}
+
+function drawParticles() {
+  particles.forEach(p => {
+    ctx.globalAlpha = p.life / p.maxLife;
+    ctx.fillStyle = p.color;
+    ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+  });
+  ctx.globalAlpha = 1;
+}
+
+function drawFloatingTexts() {
+  floatingTexts.forEach(ft => {
+    const alpha = ft.life / ft.maxLife;
+    ctx.globalAlpha = alpha;
+    ctx.font = 'bold 18px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = ft.color;
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 3;
+    const yOff = (1 - alpha) * -30;
+    ctx.strokeText(ft.text, ft.x, ft.y + yOff);
+    ctx.fillText(ft.text, ft.x, ft.y + yOff);
+    ctx.textAlign = 'left';
+  });
+  ctx.globalAlpha = 1;
+}
+
+function drawWebStrings() {
+  // Decorative web strings from spidy when moving
+  if (touchActive || keys['ArrowUp'] || keys['ArrowLeft'] || keys['ArrowRight']) {
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(spidy.x, spidy.y + spidy.h / 2);
+    ctx.quadraticCurveTo(
+      spidy.x + Math.sin(frameCount * 0.1) * 20,
+      spidy.y + 40,
+      spidy.x + Math.sin(frameCount * 0.05) * 10,
+      Math.min(spidy.y + 80, H)
+    );
+    ctx.stroke();
+  }
+}
+
+// ============ COLLISION ============
+
+function rectCollide(a, b) {
+  return a.x - a.w/2 < b.x + b.w/2 &&
+         a.x + a.w/2 > b.x - b.w/2 &&
+         a.y - a.h/2 < b.y + b.h/2 &&
+         a.y + a.h/2 > b.y - b.h/2;
+}
+
+function obstacleHitbox(o) {
+  if (o.type === 'static') {
+    return { x: o.x + o.w/2, y: o.y + o.h/2, w: o.w, h: o.h };
+  }
+  return { x: o.x, y: o.y, w: o.w, h: o.h };
+}
+
+// ============ UPDATE ============
+
+function update() {
+  frameCount++;
+
+  // Difficulty scaling
+  const newLevel = Math.floor(score / 500) + 1;
+  if (newLevel > level) {
+    level = newLevel;
+    showLevelBanner('LEVEL ' + level + '!');
+    baseScrollSpeed = 1 + (level - 1) * 0.3;
+  }
+  scrollSpeed = baseScrollSpeed;
+
+  // Move spidy - keyboard or touch
+  const spd = spidy.speed;
+  if (touchActive) {
+    // Smooth follow toward finger position
+    const dx = touchTargetX - spidy.x;
+    const dy = touchTargetY - spidy.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist > 2) {
+      const moveSpeed = Math.min(spd * 1.5, dist * 0.2);
+      spidy.x += (dx / dist) * moveSpeed;
+      spidy.y += (dy / dist) * moveSpeed;
+    }
+  } else {
+    if (keys['ArrowUp']) spidy.y -= spd;
+    if (keys['ArrowDown']) spidy.y += spd * 0.7;
+    if (keys['ArrowLeft']) spidy.x -= spd;
+    if (keys['ArrowRight']) spidy.x += spd;
+  }
+
+  // Keep in bounds - FIXED: constrain to canvas edges
+  spidy.x = Math.max(spidy.w / 2 + 2, Math.min(W - spidy.w / 2 - 2, spidy.x));
+  spidy.y = Math.max(spidy.h / 2 + 2, Math.min(H - spidy.h / 2 - 2, spidy.y));
+
+  // Scroll everything down
+  score += Math.ceil(scrollSpeed);
+
+  // Spawn obstacles
+  const spawnRate = Math.max(25, 70 - level * 5);
+  if (frameCount % spawnRate === 0) spawnObstacle();
+  if (frameCount % 120 === 0) spawnCollectible();
+
+  // Update obstacles
+  obstacles.forEach(o => {
+    o.y = (o.y || 0) + scrollSpeed;
+    if (o.type === 'villain') {
+      o.x += o.vx || 0;
+      // Bounce villains off screen edges
+      if (o.x < -50 || o.x > W + 50) {
+        o.vx = -(o.vx || 0);
+      }
+    }
+    if (o.type === 'dropping') {
+      o.y += o.vy || 0;
+    }
+  });
+
+  // Update collectibles
+  collectibles.forEach(c => { c.y += scrollSpeed; });
+
+  // Collision detection
+  if (invincibleTimer > 0) {
+    invincibleTimer--;
+  } else {
+    for (let i = obstacles.length - 1; i >= 0; i--) {
+      const hb = obstacleHitbox(obstacles[i]);
+      if (rectCollide(spidy, hb)) {
+        addParticles(spidy.x, spidy.y, '#ff1744', 15);
+        lives--;
+        obstacles.splice(i, 1);
+        invincibleTimer = 90;
+        if (lives <= 0) {
+          gameOver();
+          return;
+        }
+        break;
+      }
+    }
+  }
+
+  // Collectible pickup
+  for (let i = collectibles.length - 1; i >= 0; i--) {
+    const c = collectibles[i];
+    const dist = Math.hypot(spidy.x - c.x, spidy.y - c.y);
+    if (dist < 22) {
+      if (c.type === 'web') {
+        score += 100;
+        addParticles(c.x, c.y, '#ffffff', 8);
+        addFloatingText(c.x, c.y, '+100', '#ffffff');
+      } else if (c.type === 'heart') {
+        if (lives < 5) {
+          lives = Math.min(lives + 1, 5);
+          addParticles(c.x, c.y, '#ff4081', 12);
+          addFloatingText(c.x, c.y, '+1 UP!', '#ff4081');
+          // Flash the lives display
+          const livesEl = document.getElementById('livesDisplay');
+          livesEl.classList.remove('flash');
+          void livesEl.offsetWidth; // force reflow to restart animation
+          livesEl.classList.add('flash');
+        } else {
+          // Already at max lives, give bonus score instead
+          score += 200;
+          addParticles(c.x, c.y, '#ff4081', 8);
+          addFloatingText(c.x, c.y, '+200', '#ff4081');
+        }
+      }
+      collectibles.splice(i, 1);
+    }
+  }
+
+  // Cleanup off-screen
+  obstacles = obstacles.filter(o => o.y < H + 60 && o.y > -200);
+  collectibles = collectibles.filter(c => c.y < H + 40);
+
+  // Update particles
+  particles.forEach(p => {
+    p.x += p.vx;
+    p.y += p.vy;
+    p.life--;
+    p.vx *= 0.96;
+    p.vy *= 0.96;
+  });
+  particles = particles.filter(p => p.life > 0);
+
+  // Update floating texts
+  floatingTexts.forEach(ft => { ft.life--; });
+  floatingTexts = floatingTexts.filter(ft => ft.life > 0);
+
+  // Level banner fade
+  if (levelBannerTimer > 0) {
+    levelBannerTimer--;
+    if (levelBannerTimer === 0) {
+      document.getElementById('levelBanner').style.opacity = '0';
+    }
+  }
+
+  // Update HUD
+  document.getElementById('scoreDisplay').textContent = 'Score: ' + score;
+  document.getElementById('levelDisplay').textContent = 'Level: ' + level;
+  let heartsStr = '';
+  for (let i = 0; i < lives; i++) heartsStr += '\u2764\ufe0f';
+  document.getElementById('livesDisplay').textContent = 'Lives: ' + heartsStr;
+}
+
+// ============ DRAW ============
+
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+
+  // Night sky gradient
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, '#0a0a2e');
+  grad.addColorStop(0.5, '#1a1a4e');
+  grad.addColorStop(1, '#0d0d3a');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+
+  drawBuildings();
+  drawStars();
+  drawWebStrings();
+  drawObstacles();
+  drawCollectibles();
+  drawParticles();
+  drawFloatingTexts();
+  drawSpidy();
+
+  // Touch indicator - subtle ring where finger is
+  if (touchActive) {
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(touchTargetX, touchTargetY, 20, 0, Math.PI * 2);
+    ctx.stroke();
+    // Web line from spidy to touch
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 5]);
+    ctx.beginPath();
+    ctx.moveTo(spidy.x, spidy.y);
+    ctx.lineTo(touchTargetX, touchTargetY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+}
+
+// ============ GAME LOOP ============
+
+function gameLoop() {
+  if (!gameRunning) return;
+  update();
+  draw();
+  requestAnimationFrame(gameLoop);
+}
+
+function gameOver() {
+  gameRunning = false;
+
+  highScore = Math.max(score, parseInt(localStorage.getItem('spidyHighScore') || '0'));
+  localStorage.setItem('spidyHighScore', highScore);
+
+  const msg = deathMessages[Math.floor(Math.random() * deathMessages.length)];
+  document.getElementById('deathMessage').textContent = msg;
+  document.getElementById('deathScore').textContent = 'Score: ' + score;
+  document.getElementById('deathHighScore').textContent =
+    score >= highScore ? 'NEW HIGH SCORE!' : 'High Score: ' + highScore;
+  document.getElementById('deathScreen').style.display = 'flex';
+}
+
+// ============ CONTROLS ============
+
+document.addEventListener('keydown', e => {
+  if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) {
+    e.preventDefault();
+    keys[e.key] = true;
+  }
+});
+document.addEventListener('keyup', e => {
+  keys[e.key] = false;
+});
+
+// Init high score
+highScore = parseInt(localStorage.getItem('spidyHighScore') || '0');
+</script>
+</body>
+</html>
