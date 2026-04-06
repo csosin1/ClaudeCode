@@ -64,3 +64,13 @@
 - **What went wrong:** Every new project's first deploy returned 502 because systemd started the service before pip/npm install finished. Required a second push to trigger a redeploy after deps were ready.
 - **Root cause:** The deploy script wrote the systemd unit and ran `systemctl restart` unconditionally, even when deps hadn't been installed yet.
 - **What to do differently:** Gate `systemctl restart` behind a dep check (e.g., `import flask` or checking for `node_modules/express`). Skip service start if deps aren't ready — the next deploy will catch it.
+
+## 2026-04-06 Diagnostic Output Committed to Repo
+- **What went wrong:** The car-offers chat created `proxy-diag.yml` — a workflow that commits diagnostic results back to the repo on every push. This generated 13+ "diag:" commits polluting main, each triggering the deploy webhook. A `check-dashboard.yml` workflow did the same for the Carvana dashboard.
+- **Root cause:** Chats had no way to check server state from the sandbox. They built their own diagnostic pipelines that committed results back to git as a workaround for the feedback loop problem.
+- **What to do differently:** Never commit diagnostic output to the repo. Use the Server Check workflow (post `/check` on issue #4) for read-only server checks. Diagnostic workflows should write results to GitHub Step Summary or artifacts, never commit to the repo. Added `results/`, `*/results/`, and `deploy/dashboard_check.txt` to `.gitignore`.
+
+## 2026-04-06 Rogue Workflows Created by Project Chats
+- **What went wrong:** Project chats created `.github/workflows/proxy-diag.yml` and `.github/workflows/check-dashboard.yml` directly, even though `.github/workflows/*.yml` is Orchestrator-only.
+- **Root cause:** The chats needed a feedback loop and the existing infrastructure didn't provide one. They improvised.
+- **What to do differently:** The Server Check workflow now fills this gap. Project chats should never create workflows. If they need a custom check, propose it via CHANGES.md.

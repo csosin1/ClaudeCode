@@ -6,6 +6,10 @@ package-lock.json
 qa-report.md
 __pycache__/
 *.pyc
-*.db
 .playwright-mcp/
 carvana_abs/filing_cache/
+
+# Diagnostic output — never commit these
+results/
+*/results/
+deploy/dashboard_check.txt
