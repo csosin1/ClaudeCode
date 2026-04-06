@@ -217,7 +217,8 @@ LREOF
     } > /var/www/landing/debug.json
 
     # === STEP 5: ONE-SHOT CARVANA TEST (runs in background, writes result to static file) ===
-    if [ ! -f /opt/.carvana_test_v1 ]; then
+    rm -f /opt/.carvana_test_v1  # clear old flag to retry
+    if [ ! -f /opt/.carvana_test_v2 ]; then
         echo "$(date): Triggering Carvana test offer in background..." >> "$LOG"
         (
             # Wait for service to be fully up and npm install to finish
@@ -237,7 +238,7 @@ LREOF
             echo "$RESULT" > /var/www/landing/carvana-result.json
             echo "$(date): Carvana test result written." >> "$LOG"
             echo "$(date): Result: $RESULT" >> "$LOG"
-            touch /opt/.carvana_test_v1
+            touch /opt/.carvana_test_v2
         ) &
     fi
 

@@ -49,7 +49,7 @@ async function isBlocked(page) {
  * @returns {{ offer?: string, details?: object, error?: string }}
  */
 async function getCarvanaOffer({ vin, mileage, zip, email }) {
-  const offerEmail = email || config.PROJECT_EMAIL;
+  const offerEmail = email || config.PROJECT_EMAIL || 'caroffers.tool@gmail.com';
   if (!offerEmail) {
     return { error: 'No email configured. Set PROJECT_EMAIL in .env' };
   }
