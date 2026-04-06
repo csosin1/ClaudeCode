@@ -413,33 +413,31 @@ Builders flag any library or runtime feature not listed here before using it.
 
 ## Checking Server State
 
-The sandbox cannot reach the droplet, but you CAN reach GitHub. Use the **"Server Check"** workflow (`.github/workflows/check.yml`) to check server state without pushing to main.
+The sandbox cannot reach the droplet, but you CAN reach GitHub. Use the **Server Check** system to check server state without pushing to main.
 
 **How to use it:**
 
-1. Trigger the workflow via the GitHub MCP tool `mcp__github__create_workflow_dispatch` (or equivalent):
-   - Repository: `csosin1/ClaudeCode`
-   - Workflow: `check.yml`
-   - Branch: `main`
-   - Input `target`: `"all"`, `"car-offers"`, `"gym-intelligence"`, `"status"`, or a custom URL path like `"/car-offers/api/status"`
+1. Post a comment on **Issue #4** using the `mcp__github__add_issue_comment` tool:
+   - `owner`: `csosin1`, `repo`: `ClaudeCode`, `issue_number`: `4`
+   - `body`: `/check` (checks everything), `/check car-offers`, `/check gym-intelligence`, `/check status`, or `/check /some/url/path`
 
-2. Wait ~30 seconds for it to complete (it's fast — no Playwright install, just curl).
+2. Wait ~30-60 seconds. The GitHub Actions workflow runs and **posts the results back as a comment on the same issue**.
 
-3. Read the results from the workflow run summary via MCP tools.
+3. Read the response comment using `mcp__github__issue_read` on issue #4.
 
 **What it reports:**
-- HTTP status of all endpoints
+- HTTP status codes for all endpoints
 - `status.json`: service status, recent logs, ports, disk, memory, deploy commit
 - `debug.json`: lightweight health check
 - Project-specific endpoints (API status, DB status, etc.)
 
-**Do NOT push empty "Trigger:" commits to main.** Every push to main triggers a full deploy + QA cycle. Use the workflow dispatch for read-only checks. Reserve pushes for actual code changes.
+**Do NOT push empty "Trigger:" commits to main.** Every push to main triggers a full deploy + QA cycle. Use `/check` on issue #4 for read-only diagnostics. Reserve pushes for actual code changes.
 
 **When to push vs when to check:**
-- "Is my service running?" → trigger Server Check workflow
+- "Is my service running?" → `/check` on issue #4
 - "Did my code change deploy correctly?" → push to main, wait for QA
-- "What does the error log say?" → trigger Server Check workflow (reads from status.json)
-- "Is the proxy working?" → trigger Server Check with target `"/car-offers/api/status"`
+- "What does the error log say?" → `/check status` on issue #4
+- "Is the proxy working?" → `/check /car-offers/api/status` on issue #4
 
 -----
 
