@@ -190,68 +190,52 @@ LREOF
             --exclude='__pycache__' \
             "$REPO_DIR/gym-intelligence/" /opt/gym-intelligence/
 
-        # .env (one-time — user fills in API key via /gym-intelligence/ Setup page)
+        # .env (one-time — user fills in API key via /gym-intelligence/ Admin tab)
         if [ ! -f /opt/gym-intelligence/.env ]; then
             cat > /opt/gym-intelligence/.env << 'ENVEOF'
 ANTHROPIC_API_KEY=
 ENVEOF
         fi
 
-        # One-time: migrate from Streamlit to Flask (re-run pip install)
-        if [ -d /opt/gym-intelligence/venv ] && [ ! -f /opt/.gym-intelligence-flask-migrated ]; then
-            echo "$(date): Migrating gym-intelligence from Streamlit to Flask..." >> "$LOG"
-            /opt/gym-intelligence/venv/bin/pip install -r /opt/gym-intelligence/requirements.txt >> "$LOG" 2>&1
-            touch /opt/.gym-intelligence-flask-migrated
-            echo "$(date): Flask migration pip install done." >> "$LOG"
+        # Find python3
+        PYTHON_BIN=""
+        for candidate in /usr/bin/python3 /usr/local/bin/python3; do
+            if [ -x "$candidate" ]; then
+                PYTHON_BIN="$candidate"
+                break
+            fi
+        done
+        if [ -z "$PYTHON_BIN" ]; then
+            PYTHON_BIN="$(command -v python3 2>/dev/null || true)"
+        fi
+        if [ -z "$PYTHON_BIN" ] || [ ! -x "$PYTHON_BIN" ]; then
+            echo "$(date): python3 not found, installing..." >> "$LOG"
+            apt-get update >> "$LOG" 2>&1
+            apt-get install -y python3 python3-venv python3-pip >> "$LOG" 2>&1
+            PYTHON_BIN="$(command -v python3 2>/dev/null || echo /usr/bin/python3)"
         fi
 
-        # One-time: Python venv + pip install
-        if [ ! -f /opt/.gym-intelligence-setup ]; then
-            echo "$(date): Setting up gym-intelligence venv..." >> "$LOG"
-
-            # Find python3
-            PYTHON_BIN=""
-            for candidate in /usr/bin/python3 /usr/local/bin/python3; do
-                if [ -x "$candidate" ]; then
-                    PYTHON_BIN="$candidate"
-                    break
-                fi
-            done
-            if [ -z "$PYTHON_BIN" ]; then
-                PYTHON_BIN="$(command -v python3 2>/dev/null || true)"
-            fi
-            if [ -z "$PYTHON_BIN" ] || [ ! -x "$PYTHON_BIN" ]; then
-                echo "$(date): python3 not found, installing..." >> "$LOG"
-                apt-get update >> "$LOG" 2>&1
-                apt-get install -y python3 python3-venv python3-pip >> "$LOG" 2>&1
-                PYTHON_BIN="$(command -v python3 2>/dev/null || echo /usr/bin/python3)"
-            fi
-
-            # Ensure python3-venv is available
+        # Create venv if missing
+        if [ ! -d /opt/gym-intelligence/venv ]; then
+            echo "$(date): Creating gym-intelligence venv..." >> "$LOG"
             if ! "$PYTHON_BIN" -m venv --help > /dev/null 2>&1; then
                 apt-get install -y python3-venv >> "$LOG" 2>&1
             fi
-
-            # Create venv
             "$PYTHON_BIN" -m venv /opt/gym-intelligence/venv >> "$LOG" 2>&1
-
-            # Install dependencies
             /opt/gym-intelligence/venv/bin/pip install --upgrade pip >> "$LOG" 2>&1
-            /opt/gym-intelligence/venv/bin/pip install -r /opt/gym-intelligence/requirements.txt >> "$LOG" 2>&1
+        fi
 
-            # Verify flask installed
+        # Re-install deps if requirements.txt changed or flask missing
+        if [ "$REPO_DIR/gym-intelligence/requirements.txt" -nt /opt/.gym-intelligence-deps ] || \
+           ! /opt/gym-intelligence/venv/bin/python -c "import flask" 2>/dev/null; then
+            echo "$(date): pip install for gym-intelligence..." >> "$LOG"
+            /opt/gym-intelligence/venv/bin/pip install -r /opt/gym-intelligence/requirements.txt >> "$LOG" 2>&1
             if /opt/gym-intelligence/venv/bin/python -c "import flask" 2>/dev/null; then
-                touch /opt/.gym-intelligence-setup
-                echo "$(date): gym-intelligence venv setup complete." >> "$LOG"
+                touch /opt/.gym-intelligence-deps
+                echo "$(date): gym-intelligence pip install complete." >> "$LOG"
             else
                 echo "$(date): ERROR — gym-intelligence pip install failed (flask missing)." >> "$LOG"
             fi
-        fi
-
-        # Re-run pip install if requirements.txt changed
-        if [ "$REPO_DIR/gym-intelligence/requirements.txt" -nt /opt/gym-intelligence/venv/lib/*/site-packages/pip 2>/dev/null ]; then
-            echo "$(date): gym-intelligence requirements changed, re-running pip install..." >> "$LOG"
-            /opt/gym-intelligence/venv/bin/pip install -r /opt/gym-intelligence/requirements.txt >> "$LOG" 2>&1
         fi
 
         # systemd service (always rewrite to pick up changes)
