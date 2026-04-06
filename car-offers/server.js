@@ -94,9 +94,9 @@ app.get('/setup', (_req, res) => {
 <body>
   <h1>Server Setup</h1>
   <p class="subtitle">Configure proxy &amp; email for Carvana lookups</p>
-  ${msg === 'saved' ? '<div class="alert alert-ok">Configuration saved! <a href="/" style="color:#4ade80;font-weight:600;">Go to Car Offer Tool &rarr;</a></div>' : ''}
-  ${msg === 'required' ? '<div class="alert alert-warn">Please configure your proxy and email first.</div>' : ''}
-  <form class="card" method="POST" action="api/setup">
+  ${msg === 'saved' ? '<div class="alert alert-ok">Configuration saved! <a href="/car-offers/" style="color:#4ade80;font-weight:600;">Go to Car Offer Tool &rarr;</a></div>' : ''}
+  ${msg === 'required' ? '<div class="alert alert-warn">Please configure your proxy password first.</div>' : ''}
+  <form class="card" method="POST" action="/car-offers/api/setup">
     <label for="proxyHost">Proxy Host</label>
     <input type="text" id="proxyHost" name="proxyHost" placeholder="proxy.example.com" value="${escapeAttr(config.PROXY_HOST || 'gate.decodo.com')}">
 
@@ -145,7 +145,7 @@ app.post('/api/setup', (req, res) => {
   if (req.headers['content-type'] === 'application/json') {
     return res.json({ ok: true, message: 'Configuration saved.' });
   }
-  res.redirect('setup?msg=saved');
+  res.redirect('/car-offers/setup?msg=saved');
 });
 
 /** Escape a string for use inside an HTML attribute value (double-quoted). */
@@ -161,7 +161,7 @@ function escapeAttr(str) {
 app.get('/', (_req, res) => {
   // Redirect to setup if not configured
   if (!config.isConfigured()) {
-    return res.redirect('setup?msg=required');
+    return res.redirect('/car-offers/setup?msg=required');
   }
 
   res.send(`<!DOCTYPE html>
@@ -320,7 +320,7 @@ app.get('/', (_req, res) => {
       resultDiv.innerHTML = '<div class="result-card"><div class="spinner"><div class="spinner-ring"></div><div class="spinner-text">Getting offer from Carvana...<br>This can take up to 2 minutes.</div></div></div>';
 
       try {
-        const resp = await fetch('/api/carvana', {
+        const resp = await fetch('/car-offers/api/carvana', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ vin, mileage, zip }),
