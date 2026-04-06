@@ -8,6 +8,33 @@
 REPO_DIR="/opt/site-deploy"
 LOG="/var/log/general-deploy.log"
 
+# Find Node.js — may be installed via nvm, nodesource, or snap
+NODE_BIN=""
+for candidate in /usr/local/bin/node /usr/bin/node /snap/bin/node "$HOME/.nvm/versions/node/*/bin/node"; do
+    if [ -x "$candidate" ]; then
+        NODE_BIN="$candidate"
+        break
+    fi
+done
+# Fallback: search PATH with common nvm/profile sourcing
+if [ -z "$NODE_BIN" ]; then
+    # Source nvm if available
+    export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+    [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" 2>/dev/null
+    NODE_BIN="$(command -v node 2>/dev/null || true)"
+fi
+# Last resort: install Node.js via nodesource
+if [ -z "$NODE_BIN" ] || [ ! -x "$NODE_BIN" ]; then
+    echo "$(date): Node.js not found, installing via nodesource..." >> "$LOG"
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash - >> "$LOG" 2>&1
+    apt-get install -y nodejs >> "$LOG" 2>&1
+    NODE_BIN="$(command -v node 2>/dev/null || echo /usr/bin/node)"
+fi
+
+NPM_BIN="$(dirname "$NODE_BIN")/npm"
+NPX_BIN="$(dirname "$NODE_BIN")/npx"
+export PATH="$(dirname "$NODE_BIN"):$PATH"
+
 cd "$REPO_DIR" || exit 1
 
 # Fetch latest from main
@@ -77,12 +104,31 @@ ENVEOF
             --exclude='.env' \
             "$REPO_DIR/car-offers/" /opt/car-offers/
 
+        # Clear stale npm flag if node_modules is missing (previous install failed)
+        if [ -f /opt/car-offers/.npm_installed ] && [ ! -d /opt/car-offers/node_modules/express ]; then
+            rm -f /opt/car-offers/.npm_installed
+            echo "$(date): Cleared stale .npm_installed flag (express missing)." >> "$LOG"
+        fi
+
         # npm install (express + dotenv = seconds)
         if [ ! -f /opt/car-offers/.npm_installed ] || [ "$REPO_DIR/car-offers/package.json" -nt /opt/car-offers/.npm_installed ]; then
-            echo "$(date): npm install for car-offers..." >> "$LOG"
-            cd /opt/car-offers && npm install --production >> "$LOG" 2>&1
-            touch /opt/car-offers/.npm_installed
-            echo "$(date): npm install done." >> "$LOG"
+            echo "$(date): npm install for car-offers (using $NPM_BIN)..." >> "$LOG"
+            cd /opt/car-offers && "$NPM_BIN" install --production >> "$LOG" 2>&1
+            if [ -d /opt/car-offers/node_modules/express ]; then
+                touch /opt/car-offers/.npm_installed
+                echo "$(date): npm install done." >> "$LOG"
+            else
+                echo "$(date): npm install FAILED — express not found in node_modules." >> "$LOG"
+            fi
+        fi
+
+        # Clear stale playwright flag if previous install failed (libasound2 rename)
+        if [ -f /opt/car-offers/.playwright_installed ]; then
+            # Check if playwright is actually usable
+            if ! "$NPX_BIN" playwright --version > /dev/null 2>&1; then
+                rm -f /opt/car-offers/.playwright_installed
+                echo "$(date): Cleared stale .playwright_installed flag." >> "$LOG"
+            fi
         fi
 
         # Playwright + system deps — background (heavy, don't block server)
@@ -91,17 +137,17 @@ ENVEOF
             (
                 apt-get update -qq >> "$LOG" 2>&1
                 apt-get install -y -qq \
-                    libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
+                    libnss3 libatk1.0-0t64 libatk-bridge2.0-0t64 libcups2t64 libdrm2 \
                     libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 \
-                    libpango-1.0-0 libcairo2 libasound2 libxshmfence1 >> "$LOG" 2>&1
-                cd /opt/car-offers && npx playwright install chromium --with-deps >> "$LOG" 2>&1
+                    libpango-1.0-0 libcairo2 libasound2t64 libxshmfence1 >> "$LOG" 2>&1
+                cd /opt/car-offers && "$NPX_BIN" playwright install chromium --with-deps >> "$LOG" 2>&1
                 touch /opt/car-offers/.playwright_installed
                 echo "$(date): Playwright install done." >> "$LOG"
             ) &
         fi
 
-        # systemd service (no PM2)
-        cat > /etc/systemd/system/car-offers.service << 'SVCEOF'
+        # systemd service (no PM2) — use discovered node path
+        cat > /etc/systemd/system/car-offers.service << SVCEOF
 [Unit]
 Description=Car Offer Tool (Express on port 3100)
 After=network.target
@@ -109,7 +155,7 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=/opt/car-offers
-ExecStart=/usr/bin/node server.js
+ExecStart=$NODE_BIN server.js
 Restart=always
 RestartSec=5
 Environment=NODE_ENV=production
@@ -148,9 +194,9 @@ LREOF
     {
         echo "{"
         echo "  \"timestamp\": \"$(date -Iseconds)\","
-        echo "  \"node_version\": \"$(node --version 2>&1 || echo 'NOT_FOUND')\","
-        echo "  \"node_path\": \"$(which node 2>&1 || echo 'NOT_FOUND')\","
-        echo "  \"npm_version\": \"$(npm --version 2>&1 || echo 'NOT_FOUND')\","
+        echo "  \"node_version\": \"$("$NODE_BIN" --version 2>&1 || echo 'NOT_FOUND')\","
+        echo "  \"node_path\": \"$NODE_BIN\","
+        echo "  \"npm_version\": \"$("$NPM_BIN" --version 2>&1 || echo 'NOT_FOUND')\","
         echo "  \"car_offers_dir_exists\": $([ -d /opt/car-offers ] && echo true || echo false),"
         echo "  \"server_js_exists\": $([ -f /opt/car-offers/server.js ] && echo true || echo false),"
         echo "  \"node_modules_exists\": $([ -d /opt/car-offers/node_modules ] && echo true || echo false),"
