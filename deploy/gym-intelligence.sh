@@ -119,25 +119,32 @@ LREOF
 fi
 
 # Data collection: run until DB is populated
-if [ -f "$PROJECT_DIR/test_collect.py" ]; then
-    GYM_COUNT=$("$PROJECT_DIR/venv/bin/python" -c "
+GYM_COUNT=$("$PROJECT_DIR/venv/bin/python" -c "
+import sys; sys.path.insert(0,'$PROJECT_DIR')
+from db import get_connection, init_db
+init_db()
+c = get_connection()
+r = c.execute('SELECT COUNT(*) as n FROM locations WHERE active=1').fetchone()
+print(r['n'])
+c.close()
+" 2>/dev/null || echo "0")
+
+if [ "$GYM_COUNT" -lt 10 ] && [ -f "$PROJECT_DIR/test_collect.py" ]; then
+    echo "$(date): Running gym data collection (currently $GYM_COUNT locations)..." >> "$LOG"
+    cd "$PROJECT_DIR"
+    timeout 600 "$PROJECT_DIR/venv/bin/python" test_collect.py >> "$LOG" 2>&1
+    echo "$(date): Collection script finished." >> "$LOG"
+fi
+
+# Write gym status to main diagnostics
+GYM_COUNT=$("$PROJECT_DIR/venv/bin/python" -c "
+import sys; sys.path.insert(0,'$PROJECT_DIR')
 from db import get_connection
 c = get_connection()
 r = c.execute('SELECT COUNT(*) as n FROM locations WHERE active=1').fetchone()
 print(r['n'])
 c.close()
 " 2>/dev/null || echo "0")
-    if [ "$GYM_COUNT" -lt 10 ]; then
-        echo "$(date): Running gym data collection (currently $GYM_COUNT locations)..." >> "$LOG"
-        rm -f "$PROJECT_DIR/test_results.json"
-        cd "$PROJECT_DIR"
-        "$PROJECT_DIR/venv/bin/python" test_collect.py >> "$LOG" 2>&1
-        echo "$(date): Collection script finished." >> "$LOG"
-    fi
-fi
-
-# Write DB status for monitoring
-cd "$PROJECT_DIR"
-"$PROJECT_DIR/venv/bin/python" check_db.py >> "$LOG" 2>&1 || true
+echo "$(date): gym-intelligence DB has $GYM_COUNT active locations." >> "$LOG"
 
 echo "$(date): $PROJECT deploy block done." >> "$LOG"

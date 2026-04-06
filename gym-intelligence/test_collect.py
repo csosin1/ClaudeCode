@@ -1,4 +1,4 @@
-"""Robust Overpass collection: checks server status, waits for available slot, uses proper headers."""
+"""Collect gym data from Overpass API. Tries multiple mirrors, waits for available slots."""
 import json
 import os
 import sys
@@ -8,179 +8,144 @@ import re
 sys.path.insert(0, os.path.dirname(__file__))
 import httpx
 
-result_file = os.path.join(os.path.dirname(__file__), "test_results.json")
-WEB_COPY = "/var/www/landing/gym-test.json"
+RESULT_FILE = os.path.join(os.path.dirname(__file__), "test_results.json")
 
-results = {"status": "starting", "steps": [], "gyms": []}
+results = {"status": "starting", "log": [], "gyms_sample": []}
 
 def save():
-    with open(result_file, "w") as f:
+    with open(RESULT_FILE, "w") as f:
         json.dump(results, f, indent=2)
     try:
         import shutil
-        shutil.copy(result_file, WEB_COPY)
+        shutil.copy(RESULT_FILE, "/var/www/landing/gym-test.json")
     except Exception:
         pass
 
-def step(msg):
+def log(msg):
     print(msg)
-    results["steps"].append(msg)
+    results["log"].append(msg)
     save()
 
+HEADERS = {"User-Agent": "GymIntelligence/1.0 (research tool)"}
+
 MIRRORS = [
-    "https://overpass-api.de/api/interpreter",
     "https://z.overpass-api.de/api/interpreter",
     "https://lz4.overpass-api.de/api/interpreter",
+    "https://overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
     "https://overpass.private.coffee/api/interpreter",
 ]
 
-HEADERS = {
-    "User-Agent": "GymIntelligenceTool/1.0 (competitive-analysis; contact@example.com)",
-    "Accept": "application/json",
-}
-
-# Step 1: Check Overpass API status
-step("Step 1: Checking Overpass API status...")
-for mirror in MIRRORS:
-    status_url = mirror.replace("/interpreter", "/status")
+def check_status(mirror):
+    """Check if mirror has available query slots. Returns slots count or -1."""
+    url = mirror.replace("/interpreter", "/status")
     try:
-        with httpx.Client(timeout=10, headers=HEADERS) as client:
-            r = client.get(status_url)
+        with httpx.Client(timeout=10, headers=HEADERS) as c:
+            r = c.get(url)
             if r.status_code == 200:
-                text = r.text
-                step(f"  {mirror}: {r.status_code}")
-                # Parse available slots
-                slots_match = re.search(r'(\d+) slots available', text)
-                rate_match = re.search(r'Rate limit: (\d+)', text)
-                if slots_match:
-                    slots = int(slots_match.group(1))
-                    step(f"    Available slots: {slots}")
-                    if slots > 0:
-                        results["best_mirror"] = mirror
-                        results["available_slots"] = slots
-                else:
-                    step(f"    Status text: {text[:200]}")
-                    # If we can reach it, it might still work
-                    if "available" in text.lower() or "Connected" in text:
-                        results["best_mirror"] = mirror
-            else:
-                step(f"  {mirror}: HTTP {r.status_code}")
+                m = re.search(r'(\d+) slots? available', r.text)
+                return int(m.group(1)) if m else 0
+    except Exception:
+        pass
+    return -1
+
+def query(mirror, overpass_ql, timeout=45):
+    """Run a single Overpass query. Returns elements list or None."""
+    try:
+        with httpx.Client(timeout=timeout, headers=HEADERS, follow_redirects=True) as c:
+            r = c.post(mirror, data={"data": overpass_ql})
+            if r.status_code == 200:
+                return r.json().get("elements", [])
+            log(f"    HTTP {r.status_code}")
+            return None
+    except httpx.TimeoutException:
+        log(f"    Timeout after {timeout}s")
+        return None
     except Exception as e:
-        step(f"  {mirror}: {str(e)[:80]}")
+        log(f"    Error: {e}")
+        return None
 
-save()
-
-# Step 2: Try to query with the best mirror (or try all)
-step("")
-step("Step 2: Attempting data query...")
-
-# Ultra-minimal query: just 3 fitness centres near Luxembourg City center
-MICRO_QUERY = '[out:json][timeout:15];node["leisure"="fitness_centre"](49.58,6.10,49.62,6.15);out body;'
-
+# Step 1: Find a mirror with available slots
+log("=== Finding available Overpass mirror ===")
 working_mirror = None
 
-mirrors_to_try = []
-if results.get("best_mirror"):
-    mirrors_to_try.append(results["best_mirror"])
-mirrors_to_try.extend([m for m in MIRRORS if m not in mirrors_to_try])
+for attempt in range(3):  # Try up to 3 rounds
+    if attempt > 0:
+        wait = 30 * attempt
+        log(f"Waiting {wait}s before retry round {attempt+1}...")
+        time.sleep(wait)
 
-for mirror in mirrors_to_try:
-    step(f"  Trying {mirror.split('//')[1].split('/')[0]}...")
-    try:
-        with httpx.Client(timeout=20, headers=HEADERS, follow_redirects=True) as client:
-            resp = client.post(mirror, data={"data": MICRO_QUERY})
-            step(f"    HTTP {resp.status_code}")
-            if resp.status_code == 200:
-                data = resp.json()
-                els = data.get("elements", [])
-                step(f"    Got {len(els)} elements!")
-                if els or resp.status_code == 200:
-                    working_mirror = mirror
-                    break
-            elif resp.status_code == 429:
-                step("    Rate limited — waiting 30s...")
-                time.sleep(30)
-                # Retry once
-                resp = client.post(mirror, data={"data": MICRO_QUERY})
-                if resp.status_code == 200:
-                    data = resp.json()
-                    step(f"    Retry got {len(data.get('elements', []))} elements")
-                    working_mirror = mirror
-                    break
-            elif resp.status_code == 504:
-                step("    Server overloaded (504) — trying next mirror...")
+    for mirror in MIRRORS:
+        short = mirror.split("//")[1].split("/")[0]
+        slots = check_status(mirror)
+        if slots > 0:
+            log(f"  {short}: {slots} slots available — testing...")
+            # Try a micro query
+            test_q = '[out:json][timeout:10];node["leisure"="fitness_centre"](49.60,6.12,49.62,6.14);out body;'
+            els = query(mirror, test_q, timeout=15)
+            if els is not None:
+                log(f"  SUCCESS: got {len(els)} test elements from {short}")
+                working_mirror = mirror
+                break
             else:
-                step(f"    Unexpected: {resp.text[:150]}")
-    except httpx.TimeoutException:
-        step("    Timed out")
-    except Exception as e:
-        step(f"    Error: {str(e)[:100]}")
-    time.sleep(5)
+                log(f"  Query failed despite available slots")
+        elif slots == 0:
+            log(f"  {short}: 0 slots (busy)")
+        else:
+            log(f"  {short}: unreachable")
+
+    if working_mirror:
+        break
 
 if not working_mirror:
-    step("")
-    step("All mirrors failed. Trying GET method as fallback...")
-    import urllib.parse
-    encoded = urllib.parse.quote(MICRO_QUERY)
-    for mirror in MIRRORS[:3]:
-        url = f"{mirror}?data={encoded}"
-        try:
-            with httpx.Client(timeout=20, headers=HEADERS, follow_redirects=True) as client:
-                resp = client.get(url)
-                step(f"  GET {mirror.split('//')[1].split('/')[0]}: HTTP {resp.status_code}")
-                if resp.status_code == 200:
-                    working_mirror = mirror
-                    results["method"] = "GET"
-                    break
-        except Exception as e:
-            step(f"  GET failed: {str(e)[:80]}")
-        time.sleep(5)
-
-if not working_mirror:
-    results["status"] = "all_mirrors_failed"
-    step("")
-    step("FAILED: Cannot reach any Overpass API mirror.")
-    step("The Overpass API may be globally overloaded.")
-    step("Will retry on next deploy (5-minute fallback timer).")
+    log("")
+    log("No mirror available after all attempts.")
+    log("Overpass API may be globally overloaded. Will retry next deploy cycle.")
+    results["status"] = "all_mirrors_busy"
     save()
     sys.exit(0)
 
-# Step 3: We have a working mirror! Run full collection.
-step("")
-step(f"Step 3: Mirror works! Using {working_mirror}")
-step("Running full 6-country collection pipeline...")
-step("")
+# Step 2: Collect data country by country using split queries
+log("")
+log(f"=== Collecting gym data via {working_mirror.split('//')[1].split('/')[0]} ===")
+
+# Import collection module and override its URL
+import collect
+collect.OVERPASS_URL = working_mirror
+
+def progress(msg):
+    log(msg)
 
 try:
-    import collect
-    collect.OVERPASS_URL = working_mirror
-
-    def progress(msg):
-        step(msg)
-
     collect.run_collection(progress_cb=progress)
-    results["pipeline_status"] = "complete"
 
-    # Count results
     from db import get_connection
     conn = get_connection()
     loc_count = conn.execute("SELECT COUNT(*) as c FROM locations WHERE active=1").fetchone()["c"]
     chain_count = conn.execute("SELECT COUNT(*) as c FROM chains WHERE location_count>0").fetchone()["c"]
+
+    # Sample of gyms for proof
+    sample = conn.execute("""
+        SELECT l.name, l.brand, l.country, l.city, c.canonical_name
+        FROM locations l LEFT JOIN chains c ON l.chain_id = c.id
+        WHERE l.active=1
+        ORDER BY c.location_count DESC
+        LIMIT 20
+    """).fetchall()
+    results["gyms_sample"] = [dict(r) for r in sample]
     conn.close()
 
     results["total_locations"] = loc_count
     results["total_chains"] = chain_count
     results["status"] = "success"
-    step("")
-    step(f"SUCCESS: {loc_count} locations, {chain_count} chains in database!")
-
+    log("")
+    log(f"SUCCESS: {loc_count} locations, {chain_count} chains")
 except Exception as e:
     import traceback
-    results["pipeline_status"] = f"failed"
+    results["status"] = "pipeline_failed"
     results["error"] = str(e)
     results["traceback"] = traceback.format_exc()
-    step(f"Pipeline error: {e}")
-    step(traceback.format_exc())
+    log(f"FAILED: {e}")
+    log(traceback.format_exc())
 
 save()
