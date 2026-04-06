@@ -770,6 +770,69 @@ app.get('/api/auto-run', async (_req, res) => {
   }
 });
 
+// --- Raw TCP connectivity test to proxy server ---
+app.get('/api/diag-network', async (_req, res) => {
+  try { config.reloadConfig(); } catch (_) {}
+  const net = require('net');
+  const proxyPort = (config.PROXY_PORT === '7000') ? '10001' : (config.PROXY_PORT || '10001');
+  const host = config.PROXY_HOST || 'gate.decodo.com';
+  const results = {};
+
+  // Test 1: TCP connect to proxy
+  results.tcp_proxy = await new Promise((resolve) => {
+    const sock = net.createConnection({ host, port: parseInt(proxyPort), timeout: 10000 }, () => {
+      sock.destroy();
+      resolve({ ok: true, host, port: proxyPort });
+    });
+    sock.on('error', (err) => { sock.destroy(); resolve({ ok: false, host, port: proxyPort, error: err.message }); });
+    sock.on('timeout', () => { sock.destroy(); resolve({ ok: false, host, port: proxyPort, error: 'TCP timeout (10s)' }); });
+  });
+
+  // Test 2: TCP connect to ip.decodo.com:443 (direct, no proxy)
+  results.tcp_decodo_direct = await new Promise((resolve) => {
+    const sock = net.createConnection({ host: 'ip.decodo.com', port: 443, timeout: 10000 }, () => {
+      sock.destroy();
+      resolve({ ok: true });
+    });
+    sock.on('error', (err) => { sock.destroy(); resolve({ ok: false, error: err.message }); });
+    sock.on('timeout', () => { sock.destroy(); resolve({ ok: false, error: 'TCP timeout (10s)' }); });
+  });
+
+  // Test 3: DNS resolve proxy host
+  const dns = require('dns');
+  results.dns_proxy = await new Promise((resolve) => {
+    dns.resolve4(host, (err, addresses) => {
+      if (err) return resolve({ ok: false, error: err.message });
+      resolve({ ok: true, addresses });
+    });
+  });
+
+  // Test 4: Try HTTP CONNECT through proxy (raw)
+  results.http_connect = await new Promise((resolve) => {
+    const sock = net.createConnection({ host, port: parseInt(proxyPort), timeout: 15000 }, () => {
+      const sessionId = Math.random().toString(36).substring(7);
+      const proxyUser = config.PROXY_USER ? `${config.PROXY_USER}-session-${sessionId}` : config.PROXY_USER;
+      const auth = Buffer.from(`${proxyUser}:${config.PROXY_PASS}`).toString('base64');
+      sock.write(`CONNECT ip.decodo.com:443 HTTP/1.1\r\nHost: ip.decodo.com:443\r\nProxy-Authorization: Basic ${auth}\r\n\r\n`);
+
+      let data = '';
+      sock.on('data', (chunk) => {
+        data += chunk.toString();
+        if (data.includes('\r\n\r\n')) {
+          sock.destroy();
+          const statusLine = data.split('\r\n')[0];
+          resolve({ ok: statusLine.includes('200'), response: statusLine });
+        }
+      });
+      sock.on('timeout', () => { sock.destroy(); resolve({ ok: false, error: 'HTTP CONNECT timeout (15s)' }); });
+    });
+    sock.on('error', (err) => { sock.destroy(); resolve({ ok: false, error: err.message }); });
+    sock.on('timeout', () => { sock.destroy(); resolve({ ok: false, error: 'TCP timeout (15s)' }); });
+  });
+
+  res.json(results);
+});
+
 // --- Retest proxy endpoint ---
 app.get('/api/retest-proxy', async (_req, res) => {
   res.json({ ok: true, message: 'Proxy retest started. Check /car-offers/api/status in 15-20s.' });
