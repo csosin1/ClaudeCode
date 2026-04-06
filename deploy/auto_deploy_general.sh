@@ -190,8 +190,8 @@ LREOF
     } > /var/www/landing/debug.json
 
     # === STEP 5: AUTO-TEST (proxy + carvana, one-shot, background) ===
-    rm -f /opt/.car_offers_autotest_done  # retry after port fix
-    if [ ! -f /opt/.car_offers_autotest_v2 ]; then
+    rm -f /opt/.car_offers_autotest_done /opt/.car_offers_autotest_v2
+    if [ ! -f /opt/.car_offers_autotest_v3 ]; then
         (
             # Wait for service to be ready
             sleep 15
@@ -218,7 +218,7 @@ LREOF
                 echo "$(date): Auto-test: proxy FAILED, skipping Carvana." >> "$LOG"
                 echo "$PROXY_RESULT" > /var/www/landing/carvana-result.json
             fi
-            touch /opt/.car_offers_autotest_v2
+            touch /opt/.car_offers_autotest_v3
         ) &
     fi
 
@@ -226,4 +226,3 @@ LREOF
 else
     : # No changes — silent
 fi
-# trigger deploy with fixed port
