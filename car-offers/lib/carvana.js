@@ -3,7 +3,7 @@ const config = require('./config');
 const path = require('path');
 
 const CARVANA_URL = 'https://www.carvana.com/sell-my-car';
-const TOTAL_TIMEOUT = 120_000; // 2 minutes total
+const TOTAL_TIMEOUT = 180_000; // 3 minutes total (proxy adds latency)
 
 /**
  * Take a timestamped screenshot for debugging.
@@ -84,8 +84,19 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
 
     // --- Step 1: Navigate to sell-my-car ---
     console.log('[carvana] Step 1: Navigating to Carvana sell page...');
+    // Verify proxy is working by checking our IP
     try {
-      await page.goto(CARVANA_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      console.log('[carvana] Verifying proxy connection...');
+      await page.goto('https://ip.decodo.com/json', { timeout: 20000 });
+      const ipInfo = await page.textContent('body');
+      console.log(`[carvana] Proxy IP info: ${ipInfo}`);
+    } catch (proxyErr) {
+      console.error(`[carvana] Proxy verification failed: ${proxyErr.message}`);
+      throw new Error(`Proxy connection failed: ${proxyErr.message}. Check proxy credentials.`);
+    }
+
+    try {
+      await page.goto(CARVANA_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
     } catch (navErr) {
       console.error(`[carvana] Navigation failed: ${navErr.message}`);
       await screenshot(page, '00-nav-failure').catch(() => {});
