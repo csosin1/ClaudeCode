@@ -344,6 +344,12 @@ def run_collection(progress_cb=None):
                 total_locations += len(locations)
                 log(f"  {cname}: {len(locations)} gyms found ({total_locations} total)")
 
+                # Assign chains after each country so partial runs still work
+                assign_chains(conn)
+                update_chain_location_counts(conn)
+                conn.commit()
+                log(f"  Chains linked and committed.")
+
                 # Pause between countries to avoid rate limiting
                 if i < len(country_list):
                     time.sleep(30)
@@ -351,7 +357,7 @@ def run_collection(progress_cb=None):
                 log(f"  {cname}: FAILED — {e}")
                 logger.error("Failed to collect %s: %s", country_code, e)
 
-        # Mark locations not seen in this pull as inactive
+        # Final: mark locations not seen in this pull as inactive
         if all_seen:
             placeholders = ",".join(["?"] * len(all_seen))
             conn.execute(
@@ -359,8 +365,8 @@ def run_collection(progress_cb=None):
                 list(all_seen),
             )
 
-        # Assign chains and update counts
-        log("Normalizing chain names...")
+        # Final chain assignment (catches any stragglers)
+        log("Final chain normalization...")
         assign_chains(conn)
         update_chain_location_counts(conn)
 

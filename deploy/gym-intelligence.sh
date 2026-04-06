@@ -118,6 +118,23 @@ LREOF
     touch /opt/.gym_intelligence_logs_initialized
 fi
 
+# Repair: link any unlinked locations to chains
+"$PROJECT_DIR/venv/bin/python" -c "
+import sys; sys.path.insert(0, '$PROJECT_DIR')
+from db import get_connection, init_db
+from collect import assign_chains, update_chain_location_counts
+init_db()
+conn = get_connection()
+unlinked = conn.execute('SELECT COUNT(*) as n FROM locations WHERE chain_id IS NULL AND active=1').fetchone()['n']
+if unlinked > 0:
+    print(f'Linking {unlinked} unlinked locations to chains...')
+    assign_chains(conn)
+    update_chain_location_counts(conn)
+    conn.commit()
+    print('Done.')
+conn.close()
+" >> "$LOG" 2>&1 || true
+
 # Data collection: run until DB is populated
 GYM_COUNT=$("$PROJECT_DIR/venv/bin/python" -c "
 import sys; sys.path.insert(0,'$PROJECT_DIR')
