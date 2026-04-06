@@ -1,4 +1,4 @@
-const { launchBrowser, humanDelay, humanType, randomMouseMove, closeBrowser } = require('./browser');
+const { launchBrowser, humanDelay, humanType, randomMouseMove, closeBrowser, simulateHumanBehavior } = require('./browser');
 const config = require('./config');
 const path = require('path');
 
@@ -123,6 +123,12 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
       throw navErr;
     }
     await humanDelay(3000, 6000);
+
+    // Simulate human behavior before interacting (mouse moves, scroll)
+    // PerimeterX tracks behavioral signals — pure automation gets flagged
+    await simulateHumanBehavior(page);
+    await humanDelay(2000, 4000);
+
     await screenshot(page, '01-landing');
 
     // Log what we see on the page for debugging
@@ -134,37 +140,58 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
       console.log(`[carvana] Body snippet: ${bodySnippet.substring(0, 300)}`);
     } catch (_) {}
 
-    if (await isBlocked(page)) {
-      const ssPath = await screenshot(page, 'blocked');
-      const pageTitle = await page.title().catch(() => 'unknown');
-      const bodySnippet = await page.textContent('body').then(t => (t || '').substring(0, 500)).catch(() => '');
-      const pageUrl = page.url();
-      console.log(`[carvana] BLOCKED — title: ${pageTitle}, url: ${pageUrl}`);
-      console.log(`[carvana] Blocked body: ${bodySnippet}`);
-      return { error: 'blocked', details: { pageTitle, bodySnippet, screenshot: ssPath, url: pageUrl } };
+    // Wait for Cloudflare/PerimeterX challenge to resolve (if any)
+    // Some challenges auto-resolve after a few seconds with a real browser
+    try {
+      await page.waitForLoadState('networkidle', { timeout: 15000 });
+    } catch {
+      console.log('[carvana] networkidle timeout — proceeding anyway');
     }
 
-    // --- Step 2: Enter VIN ---
-    console.log('[carvana] Step 2: Entering VIN...');
+    if (await isBlocked(page)) {
+      // Wait longer — some challenges resolve after JS execution
+      console.log('[carvana] Blocked detected, waiting 10s for challenge to resolve...');
+      await humanDelay(8000, 12000);
+      await simulateHumanBehavior(page);
+
+      if (await isBlocked(page)) {
+        const ssPath = await screenshot(page, 'blocked');
+        const pageTitle = await page.title().catch(() => 'unknown');
+        const bodySnippet = await page.textContent('body').then(t => (t || '').substring(0, 500)).catch(() => '');
+        const pageUrl = page.url();
+        console.log(`[carvana] BLOCKED — title: ${pageTitle}, url: ${pageUrl}`);
+        console.log(`[carvana] Blocked body: ${bodySnippet}`);
+        return { error: 'blocked', details: { pageTitle, bodySnippet, screenshot: ssPath, url: pageUrl } };
+      }
+      console.log('[carvana] Challenge resolved after waiting!');
+    }
+
+    // --- Step 2: Switch to VIN tab and enter VIN ---
+    console.log('[carvana] Step 2: Looking for VIN entry...');
     checkTimeout();
 
-    // Try multiple selectors — the exact one will need tuning on the live site
-    const vinSelectors = [
-      'input[placeholder*="VIN"]',
-      'input[placeholder*="vin"]',
-      'input[name="vin"]',
-      'input[data-testid="vin-input"]',
-      'input[aria-label*="VIN"]',
-      '#vin-input',
-      'input[type="text"]',
+    // Carvana shows license plate input by default. VIN is on a secondary tab.
+    // Look for a VIN tab/button to click first.
+    const vinTabSelectors = [
+      'button:has-text("VIN")',
+      'a:has-text("VIN")',
+      '[role="tab"]:has-text("VIN")',
+      'label:has-text("VIN")',
+      'span:has-text("VIN")',
+      '[data-testid*="vin-tab"]',
+      '[data-testid*="vin"]',
     ];
 
-    let vinInput = null;
-    for (const sel of vinSelectors) {
+    for (const sel of vinTabSelectors) {
       try {
-        vinInput = await page.waitForSelector(sel, { timeout: 5000 });
-        if (vinInput) {
-          console.log(`  [carvana] Found VIN input with selector: ${sel}`);
+        const tab = await page.waitForSelector(sel, { timeout: 3000 });
+        if (tab && await tab.isVisible()) {
+          console.log(`  [carvana] Found VIN tab: ${sel} — clicking...`);
+          await randomMouseMove(page, sel).catch(() => {});
+          await humanDelay(500, 1000);
+          await tab.click();
+          await humanDelay(1000, 2000);
+          await screenshot(page, '02-vin-tab-clicked');
           break;
         }
       } catch {
@@ -172,6 +199,34 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
       }
     }
 
+    // Now look for the VIN input field
+    const vinSelectors = [
+      'input[placeholder*="VIN"]',
+      'input[placeholder*="vin"]',
+      'input[placeholder*="vehicle identification"]',
+      'input[name="vin"]',
+      'input[data-testid="vin-input"]',
+      'input[data-testid*="vin"]',
+      'input[aria-label*="VIN"]',
+      '#vin-input',
+      '#vin',
+    ];
+
+    let vinInput = null;
+    for (const sel of vinSelectors) {
+      try {
+        vinInput = await page.waitForSelector(sel, { timeout: 3000 });
+        if (vinInput && await vinInput.isVisible()) {
+          console.log(`  [carvana] Found VIN input with selector: ${sel}`);
+          break;
+        }
+        vinInput = null;
+      } catch {
+        continue;
+      }
+    }
+
+    // If no specific VIN input found, try the general text input (but only if we see VIN-related content)
     if (!vinInput) {
       // Fallback: try Playwright locator methods
       try {
