@@ -413,31 +413,23 @@ Builders flag any library or runtime feature not listed here before using it.
 
 ## Checking Server State
 
-The sandbox cannot reach the droplet, but you CAN reach GitHub. Use the **Server Check** system to check server state without pushing to main.
+The sandbox cannot reach the droplet, but you CAN reach GitHub. There are two ways to check server state:
 
-**How to use it:**
+**Method 1 — After a push (automatic):** Every push to main triggers the QA workflow, which includes server diagnostics in its output. Read the workflow results via GitHub MCP tools.
 
-1. Post a comment on **Issue #4** using the `mcp__github__add_issue_comment` tool:
+**Method 2 — Without pushing (manual trigger):** Ask the user to trigger the "Server Check" workflow from GitHub Actions UI on their phone (one tap: Actions → Server Check → Run workflow). Or post `/check` on **Issue #4** using `mcp__github__add_issue_comment`:
    - `owner`: `csosin1`, `repo`: `ClaudeCode`, `issue_number`: `4`
-   - `body`: `/check` (checks everything), `/check car-offers`, `/check gym-intelligence`, `/check status`, or `/check /some/url/path`
+   - `body`: `/check`, `/check car-offers`, `/check gym-intelligence`, `/check /some/url/path`
 
-2. Wait ~30-60 seconds. The GitHub Actions workflow runs and **posts the results back as a comment on the same issue**.
+**What it reports:** HTTP status codes, service status, recent logs, ports, disk, memory, deploy commit.
 
-3. Read the response comment using `mcp__github__issue_read` on issue #4.
-
-**What it reports:**
-- HTTP status codes for all endpoints
-- `status.json`: service status, recent logs, ports, disk, memory, deploy commit
-- `debug.json`: lightweight health check
-- Project-specific endpoints (API status, DB status, etc.)
-
-**Do NOT push empty "Trigger:" commits to main.** Every push to main triggers a full deploy + QA cycle. Use `/check` on issue #4 for read-only diagnostics. Reserve pushes for actual code changes.
+**Do NOT push empty "Trigger:" commits to main.** Every push to main triggers a full deploy + QA cycle. If you just need to check server state, ask the user to trigger the Server Check workflow. Reserve pushes for actual code changes.
 
 **When to push vs when to check:**
-- "Is my service running?" → `/check` on issue #4
+- "Is my service running?" → ask user to trigger Server Check, or read last QA run
 - "Did my code change deploy correctly?" → push to main, wait for QA
-- "What does the error log say?" → `/check status` on issue #4
-- "Is the proxy working?" → `/check /car-offers/api/status` on issue #4
+- "What does the error log say?" → ask user to trigger Server Check
+- "Is the proxy working?" → ask user to trigger Server Check with `/car-offers/api/status`
 
 -----
 
