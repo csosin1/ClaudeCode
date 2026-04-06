@@ -20,7 +20,7 @@ The user prompts from an iPhone. Claude does everything — writes code, deploys
 **Infrastructure ownership — do not modify these files:**
 - The infrastructure chat owns all deploy scripts, workflows, QA tests, and harness config
 - See the "Parallelism Rules" section for the full list of Orchestrator-only files
-- If you need a new deploy step, nginx route, QA test, or workflow change: write your proposed change into `CHANGES.md` and the infrastructure chat will apply it
+- If you need a new deploy step, nginx route, QA test, or workflow change: write your proposed change into `CHANGES.md` and **ask the user** to take it to the infrastructure chat for implementation. Do not apply infrastructure changes yourself.
 - Directly editing infrastructure files causes merge conflicts and deploy breakage — don't do it
 
 -----
@@ -309,7 +309,7 @@ The dangerous moment is **after pushing to main but before reading QA results**.
   - `LESSONS.md`
   - `RUNBOOK.md`
   - `CHANGES.md`
-- **How other chats propose infrastructure changes:** If a chat needs a new deploy step, nginx route, QA test, or workflow change, it writes the proposed change into its project's `CHANGES.md` entry (or a comment in a PR). The Orchestrator chat reviews and applies the change. Other chats must never directly edit infrastructure files — doing so causes merge conflicts and deploy breakage.
+- **How other chats propose infrastructure changes:** If a chat needs a new deploy step, nginx route, QA test, or workflow change, it writes the proposed change into `CHANGES.md` and **tells the user** to take the request to the infrastructure chat. The infrastructure chat reviews and applies the change. Other chats must never directly edit infrastructure files — doing so causes merge conflicts and deploy breakage. Example message to the user: "I need a new nginx route for /my-project/. I've written the details in CHANGES.md — please ask your infrastructure chat to apply it."
 
 -----
 
