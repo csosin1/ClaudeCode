@@ -15,6 +15,11 @@
 - **Root cause:** `isMobile: true` causes the browser to send mobile-specific request headers that some servers handle differently.
 - **What to do differently:** Use plain viewport dimensions (`{ width: 390, height: 844 }`) instead of device emulation profiles. This tests the responsive layout without changing request behavior.
 
+## 2026-04-06 Agents Still Ask User to SSH Despite Rules
+- **What went wrong:** Car-offers chat asked user to "SSH to the droplet and fill in .env" despite three separate sections of CLAUDE.md saying never to do this.
+- **Root cause:** Agents don't have a clear pattern for getting secrets onto the droplet without SSH. The `.env` creation pattern (one-time gated block in deploy script + web setup page for secrets) isn't obvious.
+- **What to do differently:** For non-secret `.env` values (host, port, username), use a one-time gated block in `deploy/auto_deploy_general.sh`. For actual secrets (passwords, API keys), build a `/setup` web page in the app so the user can enter them from their phone. The car-offers app already has this pattern — use it as a reference.
+
 ## 2026-04-05 QA Polling Burns Tokens
 - **What went wrong:** Orchestrator polled GitHub Actions results via WebFetch in a loop. The WebFetch cache returned stale "in progress" results for ~6 minutes. Multiple fetch+sleep cycles burned context window for no progress.
 - **Root cause:** WebFetch has a 15-minute cache, so repeated requests to the same URL return stale data.

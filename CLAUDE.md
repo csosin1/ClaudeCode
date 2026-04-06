@@ -317,6 +317,7 @@ The dangerous moment is **after pushing to main but before reading QA results**.
 - Orchestrator ensures `.env` exists on the droplet before deploying.
 - `.env` is never committed to git. Verify `.gitignore` includes `.env` before any commit.
 - nginx must never serve `.env`, dotfiles, or `.md` files.
+- **How to create `.env` on the droplet:** Add a one-time gated block to `deploy/auto_deploy_general.sh` that writes the `.env` template with non-secret defaults. For actual secrets (API keys, proxy passwords), either: (a) build a `/setup` web page in the app where the user enters credentials via their phone, or (b) use GitHub Secrets in the Actions workflow. Never ask the user to SSH — it's not available.
 
 -----
 
