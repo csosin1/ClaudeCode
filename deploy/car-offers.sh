@@ -87,6 +87,26 @@ systemctl enable $PROJECT >> "$LOG" 2>&1
 if [ -d "$PROJECT_DIR/node_modules/express" ]; then
     systemctl restart $PROJECT >> "$LOG" 2>&1
     echo "$(date): $PROJECT service restarted." >> "$LOG"
+
+    # Post-restart: wait for service, dump status for diagnostics
+    (
+        sleep 15
+        echo "$(date): [post-restart] Checking service health..." >> "$LOG"
+        STATUS=$(curl -sf --max-time 5 http://127.0.0.1:3100/api/status 2>&1) || STATUS="curl failed"
+        echo "$(date): [post-restart] /api/status: $STATUS" >> "$LOG"
+
+        # Wait for auto-run Carvana to complete (up to 5 min)
+        for i in 1 2 3 4 5 6 7 8 9 10; do
+            sleep 30
+            RESULTS=$(curl -sf --max-time 5 http://127.0.0.1:3100/api/startup-results 2>&1) || RESULTS="curl failed"
+            if echo "$RESULTS" | grep -q '"lastCarvanaRun"' && ! echo "$RESULTS" | grep -q '"lastCarvanaRun":null'; then
+                echo "$(date): [post-restart] Carvana run completed (attempt $i):" >> "$LOG"
+                echo "$RESULTS" >> "$LOG"
+                break
+            fi
+            echo "$(date): [post-restart] Waiting for Carvana auto-run... ($((i*30))s)" >> "$LOG"
+        done
+    ) &
 else
     echo "$(date): $PROJECT deps not ready — skipping service start." >> "$LOG"
 fi
