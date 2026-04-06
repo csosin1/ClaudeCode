@@ -16,12 +16,26 @@ jobs:
         with:
           node-version: 22
 
+      - name: Cache Playwright
+        id: cache-pw
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/ms-playwright
+            node_modules
+          key: playwright-${{ runner.os }}-${{ hashFiles('playwright.config.ts') }}
+
       - name: Install Playwright
+        if: steps.cache-pw.outputs.cache-hit != 'true'
         run: |
           npm init -y
           npm install @playwright/test
           npx playwright install chromium
           npx playwright install-deps chromium
+
+      - name: Install Playwright deps (always needed)
+        if: steps.cache-pw.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
 
       - name: Wait for deploy
         run: sleep 15
