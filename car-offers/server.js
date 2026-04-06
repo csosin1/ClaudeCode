@@ -27,27 +27,38 @@ async function runProxyTest() {
     return;
   }
 
+  const proxyPort = (config.PROXY_PORT === '7000') ? '10001' : (config.PROXY_PORT || '10001');
+  const sessionId = Math.random().toString(36).substring(7);
+  const proxyUser = config.PROXY_USER ? `${config.PROXY_USER}-session-${sessionId}` : '';
+
   let browser = null;
   try {
-    const { launchBrowser, closeBrowser } = require('./lib/browser');
-    const result = await launchBrowser();
-    browser = result.browser;
-    const page = result.page;
+    const pw = require('playwright');
+    browser = await pw.chromium.launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--no-zygote', '--single-process', '--disable-gpu', '--disable-dev-shm-usage'],
+      proxy: {
+        server: `http://${config.PROXY_HOST}:${proxyPort}`,
+        username: proxyUser,
+        password: config.PROXY_PASS,
+      },
+    });
 
-    await page.goto('https://ip.decodo.com/json', { timeout: 25000 });
+    const page = await browser.newPage();
+    await page.goto('https://ip.decodo.com/json', { timeout: 30000 });
     const body = await page.textContent('body');
-    await closeBrowser(browser);
+    await browser.close();
     browser = null;
 
     try {
       const ipData = JSON.parse(body);
-      selfTest.proxyResult = { ok: true, ip: ipData.ip, country: ipData.country_code };
+      selfTest.proxyResult = { ok: true, ip: ipData.ip, country: ipData.country_code, port: proxyPort };
     } catch {
-      selfTest.proxyResult = { ok: true, ip: body.trim().substring(0, 100) };
+      selfTest.proxyResult = { ok: true, ip: body.trim().substring(0, 100), port: proxyPort };
     }
   } catch (err) {
     if (browser) try { await browser.close(); } catch (_) {}
-    selfTest.proxyResult = { ok: false, error: err.message };
+    selfTest.proxyResult = { ok: false, error: err.message, port: proxyPort };
   }
   selfTest.proxyTestedAt = new Date().toISOString();
   console.log(`[self-test] Proxy test result:`, JSON.stringify(selfTest.proxyResult));
@@ -460,7 +471,7 @@ app.get('/api/debug', (_req, res) => {
   res.json(info);
 });
 
-// --- Proxy test endpoint ---
+// --- Proxy test endpoint (uses regular playwright, not stealth — more stable) ---
 app.get('/api/test-proxy', async (_req, res) => {
   try { config.reloadConfig(); } catch (_) {}
 
@@ -468,29 +479,46 @@ app.get('/api/test-proxy', async (_req, res) => {
     return res.json({ ok: false, error: 'Proxy not configured. Save your password first.' });
   }
 
+  const proxyPort = (config.PROXY_PORT === '7000') ? '10001' : (config.PROXY_PORT || '10001');
+  const sessionId = Math.random().toString(36).substring(7);
+  const proxyUser = config.PROXY_USER ? `${config.PROXY_USER}-session-${sessionId}` : '';
+
+  const proxyInfo = {
+    host: config.PROXY_HOST,
+    port: proxyPort,
+    user: proxyUser,
+    pass_length: (config.PROXY_PASS || '').length,
+  };
+
   let browser = null;
   try {
-    const { launchBrowser, closeBrowser } = require('./lib/browser');
-    const result = await launchBrowser();
-    browser = result.browser;
-    const page = result.page;
+    const pw = require('playwright');
+    browser = await pw.chromium.launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--no-zygote', '--single-process', '--disable-gpu', '--disable-dev-shm-usage'],
+      proxy: {
+        server: `http://${config.PROXY_HOST}:${proxyPort}`,
+        username: proxyUser,
+        password: config.PROXY_PASS,
+      },
+    });
 
-    // Hit Decodo's IP check endpoint through the proxy
-    await page.goto('https://ip.decodo.com/json', { timeout: 20000 });
+    const page = await browser.newPage();
+    await page.goto('https://ip.decodo.com/json', { timeout: 30000 });
     const body = await page.textContent('body');
-    await closeBrowser(browser);
+    await browser.close();
     browser = null;
 
     try {
       const ipData = JSON.parse(body);
-      return res.json({ ok: true, ip: ipData.ip, country: ipData.country_code, raw: ipData });
+      return res.json({ ok: true, ip: ipData.ip, country: ipData.country_code, proxy: proxyInfo });
     } catch {
-      return res.json({ ok: true, ip: body.trim().substring(0, 100) });
+      return res.json({ ok: true, ip: body.trim().substring(0, 100), proxy: proxyInfo });
     }
   } catch (err) {
     if (browser) try { await browser.close(); } catch (_) {}
     console.error('[test-proxy] Error:', err.message);
-    return res.json({ ok: false, error: err.message });
+    return res.json({ ok: false, error: err.message, proxy: proxyInfo });
   }
 });
 
