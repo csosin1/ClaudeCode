@@ -13,12 +13,15 @@ permissions:
 jobs:
   diag:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
 
       - name: Wait for deploy + startup diagnostics + Carvana run
-        run: sleep 240
+        run: |
+          echo "Waiting 420s for deploy + IP hunt + Carvana flow..."
+          sleep 420
+          echo "Done waiting at $(date -u)"
 
       - name: Fetch diagnostic results
         run: |

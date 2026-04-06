@@ -2,19 +2,31 @@
 {
     "proxyResult": {
         "ok": true,
-        "ip": "45.169.214.34",
+        "ip": "190.242.130.153",
         "method": "curl",
         "port": "10001"
     },
-    "proxyTestedAt": "2026-04-06T19:20:13.877Z",
-    "startedAt": "2026-04-06T19:20:02.235Z",
-    "lastCarvanaRun": null,
+    "proxyTestedAt": "2026-04-06T19:32:36.001Z",
+    "startedAt": "2026-04-06T19:32:25.257Z",
+    "lastCarvanaRun": {
+        "error": "blocked",
+        "details": {
+            "pageTitle": "Attention Required! | Cloudflare",
+            "bodySnippet": "\n  \n    Please enable cookies.\n    \n      \n        Sorry, you have been blocked\n        You are unable to access carvana.com\n      \n\n      \n        \n          \n            \n              \n            \n          \n        \n      \n\n      \n        \n          \n            Why have I been blocked?\n\n      ",
+            "screenshot": "/tmp/carvana-blocked-1775503962637.png",
+            "url": "https://www.carvana.com/sell-my-car"
+        },
+        "vin": "1HGCV2F9XNA008352",
+        "mileage": "48000",
+        "zip": "06880",
+        "completed_at": "2026-04-06T19:32:42.812Z"
+    },
     "networkDiag": {
-        "timestamp": "2026-04-06T19:20:07.259Z",
+        "timestamp": "2026-04-06T19:32:30.275Z",
         "tests": {
             "dns_resolve": {
                 "ok": true,
-                "output": "dataroute0.com.\n169.150.204.216\n149.88.97.66\n89.222.99.194\n37.19.211.193\n37.19.211.219\n212.11.41.34\n138.199.35.66"
+                "output": "dataroute0.com.\n37.19.211.219\n212.11.41.34\n138.199.35.66\n37.19.211.193\n169.150.204.216\n89.222.99.194\n149.88.97.66"
             },
             "tcp_proxy": {
                 "ok": true,
@@ -22,11 +34,11 @@
             },
             "curl_httpbin_proxy": {
                 "ok": true,
-                "output": "{\n  \"origin\": \"45.169.214.34\"\n}"
+                "output": "{\n  \"origin\": \"190.242.130.153\"\n}"
             },
             "curl_decodo_proxy": {
                 "ok": true,
-                "output": "{\n    \"browser\": {\n        \"name\": \"curl\",\n        \"version\": \"8.5.0\"\n    },\n    \"platform\": {\n        \"name\": \"\",\n        \"os\": \"\",\n        \"type\": \"desktop\"\n    },\n    \"engine\": {\n        \"name\": \"\",\n        \"version\": \"\"\n    },\n    \"isp\": {\n        \"asn\": 52941,\n        \"isp\": \"Space Network\",\n        \"organization\": \"SNAKE INFORMATICA LTDA ME\",\n        \"domain\": \"\"\n    },\n    \"city\": {\n        \"name\": \"S\u00e3o Paulo\",\n        \"code\": \"SP\",\n        \"zip_code\": \"01008\",\n        \"state\": \"S\u00e3o Paulo"
+                "output": "{\n    \"browser\": {\n        \"name\": \"curl\",\n        \"version\": \"8.5.0\"\n    },\n    \"platform\": {\n        \"name\": \"\",\n        \"os\": \"\",\n        \"type\": \"desktop\"\n    },\n    \"engine\": {\n        \"name\": \"\",\n        \"version\": \"\"\n    },\n    \"isp\": {\n        \"asn\": 262191,\n        \"isp\": \"Columbus Networks USA\",\n        \"organization\": \"Liberty Networks De Colombia S.a.s\",\n        \"domain\": \"\"\n    },\n    \"city\": {\n        \"name\": \"Sincelejo\",\n        \"code\": \"SUC\",\n        \"zip_code\": \"700008\",\n       "
             },
             "curl_httpbin_direct": {
                 "ok": true,
@@ -42,17 +54,17 @@
             }
         }
     },
-    "networkDiagAt": "2026-04-06T19:20:07.259Z",
+    "networkDiagAt": "2026-04-06T19:32:30.275Z",
     "playwrightProxy": {
-        "ok": false,
-        "error": "Unexpected token 'A', \"Access den\"... is not valid JSON",
-        "testedAt": "2026-04-06T19:20:18.190Z"
+        "ok": true,
+        "ip": "190.242.130.153",
+        "testedAt": "2026-04-06T19:32:37.581Z"
     }
 }
 
 === Debug Config ===
 {
-    "timestamp": "2026-04-06T19:24:02.823Z",
+    "timestamp": "2026-04-06T19:36:25.521Z",
     "proxy_host": "gate.decodo.com",
     "proxy_port": "10001",
     "proxy_user": "spjax0kgms",
@@ -60,14 +72,14 @@
     "proxy_pass_length": 18,
     "project_email": "caroffers.tool@gmail.com",
     "node_version": "v22.22.2",
-    "uptime_seconds": 241
+    "uptime_seconds": 240
 }
 
 === Status ===
 {
     "service": {
-        "startedAt": "2026-04-06T19:20:02.235Z",
-        "uptime_seconds": 241,
+        "startedAt": "2026-04-06T19:32:25.257Z",
+        "uptime_seconds": 240,
         "node_version": "v22.22.2"
     },
     "proxy": {
@@ -79,18 +91,18 @@
         "pass_length": 18,
         "test_result": {
             "ok": true,
-            "ip": "45.169.214.34",
+            "ip": "190.242.130.153",
             "method": "curl",
             "port": "10001"
         },
-        "tested_at": "2026-04-06T19:20:13.877Z"
+        "tested_at": "2026-04-06T19:32:36.001Z"
     },
     "networkDiag": {
-        "timestamp": "2026-04-06T19:20:07.259Z",
+        "timestamp": "2026-04-06T19:32:30.275Z",
         "tests": {
             "dns_resolve": {
                 "ok": true,
-                "output": "dataroute0.com.\n169.150.204.216\n149.88.97.66\n89.222.99.194\n37.19.211.193\n37.19.211.219\n212.11.41.34\n138.199.35.66"
+                "output": "dataroute0.com.\n37.19.211.219\n212.11.41.34\n138.199.35.66\n37.19.211.193\n169.150.204.216\n89.222.99.194\n149.88.97.66"
             },
             "tcp_proxy": {
                 "ok": true,
@@ -98,11 +110,11 @@
             },
             "curl_httpbin_proxy": {
                 "ok": true,
-                "output": "{\n  \"origin\": \"45.169.214.34\"\n}"
+                "output": "{\n  \"origin\": \"190.242.130.153\"\n}"
             },
             "curl_decodo_proxy": {
                 "ok": true,
-                "output": "{\n    \"browser\": {\n        \"name\": \"curl\",\n        \"version\": \"8.5.0\"\n    },\n    \"platform\": {\n        \"name\": \"\",\n        \"os\": \"\",\n        \"type\": \"desktop\"\n    },\n    \"engine\": {\n        \"name\": \"\",\n        \"version\": \"\"\n    },\n    \"isp\": {\n        \"asn\": 52941,\n        \"isp\": \"Space Network\",\n        \"organization\": \"SNAKE INFORMATICA LTDA ME\",\n        \"domain\": \"\"\n    },\n    \"city\": {\n        \"name\": \"S\u00e3o Paulo\",\n        \"code\": \"SP\",\n        \"zip_code\": \"01008\",\n        \"state\": \"S\u00e3o Paulo"
+                "output": "{\n    \"browser\": {\n        \"name\": \"curl\",\n        \"version\": \"8.5.0\"\n    },\n    \"platform\": {\n        \"name\": \"\",\n        \"os\": \"\",\n        \"type\": \"desktop\"\n    },\n    \"engine\": {\n        \"name\": \"\",\n        \"version\": \"\"\n    },\n    \"isp\": {\n        \"asn\": 262191,\n        \"isp\": \"Columbus Networks USA\",\n        \"organization\": \"Liberty Networks De Colombia S.a.s\",\n        \"domain\": \"\"\n    },\n    \"city\": {\n        \"name\": \"Sincelejo\",\n        \"code\": \"SUC\",\n        \"zip_code\": \"700008\",\n       "
             },
             "curl_httpbin_direct": {
                 "ok": true,
@@ -118,14 +130,26 @@
             }
         }
     },
-    "networkDiagAt": "2026-04-06T19:20:07.259Z",
+    "networkDiagAt": "2026-04-06T19:32:30.275Z",
     "workingPort": null,
     "playwrightProxy": {
-        "ok": false,
-        "error": "Unexpected token 'A', \"Access den\"... is not valid JSON",
-        "testedAt": "2026-04-06T19:20:18.190Z"
+        "ok": true,
+        "ip": "190.242.130.153",
+        "testedAt": "2026-04-06T19:32:37.581Z"
     },
-    "lastCarvanaRun": null
+    "lastCarvanaRun": {
+        "error": "blocked",
+        "details": {
+            "pageTitle": "Attention Required! | Cloudflare",
+            "bodySnippet": "\n  \n    Please enable cookies.\n    \n      \n        Sorry, you have been blocked\n        You are unable to access carvana.com\n      \n\n      \n        \n          \n            \n              \n            \n          \n        \n      \n\n      \n        \n          \n            Why have I been blocked?\n\n      ",
+            "screenshot": "/tmp/carvana-blocked-1775503962637.png",
+            "url": "https://www.carvana.com/sell-my-car"
+        },
+        "vin": "1HGCV2F9XNA008352",
+        "mileage": "48000",
+        "zip": "06880",
+        "completed_at": "2026-04-06T19:32:42.812Z"
+    }
 }
 
 === Browser Diagnostic ===
