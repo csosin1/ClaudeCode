@@ -516,7 +516,7 @@ Builder reads `LESSONS.md` at the start of every task.
 2. Orchestrator pushes to `main` → webhook deploys in 2-3s → GitHub Actions triggers `.github/workflows/qa.yml`
 3. GitHub Actions installs Playwright + Chromium, waits 15s for deploy, runs all tests at 390px mobile and 1280px desktop
 4. Screenshots uploaded as artifacts (7-day retention)
-5. Orchestrator checks the Actions run for the push commit to read pass/fail results
+5. Orchestrator checks the Actions run for the push commit to read pass/fail results. **Note:** WebFetch returns cached/stale GitHub Actions data — do not trust it for QA results. Wait at least 90 seconds after push, check once with a cache-busting query parameter, and cross-reference with the user's report of email notifications if uncertain.
 
 ### Writing Task-Specific Tests
 
@@ -616,6 +616,10 @@ Fix cycles used: [0-2]
 **Instant deploy via webhook:** Push to `main` → GitHub webhook → `http://159.223.127.125/webhook/deploy` → nginx proxies to Python listener on `127.0.0.1:9000` → verifies HMAC-SHA256 signature → triggers deploy script → deploys in 2-3 seconds. Fallback timer runs every 5 minutes in case webhook fails.
 
 **Auto-deploy pipeline:** `main` branch → `/opt/site-deploy/` → syncs `games/` → `/var/www/games/`, copies `deploy/landing.html` → `/var/www/landing/index.html`, reloads nginx if `deploy/NGINX_VERSION` changed. Log at `/var/log/general-deploy.log`.
+
+**Deploy script ordering — fast path first:** The deploy script must sync static files (landing page, games, hubs) BEFORE any heavy one-time setup (apt-get, npm install, Playwright install). The fast path must complete in 2-3 seconds regardless of pending setup work. Never block static deploys behind project-specific initialization.
+
+**Deploy script self-update is two-deploy:** When you fix the deploy script itself, the fix doesn't take effect on the current run — the old script is already in memory. Push the fix, then push a second trivial commit to trigger a deploy that runs the new script. Pattern: fix → deploy (copies new script) → trigger commit → deploy (runs new script).
 
 **Automated QA:** Every push to `main` triggers a GitHub Actions workflow (`.github/workflows/qa.yml`) that runs Playwright tests against the live site at 390px mobile and 1280px desktop. Tests cover: page loads, link integrity, JS errors, security (dotfile/env blocking), performance (<8s load), and webhook health. Results visible in the GitHub Actions tab. Screenshots uploaded as artifacts.
 
