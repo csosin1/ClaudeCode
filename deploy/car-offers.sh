@@ -28,14 +28,8 @@ PORT=3100
 ENVEOF
 fi
 
-# One-time: fix proxy port from 7000 to 10001
-if [ ! -f /opt/.car_offers_port_fixed ]; then
-    if [ -f "$PROJECT_DIR/.env" ]; then
-        sed -i 's/^PROXY_PORT=7000$/PROXY_PORT=10001/' "$PROJECT_DIR/.env"
-        touch /opt/.car_offers_port_fixed
-        echo "$(date): Fixed proxy port to 10001." >> "$LOG"
-    fi
-fi
+# Note: code hardcodes port 7000 for geo-targeting (user- prefix params).
+# .env PROXY_PORT is not used for the actual proxy connection.
 
 # Sync code (preserve node_modules, .env, data)
 rsync -a --delete \

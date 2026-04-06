@@ -24,7 +24,13 @@ async function screenshot(page, label) {
  * Check if the page shows a CAPTCHA or bot-block screen.
  */
 async function isBlocked(page) {
-  const html = await page.content();
+  let html;
+  try {
+    html = await page.content();
+  } catch (err) {
+    console.error(`[carvana] isBlocked check failed (page may have crashed): ${err.message}`);
+    return false; // Can't check — let the flow continue and fail at the next step
+  }
   const blockedIndicators = [
     'perimeterx',
     'px-captcha',

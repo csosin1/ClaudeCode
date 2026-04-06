@@ -64,9 +64,8 @@ async function launchBrowser(options = {}) {
     '--disable-sync',
     '--disable-translate',
     '--no-first-run',
-    '--no-zygote',
-    '--single-process',
     '--mute-audio',
+    '--js-flags=--max-old-space-size=256',
   ];
 
   // Build proxy config
