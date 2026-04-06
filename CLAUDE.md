@@ -17,11 +17,12 @@ The user prompts from an iPhone. Claude does everything — writes code, deploys
 - All live-site testing runs via GitHub Actions, not from this sandbox
 - See "Production Environment" section for details
 
-**Infrastructure ownership — do not modify these files:**
-- The infrastructure chat owns all deploy scripts, workflows, QA tests, and harness config
-- See the "Parallelism Rules" section for the full list of Orchestrator-only files
-- If you need a new deploy step, nginx route, QA test, or workflow change: write your proposed change into `CHANGES.md` and **ask the user** to take it to the infrastructure chat for implementation. Do not apply infrastructure changes yourself.
-- Directly editing infrastructure files causes merge conflicts and deploy breakage — don't do it
+**Infrastructure ownership — what you can and can't modify:**
+- **Your project's deploy script** (`deploy/<your-project>.sh`): You own it. Edit it directly.
+- **Everything else in deploy/**: Orchestrator-only. Do not modify `auto_deploy_general.sh`, `update_nginx.sh`, `landing.html`, `NGINX_VERSION`, or `setup_*.sh`.
+- **Workflows, QA tests, harness config**: Orchestrator-only. See "Parallelism Rules" for the full list.
+- If you need nginx routes, QA tests, landing page cards, or workflow changes: write your proposal into `CHANGES.md` and **ask the user** to take it to the infrastructure chat.
+- **Diagnostics**: Check `http://159.223.127.125/status.json` for service status, recent logs, ports, disk, and memory — no need to push commits just to check server state.
 
 -----
 
@@ -298,10 +299,11 @@ The dangerous moment is **after pushing to main but before reading QA results**.
 - The following files are **Orchestrator-only**. No other agent or chat may modify them:
   - `CLAUDE.md`
   - `.claude/agents/*.md`
-  - `deploy/landing.html`
+  - `deploy/auto_deploy_general.sh`
   - `deploy/update_nginx.sh`
   - `deploy/NGINX_VERSION`
-  - `deploy/auto_deploy_general.sh`
+  - `deploy/landing.html`
+  - `deploy/setup_*.sh`
   - `.github/workflows/*.yml`
   - `tests/qa-smoke.spec.ts`
   - `playwright.config.ts`
@@ -309,7 +311,9 @@ The dangerous moment is **after pushing to main but before reading QA results**.
   - `LESSONS.md`
   - `RUNBOOK.md`
   - `CHANGES.md`
-- **How other chats propose infrastructure changes:** If a chat needs a new deploy step, nginx route, QA test, or workflow change, it writes the proposed change into `CHANGES.md` and **tells the user** to take the request to the infrastructure chat. The infrastructure chat reviews and applies the change. Other chats must never directly edit infrastructure files — doing so causes merge conflicts and deploy breakage. Example message to the user: "I need a new nginx route for /my-project/. I've written the details in CHANGES.md — please ask your infrastructure chat to apply it."
+- **Project deploy scripts** (`deploy/<project>.sh`): Owned by the project chat. Each project chat can modify its own deploy script directly. The main deploy script sources these automatically. Available variables: `$REPO_DIR`, `$LOG`, `$NODE_BIN`, `$NPM_BIN`, `$NPX_BIN`.
+- **Diagnostics**: Project chats can read `http://159.223.127.125/status.json` to check service status, recent logs, ports, disk, and memory without pushing commits.
+- **How other chats propose infrastructure changes:** If a chat needs a new nginx route, QA test, landing page card, or workflow change, it writes the proposed change into `CHANGES.md` and **tells the user** to take the request to the infrastructure chat. Example message to the user: "I need a new nginx route for /my-project/. I've written the details in CHANGES.md — please ask your infrastructure chat to apply it."
 
 -----
 
@@ -642,6 +646,7 @@ Fix cycles used: [0-2]
 
 1. Clarify location before writing code
 1. Create `/opt/<project>/` (or `games/<name>/` for static games)
+1. **Create `deploy/<project>.sh`** — the project's own deploy script. This file is owned by the project chat and sourced by the main deploy script automatically. It handles: code sync, dependency install, systemd service, observability. Use `deploy/car-offers.sh` or `deploy/gym-intelligence.sh` as a template. Available variables from parent: `$REPO_DIR`, `$LOG`, `$NODE_BIN`, `$NPM_BIN`, `$NPX_BIN`.
 1. Add nginx location block in `deploy/update_nginx.sh`
 1. Bump `NGINX_VERSION`
 1. Add link card to every relevant hub page:
@@ -651,6 +656,8 @@ Fix cycles used: [0-2]
 1. If a new sub-folder group is created (e.g. `/carvana/`), create a hub `index.html` for it with cards linking to each project in the group, and add a card on the main landing page pointing to the hub
 1. Configure error logging and health check
 1. Add to `RUNBOOK.md`
+
+**Steps 1-2 and the deploy script (step 3) can be done by the project chat.** Steps 4-8 require the infrastructure chat — propose them via `CHANGES.md`.
 
 **Every project must be reachable by tapping links from the landing page.** No project should exist without a link card. If a user can't navigate to it from http://159.223.127.125/, it's not done.
 

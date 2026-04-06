@@ -4,6 +4,7 @@
 #
 # RULE 1: Update THIS SCRIPT first after git reset — breaks deadlock if old version is stuck.
 # RULE 2: Static file sync next (2-3s). Heavy setup (npm, apt-get) runs last and never blocks.
+# RULE 3: Project deploy scripts live in deploy/<project>.sh — owned by project chats.
 
 REPO_DIR="/opt/site-deploy"
 LOG="/var/log/general-deploy.log"
@@ -77,231 +78,24 @@ if [ "$LOCAL" != "$REMOTE" ]; then
 
     echo "$(date): Static files deployed." >> "$LOG"
 
-    # === STEP 3: SERVER-SIDE PROJECTS ===
+    # === STEP 3: SERVER-SIDE PROJECTS (each project sources its own deploy script) ===
+    for deploy_script in "$REPO_DIR"/deploy/*.sh; do
+        script_name="$(basename "$deploy_script")"
+        # Skip infrastructure scripts
+        case "$script_name" in
+            auto_deploy_general.sh|update_nginx.sh|setup_*.sh) continue ;;
+        esac
+        echo "$(date): Running deploy/$script_name..." >> "$LOG"
+        (
+            cd "$REPO_DIR" || exit 1
+            source "$deploy_script"
+        ) >> "$LOG" 2>&1 || echo "$(date): WARNING — deploy/$script_name failed." >> "$LOG"
+    done
 
-    # --- car-offers (Express on port 3100) ---
-    if [ -d "$REPO_DIR/car-offers" ]; then
-        mkdir -p /opt/car-offers/data
-        mkdir -p /var/log/car-offers
-
-        # .env (one-time — user fills in password via /car-offers/setup)
-        if [ ! -f /opt/car-offers/.env ]; then
-            cat > /opt/car-offers/.env << 'ENVEOF'
-PROXY_HOST=gate.decodo.com
-PROXY_PORT=10001
-PROXY_USER=spjax0kgms
-PROXY_PASS=
-PROJECT_EMAIL=
-PORT=3100
-ENVEOF
-        fi
-
-        # One-time: fix proxy port from 7000 to 10001
-        if [ ! -f /opt/.car_offers_port_fixed ]; then
-            if [ -f /opt/car-offers/.env ]; then
-                sed -i 's/^PROXY_PORT=7000$/PROXY_PORT=10001/' /opt/car-offers/.env
-                touch /opt/.car_offers_port_fixed
-                echo "$(date): Fixed proxy port to 10001." >> "$LOG"
-            fi
-        fi
-
-        # Sync code (preserve node_modules, .env, data)
-        rsync -a --delete \
-            --exclude='node_modules' \
-            --exclude='*.db' \
-            --exclude='.env' \
-            "$REPO_DIR/car-offers/" /opt/car-offers/
-
-        # npm install (if package.json changed or node_modules missing)
-        if [ "$REPO_DIR/car-offers/package.json" -nt /opt/car-offers/node_modules/.package-lock.json ] || [ ! -d /opt/car-offers/node_modules/express ]; then
-            echo "$(date): npm install for car-offers..." >> "$LOG"
-            cd /opt/car-offers && "$NPM_BIN" install --production >> "$LOG" 2>&1
-            if [ -d /opt/car-offers/node_modules/express ]; then
-                echo "$(date): npm install done." >> "$LOG"
-            else
-                echo "$(date): ERROR — npm install failed (express missing)." >> "$LOG"
-            fi
-        fi
-
-        # Playwright (one-time, only if not already installed)
-        if [ ! -f /opt/car-offers/.playwright_installed ]; then
-            echo "$(date): Installing Playwright + Chromium..." >> "$LOG"
-            cd /opt/car-offers && "$NPX_BIN" playwright install --with-deps chromium >> "$LOG" 2>&1
-            if "$NPX_BIN" playwright --version > /dev/null 2>&1; then
-                touch /opt/car-offers/.playwright_installed
-                echo "$(date): Playwright installed." >> "$LOG"
-            else
-                echo "$(date): WARNING — Playwright install may have failed." >> "$LOG"
-            fi
-        fi
-
-        # systemd service
-        cat > /etc/systemd/system/car-offers.service << SVCEOF
-[Unit]
-Description=Car Offer Tool (Express on port 3100)
-After=network.target
-
-[Service]
-Type=simple
-WorkingDirectory=/opt/car-offers
-ExecStart=$NODE_BIN server.js
-Restart=always
-RestartSec=5
-Environment=NODE_ENV=production
-StandardOutput=append:/var/log/car-offers/error.log
-StandardError=append:/var/log/car-offers/error.log
-
-[Install]
-WantedBy=multi-user.target
-SVCEOF
-        systemctl daemon-reload
-        systemctl enable car-offers >> "$LOG" 2>&1
-        systemctl restart car-offers >> "$LOG" 2>&1
-        echo "$(date): car-offers service restarted." >> "$LOG"
-
-        # Observability (one-time)
-        if [ ! -f /opt/.car_offers_logs_initialized ]; then
-            touch /var/log/car-offers/error.log /var/log/car-offers/uptime.log
-            cat > /etc/logrotate.d/car-offers << 'LREOF'
-/var/log/car-offers/*.log {
-    weekly
-    rotate 4
-    compress
-    missingok
-    notifempty
-    create 0644 root root
-}
-LREOF
-            (crontab -l 2>/dev/null; echo '*/5 * * * * curl -sf http://127.0.0.1:3100/ > /dev/null || echo "$(date) DOWN" >> /var/log/car-offers/uptime.log') | crontab -
-            touch /opt/.car_offers_logs_initialized
-        fi
-    fi
-
-    # --- gym-intelligence (Flask on port 8502) ---
-    if [ -d "$REPO_DIR/gym-intelligence" ]; then
-        mkdir -p /opt/gym-intelligence
-        mkdir -p /var/log/gym-intelligence
-
-        # Sync code (preserve venv, .env, *.db)
-        rsync -a --delete \
-            --exclude='venv' \
-            --exclude='*.db' \
-            --exclude='.env' \
-            --exclude='__pycache__' \
-            "$REPO_DIR/gym-intelligence/" /opt/gym-intelligence/
-
-        # .env (one-time — user fills in API key via /gym-intelligence/ Admin tab)
-        if [ ! -f /opt/gym-intelligence/.env ]; then
-            cat > /opt/gym-intelligence/.env << 'ENVEOF'
-ANTHROPIC_API_KEY=
-ENVEOF
-        fi
-
-        # Find python3
-        PYTHON_BIN=""
-        for candidate in /usr/bin/python3 /usr/local/bin/python3; do
-            if [ -x "$candidate" ]; then
-                PYTHON_BIN="$candidate"
-                break
-            fi
-        done
-        if [ -z "$PYTHON_BIN" ]; then
-            PYTHON_BIN="$(command -v python3 2>/dev/null || true)"
-        fi
-        if [ -z "$PYTHON_BIN" ] || [ ! -x "$PYTHON_BIN" ]; then
-            echo "$(date): python3 not found, installing..." >> "$LOG"
-            apt-get update >> "$LOG" 2>&1
-            apt-get install -y python3 python3-venv python3-pip >> "$LOG" 2>&1
-            PYTHON_BIN="$(command -v python3 2>/dev/null || echo /usr/bin/python3)"
-        fi
-
-        # Create venv if missing
-        if [ ! -d /opt/gym-intelligence/venv ]; then
-            echo "$(date): Creating gym-intelligence venv..." >> "$LOG"
-            if ! "$PYTHON_BIN" -m venv --help > /dev/null 2>&1; then
-                apt-get install -y python3-venv >> "$LOG" 2>&1
-            fi
-            "$PYTHON_BIN" -m venv /opt/gym-intelligence/venv >> "$LOG" 2>&1
-            /opt/gym-intelligence/venv/bin/pip install --upgrade pip >> "$LOG" 2>&1
-        fi
-
-        # Re-install deps if requirements.txt changed or flask missing
-        if [ "$REPO_DIR/gym-intelligence/requirements.txt" -nt /opt/.gym-intelligence-deps ] || \
-           ! /opt/gym-intelligence/venv/bin/python -c "import flask" 2>/dev/null; then
-            echo "$(date): pip install for gym-intelligence..." >> "$LOG"
-            /opt/gym-intelligence/venv/bin/pip install -r /opt/gym-intelligence/requirements.txt >> "$LOG" 2>&1
-            if /opt/gym-intelligence/venv/bin/python -c "import flask" 2>/dev/null; then
-                touch /opt/.gym-intelligence-deps
-                echo "$(date): gym-intelligence pip install complete." >> "$LOG"
-            else
-                echo "$(date): ERROR — gym-intelligence pip install failed (flask missing)." >> "$LOG"
-            fi
-        fi
-
-        # systemd service (always rewrite to pick up changes)
-        cat > /etc/systemd/system/gym-intelligence.service << 'SVCEOF'
-[Unit]
-Description=Gym Intelligence (Flask on port 8502)
-After=network.target
-
-[Service]
-Type=simple
-WorkingDirectory=/opt/gym-intelligence
-ExecStart=/opt/gym-intelligence/venv/bin/python app.py
-Restart=always
-RestartSec=5
-Environment=HOME=/root
-StandardOutput=append:/var/log/gym-intelligence/app.log
-StandardError=append:/var/log/gym-intelligence/app.log
-
-[Install]
-WantedBy=multi-user.target
-SVCEOF
-        systemctl daemon-reload
-        systemctl enable gym-intelligence >> "$LOG" 2>&1
-        systemctl restart gym-intelligence >> "$LOG" 2>&1
-        echo "$(date): gym-intelligence service restarted." >> "$LOG"
-
-        # Observability (one-time)
-        if [ ! -f /opt/.gym_intelligence_logs_initialized ]; then
-            touch /var/log/gym-intelligence/app.log
-            cat > /etc/logrotate.d/gym-intelligence << 'LREOF'
-/var/log/gym-intelligence/*.log {
-    weekly
-    rotate 4
-    compress
-    missingok
-    notifempty
-    create 0644 root root
-}
-LREOF
-            touch /opt/.gym_intelligence_logs_initialized
-        fi
-        # Test + collect: run until DB is populated
-        if [ -f /opt/gym-intelligence/test_collect.py ]; then
-            # Check if DB already has data
-            GYM_COUNT=$(/opt/gym-intelligence/venv/bin/python -c "
-from db import get_connection
-c = get_connection()
-r = c.execute('SELECT COUNT(*) as n FROM locations WHERE active=1').fetchone()
-print(r['n'])
-c.close()
-" 2>/dev/null || echo "0")
-            if [ "$GYM_COUNT" -lt 10 ]; then
-                echo "$(date): Running gym data collection (currently $GYM_COUNT locations)..." >> "$LOG"
-                rm -f /opt/gym-intelligence/test_results.json
-                cd /opt/gym-intelligence
-                /opt/gym-intelligence/venv/bin/python test_collect.py >> "$LOG" 2>&1
-                echo "$(date): Collection script finished." >> "$LOG"
-            fi
-        fi
-        # Write DB status for monitoring
-        cd /opt/gym-intelligence
-        /opt/gym-intelligence/venv/bin/python check_db.py >> "$LOG" 2>&1 || true
-    fi
-
-    # === STEP 4: LIGHTWEIGHT DIAGNOSTICS ===
+    # === STEP 4: STATUS PAGE + DIAGNOSTICS ===
     mkdir -p /var/www/landing
+
+    # debug.json — lightweight health check for QA tests
     {
         echo "{"
         echo "  \"timestamp\": \"$(date -Iseconds)\","
@@ -313,8 +107,51 @@ c.close()
         echo "}"
     } > /var/www/landing/debug.json
 
+    # status.json — rich diagnostics for project chats to read via /status.json
+    {
+        echo "{"
+        echo "  \"timestamp\": \"$(date -Iseconds)\","
+        echo "  \"uptime\": \"$(uptime -p 2>/dev/null || echo 'unknown')\","
+        echo "  \"deploy_commit\": \"$(git -C "$REPO_DIR" rev-parse --short HEAD 2>/dev/null)\","
+        echo "  \"deploy_message\": $(git -C "$REPO_DIR" log -1 --pretty=format:'"%s"' 2>/dev/null || echo '""'),"
+
+        echo "  \"services\": {"
+        # Enumerate all project services
+        FIRST_SVC=true
+        for svc in car-offers gym-intelligence; do
+            $FIRST_SVC || echo ","
+            FIRST_SVC=false
+            SVC_STATUS="$(systemctl is-active "$svc" 2>&1)"
+            SVC_ENABLED="$(systemctl is-enabled "$svc" 2>&1)"
+            SVC_LOG=""
+            # Get last 3 log lines, JSON-escaped
+            if [ -f "/var/log/$svc/error.log" ] || [ -f "/var/log/$svc/app.log" ]; then
+                LOG_FILE="/var/log/$svc/error.log"
+                [ -f "/var/log/$svc/app.log" ] && LOG_FILE="/var/log/$svc/app.log"
+                SVC_LOG=$(tail -3 "$LOG_FILE" 2>/dev/null | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read().strip()))' 2>/dev/null || echo '""')
+            fi
+            [ -z "$SVC_LOG" ] && SVC_LOG='""'
+            echo "    \"$svc\": {"
+            echo "      \"status\": \"$SVC_STATUS\","
+            echo "      \"enabled\": \"$SVC_ENABLED\","
+            echo "      \"recent_log\": $SVC_LOG"
+            echo "    }"
+        done
+        echo "  },"
+
+        echo "  \"ports\": {"
+        echo "    \"3100\": $(ss -tlnp | grep -q ':3100' && echo true || echo false),"
+        echo "    \"8502\": $(ss -tlnp | grep -q ':8502' && echo true || echo false),"
+        echo "    \"9000\": $(ss -tlnp | grep -q ':9000' && echo true || echo false)"
+        echo "  },"
+
+        echo "  \"disk\": \"$(df -h / | awk 'NR==2{print $5}' 2>/dev/null || echo 'unknown')\","
+        echo "  \"memory_free\": \"$(free -h | awk '/^Mem:/{print $4}' 2>/dev/null || echo 'unknown')\","
+        echo "  \"deploy_log_tail\": $(tail -10 "$LOG" 2>/dev/null | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read().strip()))' 2>/dev/null || echo '""')"
+        echo "}"
+    } > /var/www/landing/status.json
+
     echo "$(date): Deploy complete." >> "$LOG"
 else
     : # No changes — silent
 fi
-
