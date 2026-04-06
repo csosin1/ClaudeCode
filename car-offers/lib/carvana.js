@@ -95,81 +95,106 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
     browser = result.browser;
     page = result.page;
 
-    // --- Step 1: Verify US IP and navigate to sell-my-car ---
-    console.log('[carvana] Step 1: Verifying US proxy IP...');
+    // --- Step 1: Warm up browser session with non-Carvana sites ---
+    // Visiting a few benign sites first builds a more realistic browser fingerprint
+    // and lets Cloudflare see normal navigation patterns before hitting the target
+    log('[carvana] Step 1: Warming up browser session...');
     try {
-      // Use ip.decodo.com (Decodo's own IP checker) — httpbin is blocked on geo proxy
-      await page.goto('https://ip.decodo.com/json', { timeout: 30000 });
-      const ipInfo = await page.textContent('body');
-      console.log(`[carvana] Proxy IP info: ${ipInfo.substring(0, 300)}`);
-      // Verify we got a US IP
-      if (ipInfo.includes('Access denied') || ipInfo.includes('error')) {
-        console.error('[carvana] Proxy returned error — may not be authenticated');
-        throw new Error('Proxy auth failed — got Access denied');
-      }
-    } catch (proxyErr) {
-      console.error(`[carvana] Proxy verification failed: ${proxyErr.message}`);
-      // Don't abort — curl confirmed US IP, Playwright auth may just be different
-      // Log the error but continue to Carvana anyway
-      console.log('[carvana] Continuing to Carvana despite proxy verification failure (curl confirmed US IP)...');
-    }
-
-    console.log('[carvana] Navigating to Carvana sell page...');
-    try {
-      await page.goto(CARVANA_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
-    } catch (navErr) {
-      console.error(`[carvana] Navigation failed: ${navErr.message}`);
-      await screenshot(page, '00-nav-failure').catch(() => {});
-      // Capture more debug info before throwing
-      try {
-        const url = page.url();
-        const title = await page.title().catch(() => 'unknown');
-        console.error(`[carvana] Page state at failure — url: ${url}, title: ${title}`);
-      } catch (_) {}
-      throw navErr;
-    }
-    await humanDelay(3000, 6000);
-
-    // Simulate human behavior before interacting (mouse moves, scroll)
-    // PerimeterX tracks behavioral signals — pure automation gets flagged
-    await simulateHumanBehavior(page);
-    await humanDelay(2000, 4000);
-
-    await screenshot(page, '01-landing');
-
-    // Log what we see on the page for debugging
-    try {
-      const pageTitle = await page.title();
-      const pageUrl = page.url();
-      const bodySnippet = await page.textContent('body').then(t => (t || '').substring(0, 500)).catch(() => '');
-      console.log(`[carvana] Landing page — title: "${pageTitle}", url: ${pageUrl}`);
-      console.log(`[carvana] Body snippet: ${bodySnippet.substring(0, 300)}`);
-    } catch (_) {}
-
-    // Wait for Cloudflare/PerimeterX challenge to resolve (if any)
-    // Some challenges auto-resolve after a few seconds with a real browser
-    try {
-      await page.waitForLoadState('networkidle', { timeout: 15000 });
-    } catch {
-      console.log('[carvana] networkidle timeout — proceeding anyway');
-    }
-
-    if (await isBlocked(page)) {
-      // Wait longer — some challenges resolve after JS execution
-      console.log('[carvana] Blocked detected, waiting 10s for challenge to resolve...');
-      await humanDelay(8000, 12000);
+      await page.goto('https://www.google.com', { timeout: 20000, waitUntil: 'domcontentloaded' });
+      await humanDelay(2000, 4000);
       await simulateHumanBehavior(page);
+      log('[carvana] Warmup: visited Google');
+    } catch { log('[carvana] Warmup: Google failed (non-fatal)'); }
+    await humanDelay(3000, 5000);
 
-      if (await isBlocked(page)) {
-        const ssPath = await screenshot(page, 'blocked');
-        const pageTitle = await page.title().catch(() => 'unknown');
-        const bodySnippet = await page.textContent('body').then(t => (t || '').substring(0, 500)).catch(() => '');
-        const pageUrl = page.url();
-        console.log(`[carvana] BLOCKED — title: ${pageTitle}, url: ${pageUrl}`);
-        console.log(`[carvana] Blocked body: ${bodySnippet}`);
-        return { error: 'blocked', details: { pageTitle, bodySnippet, screenshot: ssPath, url: pageUrl }, wizardLog };
+    // Verify US IP via ip.decodo.com (optional — curl already confirmed)
+    try {
+      await page.goto('https://ip.decodo.com/json', { timeout: 20000 });
+      const ipInfo = await page.textContent('body');
+      log(`[carvana] Proxy IP info: ${ipInfo.substring(0, 200)}`);
+    } catch (proxyErr) {
+      log(`[carvana] Proxy verification skipped: ${proxyErr.message}`);
+    }
+    await humanDelay(3000, 5000);
+
+    // --- Navigate to Carvana with retry logic for Cloudflare challenges ---
+    log('[carvana] Navigating to Carvana sell page...');
+
+    let carvanaLoaded = false;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        await page.goto(CARVANA_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      } catch (navErr) {
+        log(`[carvana] Navigation attempt ${attempt} failed: ${navErr.message}`);
+        if (attempt === 2) {
+          await screenshot(page, '00-nav-failure');
+          throw navErr;
+        }
+        await humanDelay(10000, 15000);
+        continue;
       }
-      console.log('[carvana] Challenge resolved after waiting!');
+
+      // Wait for page to fully settle (Cloudflare JS challenge needs time)
+      await humanDelay(5000, 8000);
+      await simulateHumanBehavior(page);
+      await humanDelay(3000, 5000);
+      await screenshot(page, `01-landing-attempt-${attempt}`);
+
+      // Log page state
+      try {
+        const pageTitle = await page.title();
+        const pageUrl = page.url();
+        const bodySnippet = await page.textContent('body').then(t => (t || '').substring(0, 500)).catch(() => '');
+        log(`[carvana] Landing — title: "${pageTitle}", url: ${pageUrl}`);
+        log(`[carvana] Body: ${bodySnippet.substring(0, 200)}`);
+      } catch (_) {}
+
+      // Wait for networkidle — Cloudflare challenges resolve during this phase
+      try {
+        await page.waitForLoadState('networkidle', { timeout: 30000 });
+      } catch {
+        log('[carvana] networkidle timeout — checking if blocked...');
+      }
+
+      if (!(await isBlocked(page))) {
+        carvanaLoaded = true;
+        log(`[carvana] Carvana loaded successfully on attempt ${attempt}`);
+        break;
+      }
+
+      // Cloudflare detected — wait progressively longer for the challenge to auto-resolve
+      // Cloudflare JS challenges can take 15-45 seconds to complete
+      const waitSecs = [30, 45, 60][attempt] || 60;
+      log(`[carvana] Cloudflare challenge detected (attempt ${attempt}). Waiting ${waitSecs}s...`);
+      await screenshot(page, `blocked-attempt-${attempt}`);
+
+      // Simulate human behavior during the wait — Cloudflare watches mouse/keyboard
+      for (let w = 0; w < Math.floor(waitSecs / 10); w++) {
+        await humanDelay(8000, 12000);
+        await simulateHumanBehavior(page);
+      }
+
+      // Check if challenge resolved
+      if (!(await isBlocked(page))) {
+        carvanaLoaded = true;
+        log('[carvana] Cloudflare challenge resolved after waiting!');
+        break;
+      }
+
+      // Try refreshing the page for next attempt
+      if (attempt < 2) {
+        log('[carvana] Refreshing page for next attempt...');
+        await humanDelay(5000, 10000);
+      }
+    }
+
+    if (!carvanaLoaded) {
+      const ssPath = await screenshot(page, 'blocked-final');
+      const pageTitle = await page.title().catch(() => 'unknown');
+      const bodySnippet = await page.textContent('body').then(t => (t || '').substring(0, 500)).catch(() => '');
+      const pageUrl = page.url();
+      log(`[carvana] BLOCKED after all attempts — title: ${pageTitle}, url: ${pageUrl}`);
+      return { error: 'blocked', details: { pageTitle, bodySnippet, screenshot: ssPath, url: pageUrl }, wizardLog };
     }
 
     // --- Step 2: Switch to VIN tab and enter VIN ---

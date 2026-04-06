@@ -154,16 +154,19 @@ async function launchBrowser(options = {}) {
 
   // Build proxy config
   // Decodo geo-targeting: use port 7000 with user- prefix and country/zip params
+  // Add session stickiness to keep the same IP for the entire browser session
+  // This prevents Cloudflare from seeing IP changes mid-flow
   let proxyConfig = null;
   if (config.PROXY_HOST && config.PROXY_PASS) {
     const proxyPort = '7000';
-    const proxyUser = `user-${config.PROXY_USER}-country-us-zip-06880`;
+    const sessionId = `carvana${Date.now()}`;
+    const proxyUser = `user-${config.PROXY_USER}-country-us-zip-06880-session-${sessionId}-sessionduration-30`;
     proxyConfig = {
       server: `http://${config.PROXY_HOST}:${proxyPort}`,
       username: proxyUser,
       password: config.PROXY_PASS,
     };
-    console.log(`[browser] Using proxy: ${config.PROXY_HOST}:${proxyPort} user=${proxyUser}`);
+    console.log(`[browser] Using proxy: ${config.PROXY_HOST}:${proxyPort} session=${sessionId}`);
   } else {
     console.log('[browser] No proxy configured — using direct connection');
   }

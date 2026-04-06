@@ -983,30 +983,52 @@ app.listen(port, '0.0.0.0', () => {
     // The actual Carvana flow uses launchBrowser() which sets proxy at launch — different
     // auth path that should work. No point blocking on a test that doesn't reflect reality.
     if (selfTest.proxyResult && selfTest.proxyResult.ok) {
-      console.log('[startup] Curl proxy works (US IP confirmed). Skipping Playwright proxy test — going straight to Carvana...');
+      // Check if a recent Carvana result already exists (avoid hammering on rapid redeploys)
+      let shouldRun = true;
       try {
-        const { getCarvanaOffer } = require('./lib/carvana');
-        const result = await getCarvanaOffer({
-          vin: '1HGCV2F9XNA008352',
-          mileage: '48000',
-          zip: '06880',
-          email: config.PROJECT_EMAIL || 'caroffers.tool@gmail.com',
-        });
-        selfTest.lastCarvanaRun = {
-          ...result,
-          vin: '1HGCV2F9XNA008352',
-          mileage: '48000',
-          zip: '06880',
-          completed_at: new Date().toISOString(),
-        };
-        console.log('[startup] Carvana result:', JSON.stringify(selfTest.lastCarvanaRun));
-      } catch (err) {
-        selfTest.lastCarvanaRun = {
-          error: err.message,
-          vin: '1HGCV2F9XNA008352',
-          completed_at: new Date().toISOString(),
-        };
-        console.error('[startup] Carvana error:', err.message);
+        const resultsPath = path.join(__dirname, 'startup-results.json');
+        if (fs.existsSync(resultsPath)) {
+          const existing = JSON.parse(fs.readFileSync(resultsPath, 'utf8'));
+          if (existing.lastCarvanaRun && existing.lastCarvanaRun.completed_at) {
+            const age = Date.now() - new Date(existing.lastCarvanaRun.completed_at).getTime();
+            if (age < 10 * 60 * 1000) { // Less than 10 minutes old
+              console.log(`[startup] Recent Carvana result exists (${Math.round(age/1000)}s old). Skipping auto-run.`);
+              selfTest.lastCarvanaRun = existing.lastCarvanaRun;
+              shouldRun = false;
+            }
+          }
+        }
+      } catch { /* no existing results, run anyway */ }
+
+      if (shouldRun) {
+        console.log('[startup] Curl proxy works (US IP confirmed). Running Carvana flow...');
+        // Wait 30s before starting to let the proxy session stabilize
+        // and avoid looking like a rapid bot restart
+        await new Promise(r => setTimeout(r, 30000));
+        try {
+          const { getCarvanaOffer } = require('./lib/carvana');
+          const result = await getCarvanaOffer({
+            vin: '1HGCV2F9XNA008352',
+            mileage: '48000',
+            zip: '06880',
+            email: config.PROJECT_EMAIL || 'caroffers.tool@gmail.com',
+          });
+          selfTest.lastCarvanaRun = {
+            ...result,
+            vin: '1HGCV2F9XNA008352',
+            mileage: '48000',
+            zip: '06880',
+            completed_at: new Date().toISOString(),
+          };
+          console.log('[startup] Carvana result:', JSON.stringify(selfTest.lastCarvanaRun));
+        } catch (err) {
+          selfTest.lastCarvanaRun = {
+            error: err.message,
+            vin: '1HGCV2F9XNA008352',
+            completed_at: new Date().toISOString(),
+          };
+          console.error('[startup] Carvana error:', err.message);
+        }
       }
       saveResults();
     }
