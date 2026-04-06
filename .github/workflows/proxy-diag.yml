@@ -1,0 +1,50 @@
+name: Proxy Diagnostics
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'car-offers/**'
+      - '.github/workflows/proxy-diag.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Wait for deploy + startup diagnostics
+        run: sleep 40
+
+      - name: Fetch diagnostic results
+        run: |
+          mkdir -p car-offers/results
+          echo "=== Startup Results ===" > car-offers/results/proxy-diag.txt
+          curl -sf --max-time 15 "http://159.223.127.125/car-offers/api/startup-results?v=$(date +%s)" 2>&1 | python3 -m json.tool >> car-offers/results/proxy-diag.txt 2>&1 || echo "FETCH FAILED: startup-results not available" >> car-offers/results/proxy-diag.txt
+          echo "" >> car-offers/results/proxy-diag.txt
+
+          echo "=== Debug Config ===" >> car-offers/results/proxy-diag.txt
+          curl -sf --max-time 10 "http://159.223.127.125/car-offers/api/debug?v=$(date +%s)" 2>&1 | python3 -m json.tool >> car-offers/results/proxy-diag.txt 2>&1 || echo "FETCH FAILED: debug not available" >> car-offers/results/proxy-diag.txt
+          echo "" >> car-offers/results/proxy-diag.txt
+
+          echo "=== Status ===" >> car-offers/results/proxy-diag.txt
+          curl -sf --max-time 10 "http://159.223.127.125/car-offers/api/status?v=$(date +%s)" 2>&1 | python3 -m json.tool >> car-offers/results/proxy-diag.txt 2>&1 || echo "FETCH FAILED: status not available" >> car-offers/results/proxy-diag.txt
+          echo "" >> car-offers/results/proxy-diag.txt
+
+          echo "=== Browser Diagnostic ===" >> car-offers/results/proxy-diag.txt
+          curl -sf --max-time 30 "http://159.223.127.125/car-offers/api/diag-browser?v=$(date +%s)" 2>&1 | python3 -m json.tool >> car-offers/results/proxy-diag.txt 2>&1 || echo "FETCH FAILED: diag-browser not available" >> car-offers/results/proxy-diag.txt
+
+          echo ""
+          echo "=== Results ==="
+          cat car-offers/results/proxy-diag.txt
+
+      - name: Commit results
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add car-offers/results/proxy-diag.txt
+          git diff --cached --quiet || (git commit -m "diag: proxy diagnostic results [skip ci]" && git push)
