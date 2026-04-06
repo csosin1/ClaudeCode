@@ -17,6 +17,12 @@ The user prompts from an iPhone. Claude does everything — writes code, deploys
 - All live-site testing runs via GitHub Actions, not from this sandbox
 - See "Production Environment" section for details
 
+**Infrastructure ownership — do not modify these files:**
+- The infrastructure chat owns all deploy scripts, workflows, QA tests, and harness config
+- See the "Parallelism Rules" section for the full list of Orchestrator-only files
+- If you need a new deploy step, nginx route, QA test, or workflow change: write your proposed change into `CHANGES.md` and the infrastructure chat will apply it
+- Directly editing infrastructure files causes merge conflicts and deploy breakage — don't do it
+
 -----
 
 ## Clarify Before Building
@@ -295,9 +301,15 @@ The dangerous moment is **after pushing to main but before reading QA results**.
   - `deploy/landing.html`
   - `deploy/update_nginx.sh`
   - `deploy/NGINX_VERSION`
+  - `deploy/auto_deploy_general.sh`
+  - `.github/workflows/*.yml`
+  - `tests/qa-smoke.spec.ts`
+  - `playwright.config.ts`
   - `TASK_STATE.md`
   - `LESSONS.md`
   - `RUNBOOK.md`
+  - `CHANGES.md`
+- **How other chats propose infrastructure changes:** If a chat needs a new deploy step, nginx route, QA test, or workflow change, it writes the proposed change into its project's `CHANGES.md` entry (or a comment in a PR). The Orchestrator chat reviews and applies the change. Other chats must never directly edit infrastructure files — doing so causes merge conflicts and deploy breakage.
 
 -----
 
