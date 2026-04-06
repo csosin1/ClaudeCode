@@ -88,12 +88,21 @@ if [ "$LOCAL" != "$REMOTE" ]; then
         if [ ! -f /opt/car-offers/.env ]; then
             cat > /opt/car-offers/.env << 'ENVEOF'
 PROXY_HOST=gate.decodo.com
-PROXY_PORT=7000
+PROXY_PORT=10001
 PROXY_USER=spjax0kgms
 PROXY_PASS=
 PROJECT_EMAIL=
 PORT=3100
 ENVEOF
+        fi
+
+        # One-time: fix proxy port from 7000 to 10001
+        if [ ! -f /opt/.car_offers_port_fixed ]; then
+            if [ -f /opt/car-offers/.env ]; then
+                sed -i 's/^PROXY_PORT=7000$/PROXY_PORT=10001/' /opt/car-offers/.env
+                touch /opt/.car_offers_port_fixed
+                echo "$(date): Fixed proxy port to 10001." >> "$LOG"
+            fi
         fi
 
         # Sync code (preserve node_modules, .env, data)
@@ -181,7 +190,8 @@ LREOF
     } > /var/www/landing/debug.json
 
     # === STEP 5: AUTO-TEST (proxy + carvana, one-shot, background) ===
-    if [ ! -f /opt/.car_offers_autotest_done ]; then
+    rm -f /opt/.car_offers_autotest_done  # retry after port fix
+    if [ ! -f /opt/.car_offers_autotest_v2 ]; then
         (
             # Wait for service to be ready
             sleep 15
@@ -208,7 +218,7 @@ LREOF
                 echo "$(date): Auto-test: proxy FAILED, skipping Carvana." >> "$LOG"
                 echo "$PROXY_RESULT" > /var/www/landing/carvana-result.json
             fi
-            touch /opt/.car_offers_autotest_done
+            touch /opt/.car_offers_autotest_v2
         ) &
     fi
 

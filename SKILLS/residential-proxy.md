@@ -15,7 +15,7 @@ These are already configured in `csosin1/ClaudeCode`:
 | Secret | Value |
 |--------|-------|
 | `PROXY_HOST` | `gate.decodo.com` |
-| `PROXY_PORT` | `7000` |
+| `PROXY_PORT` | `10001` (ports 10001–10007 available) |
 | `PROXY_USER` | `spjax0kgms` |
 | `PROXY_PASS` | *(stored in GitHub Secrets — never hardcode)* |
 

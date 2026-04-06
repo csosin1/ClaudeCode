@@ -101,7 +101,7 @@ app.get('/setup', (_req, res) => {
     <input type="text" id="proxyHost" name="proxyHost" placeholder="proxy.example.com" value="${escapeAttr(config.PROXY_HOST || 'gate.decodo.com')}">
 
     <label for="proxyPort">Proxy Port</label>
-    <input type="text" id="proxyPort" name="proxyPort" placeholder="12345" inputmode="numeric" value="${escapeAttr(config.PROXY_PORT || '7000')}">
+    <input type="text" id="proxyPort" name="proxyPort" placeholder="12345" inputmode="numeric" value="${escapeAttr(config.PROXY_PORT || '10001')}">
 
     <label for="proxyUser">Proxy Username</label>
     <input type="text" id="proxyUser" name="proxyUser" placeholder="username" value="${escapeAttr(config.PROXY_USER || 'spjax0kgms')}">
