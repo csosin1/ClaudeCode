@@ -11,6 +11,7 @@ cat > /etc/nginx/sites-available/abs-dashboard << 'NGXEOF'
 server {
     listen 80 default_server;
     listen [::]:80 default_server;
+    server_name casinv.dev 159.223.127.125;
 
     # Landing page — project index
     location / {
@@ -103,6 +104,32 @@ server {
     # Webhook health check
     location = /webhook/health {
         proxy_pass http://127.0.0.1:9000/health;
+    }
+
+    # Security: block dotfiles, .env, .md
+    location ~ /\. { deny all; }
+    location ~* \.md$ { deny all; }
+    location ~* \.env$ { deny all; }
+}
+
+# code-server on code.casinv.dev
+server {
+    listen 80;
+    listen [::]:80;
+    server_name code.casinv.dev;
+
+    # code-server reverse proxy
+    location / {
+        proxy_pass http://127.0.0.1:8443;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 86400;
+        proxy_send_timeout 86400;
     }
 }
 NGXEOF
