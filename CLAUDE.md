@@ -307,6 +307,7 @@ The dangerous moment is **after pushing to main but before reading QA results**.
 - If a task exceeds 10 agent delegations, stop and surface to user.
 - After each completed task, report approximate token usage and flag anything that ran unexpectedly long.
 - If an agent loop is detected (same fix attempted more than once), terminate immediately and escalate.
+- **Rate limits are a stop signal.** If GitHub API returns 403 rate-limited, stop making API calls and wait for the hourly reset. Do not retry in a loop. Tell the user what you're waiting on and pause.
 
 -----
 
