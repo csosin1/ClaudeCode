@@ -64,6 +64,130 @@ async function runProxyTest() {
   console.log(`[self-test] Proxy test result:`, JSON.stringify(selfTest.proxyResult));
 }
 
+/**
+ * Run network-level diagnostics (TCP, DNS, HTTP CONNECT) and store in selfTest.
+ */
+async function runNetworkDiag() {
+  try { config.reloadConfig(); } catch (_) {}
+  const net = require('net');
+  const dns = require('dns');
+  const proxyPort = (config.PROXY_PORT === '7000') ? '10001' : (config.PROXY_PORT || '10001');
+  const host = config.PROXY_HOST || 'gate.decodo.com';
+  const diag = {};
+
+  // DNS
+  diag.dns = await new Promise((resolve) => {
+    dns.resolve4(host, (err, addresses) => {
+      if (err) return resolve({ ok: false, error: err.message });
+      resolve({ ok: true, addresses });
+    });
+  });
+
+  // TCP to proxy
+  diag.tcp_proxy = await new Promise((resolve) => {
+    const sock = net.createConnection({ host, port: parseInt(proxyPort), timeout: 10000 }, () => {
+      sock.destroy();
+      resolve({ ok: true, host, port: proxyPort });
+    });
+    sock.on('error', (err) => { sock.destroy(); resolve({ ok: false, error: err.message }); });
+    sock.on('timeout', () => { sock.destroy(); resolve({ ok: false, error: 'timeout' }); });
+  });
+
+  // HTTP CONNECT with auth
+  if (diag.tcp_proxy.ok && config.PROXY_PASS) {
+    diag.http_connect = await new Promise((resolve) => {
+      const sock = net.createConnection({ host, port: parseInt(proxyPort), timeout: 15000 }, () => {
+        const sessionId = Math.random().toString(36).substring(7);
+        const proxyUser = config.PROXY_USER ? `${config.PROXY_USER}-session-${sessionId}` : config.PROXY_USER;
+        const auth = Buffer.from(`${proxyUser}:${config.PROXY_PASS}`).toString('base64');
+        sock.write(`CONNECT ip.decodo.com:443 HTTP/1.1\r\nHost: ip.decodo.com:443\r\nProxy-Authorization: Basic ${auth}\r\n\r\n`);
+        let data = '';
+        sock.on('data', (chunk) => {
+          data += chunk.toString();
+          if (data.includes('\r\n\r\n')) {
+            sock.destroy();
+            const statusLine = data.split('\r\n')[0];
+            resolve({ ok: statusLine.includes('200'), response: statusLine });
+          }
+        });
+        sock.on('timeout', () => { sock.destroy(); resolve({ ok: false, error: 'HTTP CONNECT timeout' }); });
+      });
+      sock.on('error', (err) => { sock.destroy(); resolve({ ok: false, error: err.message }); });
+      sock.on('timeout', () => { sock.destroy(); resolve({ ok: false, error: 'TCP timeout' }); });
+    });
+
+    // Also try without session suffix (plain username)
+    if (!diag.http_connect.ok) {
+      diag.http_connect_plain = await new Promise((resolve) => {
+        const sock = net.createConnection({ host, port: parseInt(proxyPort), timeout: 15000 }, () => {
+          const auth = Buffer.from(`${config.PROXY_USER}:${config.PROXY_PASS}`).toString('base64');
+          sock.write(`CONNECT ip.decodo.com:443 HTTP/1.1\r\nHost: ip.decodo.com:443\r\nProxy-Authorization: Basic ${auth}\r\n\r\n`);
+          let data = '';
+          sock.on('data', (chunk) => {
+            data += chunk.toString();
+            if (data.includes('\r\n\r\n')) {
+              sock.destroy();
+              const statusLine = data.split('\r\n')[0];
+              resolve({ ok: statusLine.includes('200'), response: statusLine });
+            }
+          });
+          sock.on('timeout', () => { sock.destroy(); resolve({ ok: false, error: 'timeout' }); });
+        });
+        sock.on('error', (err) => { sock.destroy(); resolve({ ok: false, error: err.message }); });
+        sock.on('timeout', () => { sock.destroy(); resolve({ ok: false, error: 'timeout' }); });
+      });
+    }
+  }
+
+  selfTest.networkDiag = diag;
+  selfTest.networkDiagAt = new Date().toISOString();
+  console.log('[startup] Network diag:', JSON.stringify(diag));
+}
+
+/**
+ * Try alternative proxy ports (10001-10007) if the default fails.
+ */
+async function tryAlternativeProxyConfigs() {
+  const ports = ['10001', '10002', '10003', '10004', '10005'];
+  const currentPort = (config.PROXY_PORT === '7000') ? '10001' : (config.PROXY_PORT || '10001');
+
+  for (const port of ports) {
+    if (port === currentPort && selfTest.proxyResult && !selfTest.proxyResult.ok) continue; // skip already-failed port
+
+    console.log(`[startup] Trying proxy on port ${port}...`);
+    let browser = null;
+    try {
+      const pw = require('playwright');
+      browser = await pw.chromium.launch({
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox', '--no-zygote', '--single-process', '--disable-gpu', '--disable-dev-shm-usage'],
+        proxy: {
+          server: `http://${config.PROXY_HOST}:${port}`,
+          username: config.PROXY_USER,
+          password: config.PROXY_PASS,
+        },
+      });
+      const page = await browser.newPage();
+      await page.goto('https://ip.decodo.com/json', { timeout: 20000 });
+      const body = await page.textContent('body');
+      await browser.close();
+      browser = null;
+
+      const ipData = JSON.parse(body);
+      selfTest.proxyResult = { ok: true, ip: ipData.ip, country: ipData.country_code, port, note: `worked on port ${port} (no session suffix)` };
+      selfTest.proxyTestedAt = new Date().toISOString();
+      selfTest.workingPort = port;
+      console.log(`[startup] Proxy WORKS on port ${port}! IP: ${ipData.ip}`);
+      return; // Found a working config
+    } catch (err) {
+      if (browser) try { await browser.close(); } catch (_) {}
+      console.log(`[startup] Port ${port} failed: ${err.message}`);
+    }
+  }
+
+  console.log('[startup] All proxy ports failed.');
+}
+
 // --- Setup page: configure .env from the browser ---
 app.get('/setup', (_req, res) => {
   // Reload config from disk in case .env was written after server started
@@ -709,6 +833,9 @@ app.get('/api/status', (_req, res) => {
       test_result: selfTest.proxyResult,
       tested_at: selfTest.proxyTestedAt,
     },
+    networkDiag: selfTest.networkDiag || null,
+    networkDiagAt: selfTest.networkDiagAt || null,
+    workingPort: selfTest.workingPort || null,
     lastCarvanaRun: selfTest.lastCarvanaRun,
   });
 });
@@ -925,11 +1052,17 @@ const port = config.PORT;
 app.listen(port, '0.0.0.0', () => {
   console.log(`Car Offer Tool running on http://0.0.0.0:${port}`);
 
-  // Run proxy self-test 5 seconds after startup (gives time for .env to be ready)
-  setTimeout(() => {
+  // Run full diagnostics 5 seconds after startup
+  setTimeout(async () => {
+    console.log('[startup] Running full network diagnostics...');
+    await runNetworkDiag();
     console.log('[startup] Running proxy self-test...');
-    runProxyTest().catch((err) => {
-      console.error('[startup] Proxy self-test error:', err.message);
-    });
+    await runProxyTest();
+
+    // If proxy test failed, try alternative configs
+    if (selfTest.proxyResult && !selfTest.proxyResult.ok) {
+      console.log('[startup] Proxy failed — trying alternative ports...');
+      await tryAlternativeProxyConfigs();
+    }
   }, 5000);
 });
