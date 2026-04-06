@@ -140,6 +140,15 @@ def index():
 
 # --- API endpoints --------------------------------------------------------
 
+@bp.route("/api/test-results")
+def api_test_results():
+    """Serve test_results.json for remote monitoring."""
+    test_file = Path(__file__).parent / "test_results.json"
+    if test_file.exists():
+        return jsonify(json.loads(test_file.read_text()))
+    return jsonify({"status": "no_test_run_yet"})
+
+
 @bp.route("/api/snapshot-dates")
 def api_snapshot_dates():
     conn = get_connection()
