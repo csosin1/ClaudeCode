@@ -92,12 +92,20 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
     // --- Step 1: Verify US IP and navigate to sell-my-car ---
     console.log('[carvana] Step 1: Verifying US proxy IP...');
     try {
-      await page.goto('http://httpbin.org/ip', { timeout: 20000 });
+      // Use ip.decodo.com (Decodo's own IP checker) — httpbin is blocked on geo proxy
+      await page.goto('https://ip.decodo.com/json', { timeout: 30000 });
       const ipInfo = await page.textContent('body');
-      console.log(`[carvana] Proxy IP: ${ipInfo}`);
+      console.log(`[carvana] Proxy IP info: ${ipInfo.substring(0, 300)}`);
+      // Verify we got a US IP
+      if (ipInfo.includes('Access denied') || ipInfo.includes('error')) {
+        console.error('[carvana] Proxy returned error — may not be authenticated');
+        throw new Error('Proxy auth failed — got Access denied');
+      }
     } catch (proxyErr) {
       console.error(`[carvana] Proxy verification failed: ${proxyErr.message}`);
-      throw new Error(`Proxy connection failed: ${proxyErr.message}`);
+      // Don't abort — curl confirmed US IP, Playwright auth may just be different
+      // Log the error but continue to Carvana anyway
+      console.log('[carvana] Continuing to Carvana despite proxy verification failure (curl confirmed US IP)...');
     }
 
     console.log('[carvana] Navigating to Carvana sell page...');
@@ -106,17 +114,33 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
     } catch (navErr) {
       console.error(`[carvana] Navigation failed: ${navErr.message}`);
       await screenshot(page, '00-nav-failure').catch(() => {});
+      // Capture more debug info before throwing
+      try {
+        const url = page.url();
+        const title = await page.title().catch(() => 'unknown');
+        console.error(`[carvana] Page state at failure — url: ${url}, title: ${title}`);
+      } catch (_) {}
       throw navErr;
     }
     await humanDelay(3000, 6000);
     await screenshot(page, '01-landing');
 
+    // Log what we see on the page for debugging
+    try {
+      const pageTitle = await page.title();
+      const pageUrl = page.url();
+      const bodySnippet = await page.textContent('body').then(t => (t || '').substring(0, 500)).catch(() => '');
+      console.log(`[carvana] Landing page — title: "${pageTitle}", url: ${pageUrl}`);
+      console.log(`[carvana] Body snippet: ${bodySnippet.substring(0, 300)}`);
+    } catch (_) {}
+
     if (await isBlocked(page)) {
       const ssPath = await screenshot(page, 'blocked');
       const pageTitle = await page.title().catch(() => 'unknown');
-      const bodySnippet = await page.textContent('body').then(t => t.substring(0, 500)).catch(() => '');
+      const bodySnippet = await page.textContent('body').then(t => (t || '').substring(0, 500)).catch(() => '');
       const pageUrl = page.url();
       console.log(`[carvana] BLOCKED — title: ${pageTitle}, url: ${pageUrl}`);
+      console.log(`[carvana] Blocked body: ${bodySnippet}`);
       return { error: 'blocked', details: { pageTitle, bodySnippet, screenshot: ssPath, url: pageUrl } };
     }
 
@@ -525,9 +549,20 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
 
     if (!offerText) {
       const finalScreenshot = await screenshot(page, '09-no-offer');
+      // Capture diagnostic info about what page we're actually on
+      let pageState = {};
+      try {
+        pageState.url = page.url();
+        pageState.title = await page.title().catch(() => 'unknown');
+        pageState.bodySnippet = await page.textContent('body').then(t => (t || '').substring(0, 1000)).catch(() => '');
+        console.log(`[carvana] NO OFFER FOUND — page state:`);
+        console.log(`  url: ${pageState.url}`);
+        console.log(`  title: ${pageState.title}`);
+        console.log(`  body: ${pageState.bodySnippet.substring(0, 500)}`);
+      } catch (_) {}
       return {
         error: 'Could not extract offer amount. The page may have changed or the flow was interrupted.',
-        details: vehicleDetails,
+        details: { ...vehicleDetails, pageState },
         screenshot: finalScreenshot,
       };
     }

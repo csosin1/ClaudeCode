@@ -79,14 +79,32 @@ async function runFullDiagnostic() {
   selfTest.networkDiag = diag;
   selfTest.networkDiagAt = diag.timestamp;
 
-  // Determine overall proxy status from geo-targeted curl test
+  // Determine overall proxy status from geo-targeted curl tests
+  // Primary: httpbin (returns clean IP JSON). Fallback: ip.decodo.com (also confirms geo).
   const httpbinResult = diag.tests.curl_httpbin_geo;
+  const decodoResult = diag.tests.curl_decodo_geo;
+
   if (httpbinResult && httpbinResult.ok && httpbinResult.output.includes('origin') && !httpbinResult.output.includes('Access denied')) {
     try {
       const parsed = JSON.parse(httpbinResult.output);
-      selfTest.proxyResult = { ok: true, ip: parsed.origin, method: 'curl', port };
+      selfTest.proxyResult = { ok: true, ip: parsed.origin, method: 'curl-httpbin', port };
     } catch {
-      selfTest.proxyResult = { ok: true, raw: httpbinResult.output, method: 'curl', port };
+      selfTest.proxyResult = { ok: true, raw: httpbinResult.output, method: 'curl-httpbin', port };
+    }
+  } else if (decodoResult && decodoResult.ok && decodoResult.output.includes('isp') && !decodoResult.output.includes('Access denied')) {
+    // ip.decodo.com worked — extract city/state info as confirmation
+    try {
+      // Output may be truncated, try to parse what we can
+      const cityMatch = decodoResult.output.match(/"name":\s*"([^"]+)"/);
+      const stateMatch = decodoResult.output.match(/"code":\s*"([^"]+)"/);
+      const zipMatch = decodoResult.output.match(/"zip_code":\s*"([^"]+)"/);
+      const city = cityMatch ? cityMatch[1] : 'unknown';
+      const state = stateMatch ? stateMatch[1] : '?';
+      const zipCode = zipMatch ? zipMatch[1] : '?';
+      selfTest.proxyResult = { ok: true, location: `${city}, ${state} ${zipCode}`, method: 'curl-decodo', port };
+      console.log(`[diag] Geo proxy confirmed via ip.decodo.com: ${city}, ${state} ${zipCode}`);
+    } catch {
+      selfTest.proxyResult = { ok: true, raw: decodoResult.output.substring(0, 200), method: 'curl-decodo', port };
     }
   } else if (diag.workingPort) {
     selfTest.proxyResult = { ok: true, method: 'curl', port: diag.workingPort, note: 'worked on alt port' };
