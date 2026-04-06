@@ -315,11 +315,26 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
     ];
 
     // Generic "click through the wizard" loop — handles up to 15 pages
+    let stuckCount = 0;
     for (let step = 0; step < 15; step++) {
       checkTimeout();
       const currentUrl = page.url();
       console.log(`[carvana] Wizard step ${step}: URL = ${currentUrl}`);
       await screenshot(page, `wizard-${step}`);
+
+      // Log all visible buttons and inputs for diagnostics
+      try {
+        const buttons = await page.$$eval('button:visible, a[role="button"]:visible', els =>
+          els.slice(0, 15).map(e => e.textContent.trim().substring(0, 60))
+        );
+        const inputs = await page.$$eval('input:visible, select:visible, textarea:visible', els =>
+          els.slice(0, 10).map(e => `${e.tagName}[name=${e.name||'?'},type=${e.type||'?'},placeholder=${(e.placeholder||'').substring(0,30)}]`)
+        );
+        console.log(`  [carvana] Visible buttons: ${JSON.stringify(buttons)}`);
+        console.log(`  [carvana] Visible inputs: ${JSON.stringify(inputs)}`);
+      } catch (diagErr) {
+        console.log(`  [carvana] Diag error: ${diagErr.message}`);
+      }
 
       // Check if we've reached the offer page (contains dollar amount)
       try {
@@ -340,7 +355,7 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
       if (await isBlocked(page)) {
         console.log('[carvana] Blocked during wizard navigation');
         await screenshot(page, 'blocked-wizard');
-        return { error: 'blocked', details: vehicleDetails };
+        return { error: 'blocked', details: { vin, mileage, zip } };
       }
 
       // Try to detect and fill the current page's form
@@ -388,41 +403,105 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
         await humanDelay(1000, 2000);
       }
 
-      // Look for condition/selection buttons (good, excellent, no, none, clean, etc.)
-      const conditionKeywords = ['good', 'excellent', 'great', 'no', 'none', 'clean', 'no accidents', 'no damage'];
-      for (const keyword of conditionKeywords) {
-        try {
-          const btns = await page.$$(`button:has-text("${keyword}"), label:has-text("${keyword}"), [role="radio"]:has-text("${keyword}"), [role="option"]:has-text("${keyword}")`);
-          for (const btn of btns) {
-            if (await btn.isVisible()) {
-              await humanDelay(800, 1500);
-              await btn.click();
-              console.log(`  [carvana] Selected option: "${keyword}"`);
+      // Look for select/dropdown elements (trim, color, etc.)
+      try {
+        const selects = await page.$$('select:visible');
+        for (const sel of selects) {
+          const options = await sel.$$eval('option', opts => opts.map(o => ({ value: o.value, text: o.textContent.trim() })));
+          if (options.length > 1) {
+            // Select the first non-empty option
+            const pick = options.find(o => o.value && o.value !== '') || options[1];
+            if (pick) {
+              await sel.selectOption(pick.value);
+              console.log(`  [carvana] Selected dropdown option: "${pick.text}"`);
               interacted = true;
+              await humanDelay(500, 1000);
             }
           }
-        } catch {
-          continue;
+        }
+      } catch {
+        // Continue
+      }
+
+      // Look for vehicle confirmation buttons (after VIN submit, Carvana shows vehicle details)
+      // Must come before generic condition buttons to avoid false matches
+      const confirmSelectors = [
+        'button:has-text("This is my")', 'button:has-text("Looks right")',
+        'button:has-text("Yes, this")', 'button:has-text("That\'s my")',
+        'button:has-text("Correct")', 'button:has-text("Confirm")',
+        'a:has-text("This is my")', 'a:has-text("Looks right")',
+      ];
+      for (const sel of confirmSelectors) {
+        try {
+          const btn = await page.$(sel);
+          if (btn && await btn.isVisible()) {
+            await humanDelay(800, 1500);
+            await btn.click();
+            console.log(`  [carvana] Confirmed vehicle: ${sel}`);
+            interacted = true;
+            break;
+          }
+        } catch { continue; }
+      }
+
+      // Look for condition/selection buttons — use specific phrases to avoid false matches
+      if (!interacted) {
+        const conditionKeywords = ['Good', 'Excellent', 'No accidents', 'No damage', 'Clean title', 'None', 'No issues'];
+        for (const keyword of conditionKeywords) {
+          try {
+            const btns = await page.$$(`button:has-text("${keyword}"), label:has-text("${keyword}"), [role="radio"]:has-text("${keyword}"), [role="option"]:has-text("${keyword}")`);
+            for (const btn of btns) {
+              if (await btn.isVisible()) {
+                await humanDelay(800, 1500);
+                await btn.click();
+                console.log(`  [carvana] Selected condition: "${keyword}"`);
+                interacted = true;
+                break;
+              }
+            }
+            if (interacted) break;
+          } catch {
+            continue;
+          }
         }
       }
 
       // Look for "sell" option (Carvana asks: sell, trade-in, or not sure)
-      const sellOptions = ['sell', 'just sell', 'sell my car', 'not sure'];
-      for (const keyword of sellOptions) {
-        try {
-          const btns = await page.$$(`button:has-text("${keyword}"), label:has-text("${keyword}"), [role="radio"]:has-text("${keyword}"), a:has-text("${keyword}")`);
-          for (const btn of btns) {
-            if (await btn.isVisible()) {
+      if (!interacted) {
+        const sellKeywords = ['Just sell', 'Sell', 'Sell my car', 'Not sure'];
+        for (const keyword of sellKeywords) {
+          try {
+            const btns = await page.$$(`button:has-text("${keyword}"), label:has-text("${keyword}"), [role="radio"]:has-text("${keyword}"), a:has-text("${keyword}")`);
+            for (const btn of btns) {
+              if (await btn.isVisible()) {
+                await humanDelay(800, 1500);
+                await btn.click();
+                console.log(`  [carvana] Selected sell option: "${keyword}"`);
+                interacted = true;
+                break;
+              }
+            }
+            if (interacted) break;
+          } catch {
+            continue;
+          }
+        }
+      }
+
+      // Look for loan/payoff question (common wizard step)
+      if (!interacted) {
+        const loanKeywords = ['No loan', 'No, I own', 'Paid off', 'I own it', 'No payoff'];
+        for (const keyword of loanKeywords) {
+          try {
+            const btn = await page.$(`button:has-text("${keyword}"), label:has-text("${keyword}"), [role="radio"]:has-text("${keyword}")`);
+            if (btn && await btn.isVisible()) {
               await humanDelay(800, 1500);
               await btn.click();
-              console.log(`  [carvana] Selected: "${keyword}"`);
+              console.log(`  [carvana] Selected loan option: "${keyword}"`);
               interacted = true;
               break;
             }
-          }
-          if (interacted) break;
-        } catch {
-          continue;
+          } catch { continue; }
         }
       }
 
@@ -436,7 +515,7 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
             await humanDelay(800, 1500);
             await btn.click();
             clickedSubmit = true;
-            console.log(`  [carvana] Clicked: ${sel}`);
+            console.log(`  [carvana] Clicked submit: ${sel}`);
             break;
           }
         } catch {
@@ -446,7 +525,7 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
 
       // If we didn't interact at all, try pressing Enter as last resort
       if (!interacted && !clickedSubmit) {
-        // Maybe we're on a confirmation page — look for any clickable element
+        // Look for any visible primary-looking button
         try {
           const anyButton = await page.$('button:visible');
           if (anyButton) {
@@ -456,7 +535,6 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
             clickedSubmit = true;
           }
         } catch {
-          // Try Enter
           await page.keyboard.press('Enter');
           console.log('  [carvana] Pressed Enter (no buttons found)');
         }
@@ -469,13 +547,17 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
       const newUrl = page.url();
       if (newUrl !== currentUrl) {
         console.log(`  [carvana] Page navigated: ${newUrl}`);
+        stuckCount = 0; // Reset stuck counter on progress
       } else if (!interacted && !clickedSubmit) {
-        console.log('  [carvana] No progress on this step — may be stuck');
-        // Take a diagnostic screenshot and try one more time before giving up
-        if (step > 3) {
-          console.log('  [carvana] Multiple stuck steps — proceeding to offer check');
+        stuckCount++;
+        console.log(`  [carvana] No progress (stuck count: ${stuckCount})`);
+        if (stuckCount >= 3) {
+          console.log('  [carvana] Stuck 3 times — breaking to offer check');
           break;
         }
+      } else {
+        // We interacted but URL didn't change — might be filling a multi-field form
+        console.log('  [carvana] Interacted but URL unchanged (multi-field page?)');
       }
     }
 
@@ -563,7 +645,7 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
       } catch (_) {}
       return {
         error: 'Could not extract offer amount. The page may have changed or the flow was interrupted.',
-        details: { ...vehicleDetails, pageState },
+        details: { vin, mileage, zip, pageState },
         screenshot: finalScreenshot,
       };
     }
@@ -571,7 +653,6 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
     return {
       offer: offerText,
       details: {
-        ...vehicleDetails,
         vin,
         mileage,
         zip,
