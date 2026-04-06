@@ -143,6 +143,32 @@ LREOF
         fi
     fi
 
+    # === STEP 4: DIAGNOSTICS (write server state to static file for QA) ===
+    mkdir -p /var/www/landing
+    {
+        echo "{"
+        echo "  \"timestamp\": \"$(date -Iseconds)\","
+        echo "  \"node_version\": \"$(node --version 2>&1 || echo 'NOT_FOUND')\","
+        echo "  \"node_path\": \"$(which node 2>&1 || echo 'NOT_FOUND')\","
+        echo "  \"npm_version\": \"$(npm --version 2>&1 || echo 'NOT_FOUND')\","
+        echo "  \"car_offers_dir_exists\": $([ -d /opt/car-offers ] && echo true || echo false),"
+        echo "  \"server_js_exists\": $([ -f /opt/car-offers/server.js ] && echo true || echo false),"
+        echo "  \"node_modules_exists\": $([ -d /opt/car-offers/node_modules ] && echo true || echo false),"
+        echo "  \"express_installed\": $([ -d /opt/car-offers/node_modules/express ] && echo true || echo false),"
+        echo "  \"dotenv_installed\": $([ -d /opt/car-offers/node_modules/dotenv ] && echo true || echo false),"
+        echo "  \"env_file_exists\": $([ -f /opt/car-offers/.env ] && echo true || echo false),"
+        echo "  \"npm_installed_flag\": $([ -f /opt/car-offers/.npm_installed ] && echo true || echo false),"
+        echo "  \"playwright_installed_flag\": $([ -f /opt/car-offers/.playwright_installed ] && echo true || echo false),"
+        echo "  \"systemd_service_exists\": $([ -f /etc/systemd/system/car-offers.service ] && echo true || echo false),"
+        echo "  \"systemd_status\": \"$(systemctl is-active car-offers 2>&1)\","
+        echo "  \"systemd_enabled\": \"$(systemctl is-enabled car-offers 2>&1)\","
+        echo "  \"port_3100_listening\": $(ss -tlnp | grep -q ':3100' && echo true || echo false),"
+        echo "  \"car_offers_log_tail\": $(tail -20 /var/log/car-offers/error.log 2>/dev/null | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))' 2>/dev/null || echo '\"no log\"'),"
+        echo "  \"deploy_log_tail\": $(tail -20 /var/log/general-deploy.log 2>/dev/null | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))' 2>/dev/null || echo '\"no log\"'),"
+        echo "  \"package_json_contents\": $(cat /opt/car-offers/package.json 2>/dev/null | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))' 2>/dev/null || echo '\"not found\"')"
+        echo "}"
+    } > /var/www/landing/debug.json
+
     echo "$(date): Deploy complete." >> "$LOG"
 else
     : # No changes — silent
