@@ -168,24 +168,6 @@ LREOF
         fi
     fi
 
-    # === ONE-SHOT: Test Carvana offer (background, won't block deploy) ===
-    if [ ! -f /opt/.carvana_test_done ]; then
-        (
-            sleep 15  # wait for service
-            for i in 1 2 3 4 5; do
-                curl -sf http://127.0.0.1:3100/ > /dev/null 2>&1 && break
-                sleep 5
-            done
-            echo "$(date): Running Carvana test..." >> "$LOG"
-            curl -sf -X POST http://127.0.0.1:3100/api/carvana \
-                -H 'Content-Type: application/json' \
-                -d '{"vin":"1HGCV2F9XNA008352","mileage":"48000","zip":"06880"}' \
-                --max-time 200 > /var/www/landing/carvana-result.json 2>&1
-            echo "$(date): Carvana test done. Result: $(cat /var/www/landing/carvana-result.json)" >> "$LOG"
-            touch /opt/.carvana_test_done
-        ) &
-    fi
-
     # === STEP 4: LIGHTWEIGHT DIAGNOSTICS ===
     # Minimal health check — just enough for QA to verify server state
     mkdir -p /var/www/landing
