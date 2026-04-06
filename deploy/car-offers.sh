@@ -105,8 +105,8 @@ SVCEOF
 systemctl daemon-reload
 systemctl enable $PROJECT >> "$LOG" 2>&1
 
-# Clear stale startup-results to force fresh Carvana run on restart
-rm -f "$PROJECT_DIR/startup-results.json" 2>/dev/null
+# Keep startup-results.json — the server checks age to avoid re-running Carvana
+# on rapid redeploys. Only runs if last result is >10 min old.
 
 # Only start service if deps are ready (prevents 502 on first deploy)
 if [ -d "$PROJECT_DIR/node_modules/express" ]; then
