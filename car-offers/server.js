@@ -92,8 +92,9 @@ async function runFullDiagnostic() {
   selfTest.networkDiagAt = diag.timestamp;
 
   // Determine overall proxy status from curl tests
+  // "Access denied" means curl got a response but auth failed — not a success
   const httpbinResult = diag.tests.curl_httpbin_proxy;
-  if (httpbinResult && httpbinResult.ok && httpbinResult.output.includes('origin')) {
+  if (httpbinResult && httpbinResult.ok && httpbinResult.output.includes('origin') && !httpbinResult.output.includes('Access denied')) {
     try {
       const parsed = JSON.parse(httpbinResult.output);
       selfTest.proxyResult = { ok: true, ip: parsed.origin, method: 'curl', port };
@@ -825,23 +826,6 @@ app.get('/api/auto-run', async (_req, res) => {
   }
 });
 
-// --- Fix .env password (the setup form corrupted it — 18 chars instead of 10) ---
-app.get('/api/fix-env', (_req, res) => {
-  try { config.reloadConfig(); } catch (_) {}
-  const envPath = path.join(__dirname, '.env');
-  const envContent = [
-    'PROXY_HOST=gate.decodo.com',
-    'PROXY_PORT=10001',
-    'PROXY_USER=spjax0kgms',
-    'PROXY_PASS=Mnx32sxKmj',
-    'PROJECT_EMAIL=caroffers.tool@gmail.com',
-    'PORT=3100',
-  ].join('\n') + '\n';
-  fs.writeFileSync(envPath, envContent, 'utf8');
-  config.reloadConfig();
-  res.json({ ok: true, message: 'Environment fixed', pass_length: config.PROXY_PASS.length });
-});
-
 // --- Retest proxy endpoint ---
 app.get('/api/retest-proxy', async (_req, res) => {
   res.json({ ok: true, message: 'Proxy retest started. Check /car-offers/api/status in 20-30s.' });
@@ -936,23 +920,8 @@ app.listen(port, '0.0.0.0', () => {
 
   // Run full diagnostics 5 seconds after startup
   setTimeout(async () => {
-    // Auto-fix .env if password is wrong length (18 chars = corrupted)
     try { config.reloadConfig(); } catch (_) {}
-    if (config.PROXY_PASS && config.PROXY_PASS.length !== 10) {
-      console.log(`[startup] Password is ${config.PROXY_PASS.length} chars (expected 10) — auto-fixing .env`);
-      const envPath = path.join(__dirname, '.env');
-      const envContent = [
-        'PROXY_HOST=gate.decodo.com',
-        'PROXY_PORT=10001',
-        'PROXY_USER=spjax0kgms',
-        'PROXY_PASS=Mnx32sxKmj',
-        'PROJECT_EMAIL=caroffers.tool@gmail.com',
-        'PORT=3100',
-      ].join('\n') + '\n';
-      fs.writeFileSync(envPath, envContent, 'utf8');
-      config.reloadConfig();
-      console.log(`[startup] .env fixed — password now ${config.PROXY_PASS.length} chars`);
-    }
+    console.log(`[startup] Proxy password: ${config.PROXY_PASS ? config.PROXY_PASS.length + ' chars' : 'NOT SET'}`);
 
     console.log('[startup] Running full curl-based diagnostics...');
     await runFullDiagnostic();
