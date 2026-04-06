@@ -215,33 +215,19 @@ test.describe('Car Offer Tool', () => {
   });
 });
 
-test.describe('Server Diagnostics', () => {
-  test('debug.json exists and reports server state', async ({ request }) => {
+test.describe('Server Health', () => {
+  test('debug.json reports healthy server state', async ({ request }) => {
     const resp = await request.get('/debug.json');
     expect(resp.status(), 'debug.json should be served').toBe(200);
     const body = await resp.json();
-    console.log('>>> SERVER DIAGNOSTICS:', JSON.stringify(body, null, 2));
-
-    // Log critical findings
-    console.log(`>>> Node version: ${body.node_version}`);
-    console.log(`>>> Node path: ${body.node_path}`);
-    console.log(`>>> car-offers dir exists: ${body.car_offers_dir_exists}`);
-    console.log(`>>> server.js exists: ${body.server_js_exists}`);
-    console.log(`>>> node_modules exists: ${body.node_modules_exists}`);
-    console.log(`>>> express installed: ${body.express_installed}`);
-    console.log(`>>> systemd status: ${body.systemd_status}`);
-    console.log(`>>> port 3100 listening: ${body.port_3100_listening}`);
-    console.log(`>>> car-offers error log: ${body.car_offers_log_tail}`);
-    console.log(`>>> deploy log: ${body.deploy_log_tail}`);
+    console.log('>>> SERVER HEALTH:', JSON.stringify(body, null, 2));
+    expect(body.car_offers_status).toBe('active');
+    expect(body.port_3100).toBe(true);
   });
 
-  test('car-offers returns non-502 response', async ({ request }) => {
+  test('car-offers responds (not 502)', async ({ request }) => {
     const resp = await request.get('/car-offers/');
-    console.log(`>>> /car-offers/ status: ${resp.status()}`);
-    const text = await resp.text();
-    console.log(`>>> /car-offers/ body (first 500 chars): ${text.substring(0, 500)}`);
-    // We want this to NOT be 502
-    expect(resp.status(), '/car-offers/ should not be 502 Bad Gateway').not.toBe(502);
+    expect(resp.status(), '/car-offers/ should not be 502').not.toBe(502);
   });
 });
 
