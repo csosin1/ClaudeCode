@@ -2,7 +2,6 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const config = require('./lib/config');
-const { getCarvanaOffer } = require('./lib/carvana');
 
 const app = express();
 app.use(express.json());
@@ -373,6 +372,14 @@ app.post('/api/carvana', async (req, res) => {
 
   if (!vin || !mileage || !zip) {
     return res.status(400).json({ error: 'Missing required fields: vin, mileage, zip' });
+  }
+
+  let getCarvanaOffer;
+  try {
+    ({ getCarvanaOffer } = require('./lib/carvana'));
+  } catch (loadErr) {
+    console.error('[server] Failed to load carvana module:', loadErr.message);
+    return res.status(503).json({ error: 'Carvana module not available yet — dependencies may still be installing. Try again in a minute.' });
   }
 
   try {

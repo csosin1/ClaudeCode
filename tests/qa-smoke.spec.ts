@@ -5,7 +5,7 @@ test.describe('Landing Page', () => {
     const response = await page.goto('/');
     expect(response?.status()).toBe(200);
     await expect(page.locator('h1')).toContainText('Projects');
-    await expect(page.locator('a.card')).toHaveCount(3);
+    await expect(page.locator('a.card')).toHaveCount(2);
   });
 
   test('all project links return 200', async ({ page, request }) => {
@@ -177,6 +177,41 @@ test.describe('Dice Roller App', () => {
     await page.goto('/games/dice-roller/');
     await page.locator('#roll-btn').click();
     expect(errors, 'Dice Roller should have no JS errors').toHaveLength(0);
+  });
+});
+
+test.describe('Carvana Hub', () => {
+  test('hub page loads with project cards', async ({ page }) => {
+    const response = await page.goto('/carvana/');
+    expect(response?.status()).toBe(200);
+    await expect(page.locator('h1')).toContainText('Carvana');
+    // Should have 3 cards: ABS Dashboard, Preview, Car Offers
+    const cards = page.locator('a.card');
+    expect(await cards.count()).toBe(3);
+  });
+
+  test('back link points to home', async ({ page }) => {
+    await page.goto('/carvana/');
+    const backLink = page.locator('a.back');
+    await expect(backLink).toHaveAttribute('href', '/');
+  });
+});
+
+test.describe('Car Offer Tool', () => {
+  test('page loads (setup or main)', async ({ page }) => {
+    const response = await page.goto('/car-offers/');
+    expect(response?.status()).toBe(200);
+    // Should see either the setup page or the main offer tool
+    const heading = page.locator('h1');
+    const text = await heading.textContent();
+    expect(text === 'Server Setup' || text === 'Car Offer Tool').toBeTruthy();
+  });
+
+  test('no JS errors on car-offers page', async ({ page }) => {
+    const errors: string[] = [];
+    page.on('pageerror', (err) => errors.push(err.message));
+    await page.goto('/car-offers/');
+    expect(errors, 'Car Offer Tool should have no JS errors').toHaveLength(0);
   });
 });
 
