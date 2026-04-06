@@ -212,9 +212,16 @@ async function api(path) {
   return r.json();
 }
 
+function esc(s) {
+  if (!s) return '';
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
 function tierBadge(tier) {
   const cls = tier === 'budget' ? 'badge-budget' : tier === 'premium' ? 'badge-premium' : 'badge-mid';
-  return `<span class="badge ${cls}">${tier || 'unknown'}</span>`;
+  return `<span class="badge ${cls}">${esc(tier) || 'unknown'}</span>`;
 }
 
 function classBadge(c) {
@@ -288,7 +295,7 @@ async function loadMarketData() {
   cards.innerHTML = data.map(d => `
     <div class="card">
       <div class="expand-toggle" onclick="this.classList.toggle('open');this.nextElementSibling.classList.toggle('open')">
-        <span><strong>${d.canonical_name}</strong></span>
+        <span><strong>${esc(d.canonical_name)}</strong></span>
         <span style="color:var(--accent);font-weight:700">${d.market_share}%</span>
       </div>
       <div class="expand-body">
@@ -310,7 +317,7 @@ async function loadChainList() {
   const chains = await api('chains?min_locations=1');
   const sel = document.getElementById('chain-select');
   sel.innerHTML = '<option value="">-- select a chain --</option>' +
-    chains.map(c => `<option value="${c.canonical_name}">${c.canonical_name} (${c.location_count})</option>`).join('');
+    chains.map(c => `<option value="${esc(c.canonical_name)}">${esc(c.canonical_name)} (${c.location_count})</option>`).join('');
 }
 
 document.getElementById('chain-select').addEventListener('change', async function() {
@@ -329,11 +336,11 @@ document.getElementById('chain-select').addEventListener('change', async functio
   const pCard = document.getElementById('chain-profile');
   pCard.classList.remove('hidden');
   pCard.innerHTML = `
-    <h3>${profile.canonical_name}</h3>
+    <h3>${esc(profile.canonical_name)}</h3>
     <p>${classBadge(profile.competitive_classification)} ${tierBadge(profile.price_tier)}</p>
     <p style="margin-top:8px">18-mo cost: ${profile.normalized_18mo_cost ? '\u20AC' + profile.normalized_18mo_cost.toFixed(0) : 'N/A'} &middot; Model: ${profile.membership_model || 'unknown'}</p>
     <p style="margin-top:8px">Locations: <strong>${profile.location_count}</strong></p>
-    ${profile.ai_classification_rationale ? '<p style="margin-top:8px;font-size:.82rem;color:var(--text-dim)"><em>Rationale: ' + profile.ai_classification_rationale + '</em></p>' : ''}
+    ${profile.ai_classification_rationale ? '<p style="margin-top:8px;font-size:.82rem;color:var(--text-dim)"><em>Rationale: ' + esc(profile.ai_classification_rationale) + '</em></p>' : ''}
   `;
 
   // Growth metrics
@@ -400,7 +407,7 @@ document.getElementById('chain-select').addEventListener('change', async functio
   locations.forEach(loc => {
     if (loc.lat && loc.lon) {
       const m = L.marker([loc.lat, loc.lon]).bindPopup(
-        `<strong>${loc.name || profile.canonical_name}</strong><br>${loc.city || ''}<br><small>${loc.address_full || ''}</small>`
+        `<strong>${esc(loc.name || profile.canonical_name)}</strong><br>${esc(loc.city || '')}<br><small>${esc(loc.address_full || '')}</small>`
       );
       markerLayer.addLayer(m);
       bounds.push([loc.lat, loc.lon]);
@@ -438,7 +445,7 @@ document.getElementById('analysis-select').addEventListener('change', async func
 
   const body = document.getElementById('analysis-body');
   body.classList.remove('hidden');
-  body.querySelector('.md-content').innerHTML = marked.parse(data.analysis_text || '');
+  body.querySelector('.md-content').innerHTML = marked.parse(data.analysis_text || '', {breaks: true});
 });
 
 // ---- TAB 4: Admin ----
@@ -467,7 +474,7 @@ async function loadUnknownChains() {
   }
   list.innerHTML = chains.map(c => `
     <div class="card review-card" id="review-${c.id}">
-      <h3>${c.canonical_name} <small style="color:var(--text-dim)">(${c.location_count} loc)</small></h3>
+      <h3>${esc(c.canonical_name)} <small style="color:var(--text-dim)">(${c.location_count} loc)</small></h3>
       <label>Classification</label>
       <select data-field="classification">
         <option value="unknown">unknown</option>

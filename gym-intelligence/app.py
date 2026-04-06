@@ -144,7 +144,10 @@ def api_snapshot_dates():
 def api_market_data():
     snapshot_date = request.args.get("date", "")
     country = request.args.get("country", "All Europe")
-    min_locations = int(request.args.get("min_locations", "5"))
+    try:
+        min_locations = int(request.args.get("min_locations", "5"))
+    except (ValueError, TypeError):
+        min_locations = 5
 
     conn = get_connection()
     params: list = [snapshot_date]
@@ -178,7 +181,10 @@ def api_market_data():
 
 @bp.route("/api/chains")
 def api_chains():
-    min_locations = int(request.args.get("min_locations", "1"))
+    try:
+        min_locations = int(request.args.get("min_locations", "1"))
+    except (ValueError, TypeError):
+        min_locations = 1
     conn = get_connection()
     rows = conn.execute("""
         SELECT id, canonical_name, location_count, competitive_classification
@@ -285,7 +291,7 @@ def api_review_chain():
     """, (
         data.get("classification", "unknown"),
         data.get("price_tier", "unknown"),
-        data.get("cost") if data.get("cost") and float(data["cost"]) > 0 else None,
+        float(data["cost"]) if data.get("cost") and str(data["cost"]).replace(".", "", 1).isdigit() and float(data["cost"]) > 0 else None,
         data.get("membership_model", "unknown"),
         data["id"],
     ))
