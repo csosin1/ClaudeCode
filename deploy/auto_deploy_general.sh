@@ -123,28 +123,16 @@ ENVEOF
             fi
         fi
 
-        # Clear stale playwright flag if previous install failed (libasound2 rename)
-        if [ -f /opt/car-offers/.playwright_installed ]; then
-            # Check if playwright is actually usable
-            if ! "$NPX_BIN" playwright --version > /dev/null 2>&1; then
-                rm -f /opt/car-offers/.playwright_installed
-                echo "$(date): Cleared stale .playwright_installed flag." >> "$LOG"
-            fi
-        fi
-
-        # Playwright + system deps — background (heavy, don't block server)
+        # Playwright system deps + browser install
         if [ ! -f /opt/car-offers/.playwright_installed ]; then
-            echo "$(date): Playwright installing in background..." >> "$LOG"
-            (
-                apt-get update -qq >> "$LOG" 2>&1
-                apt-get install -y -qq \
-                    libnss3 libatk1.0-0t64 libatk-bridge2.0-0t64 libcups2t64 libdrm2 \
-                    libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 \
-                    libpango-1.0-0 libcairo2 libasound2t64 libxshmfence1 >> "$LOG" 2>&1
-                cd /opt/car-offers && "$NPX_BIN" playwright install chromium --with-deps >> "$LOG" 2>&1
+            echo "$(date): Installing Playwright system deps + browser..." >> "$LOG"
+            cd /opt/car-offers && "$NPX_BIN" playwright install --with-deps chromium >> "$LOG" 2>&1
+            if "$NPX_BIN" playwright --version > /dev/null 2>&1; then
                 touch /opt/car-offers/.playwright_installed
-                echo "$(date): Playwright install done." >> "$LOG"
-            ) &
+                echo "$(date): Playwright install done ($(NPX_BIN playwright --version 2>&1))." >> "$LOG"
+            else
+                echo "$(date): Playwright install may have failed. Continuing anyway." >> "$LOG"
+            fi
         fi
 
         # systemd service (no PM2) — use discovered node path
@@ -223,30 +211,19 @@ LREOF
     } > /var/www/landing/debug.json
 
     # === STEP 5: ONE-SHOT CARVANA TEST (runs in background, writes result to static file) ===
-    rm -f /opt/.carvana_test_v1 /opt/.carvana_test_v2 /opt/.carvana_test_v3 /opt/.carvana_test_v4
-    if [ ! -f /opt/.carvana_test_v5 ]; then
+    rm -f /opt/.carvana_test_v1 /opt/.carvana_test_v2 /opt/.carvana_test_v3 /opt/.carvana_test_v4 /opt/.carvana_test_v5
+    if [ ! -f /opt/.carvana_test_v6 ]; then
         echo "$(date): Triggering Carvana test offer in background..." >> "$LOG"
         (
-            # Wait for Playwright to be installed (background install from STEP 3)
-            echo "$(date): Waiting for Playwright install to finish..." >> "$LOG"
-            for i in $(seq 1 60); do
-                if [ -f /opt/car-offers/.playwright_installed ]; then
-                    echo "$(date): Playwright ready." >> "$LOG"
-                    break
-                fi
-                sleep 10
-            done
-            # Also wait for service to be up
-            sleep 5
+            # Wait for service to be up (Playwright is installed synchronously before this)
+            sleep 10
             for i in 1 2 3 4 5; do
                 if curl -sf http://127.0.0.1:3100/ > /dev/null 2>&1; then
+                    echo "$(date): Service is up, starting Carvana test." >> "$LOG"
                     break
                 fi
                 sleep 5
             done
-            # Restart service so it picks up newly installed playwright
-            systemctl restart car-offers >> "$LOG" 2>&1
-            sleep 5
             echo "$(date): Calling Carvana API..." >> "$LOG"
             RESULT=$(curl -sf -X POST http://127.0.0.1:3100/api/carvana \
                 -H 'Content-Type: application/json' \
@@ -255,7 +232,7 @@ LREOF
             echo "$RESULT" > /var/www/landing/carvana-result.json
             echo "$(date): Carvana test result written." >> "$LOG"
             echo "$(date): Result: $RESULT" >> "$LOG"
-            touch /opt/.carvana_test_v5
+            touch /opt/.carvana_test_v6
         ) &
     fi
 

@@ -69,15 +69,28 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
 
   try {
     console.log(`[carvana] Starting offer flow for VIN=${vin} mileage=${mileage} zip=${zip}`);
+    console.log(`[carvana] Proxy configured: ${!!(config.PROXY_HOST && config.PROXY_PASS)}`);
 
     // --- Launch browser ---
-    const result = await launchBrowser();
+    let result;
+    try {
+      result = await launchBrowser();
+    } catch (launchErr) {
+      console.error(`[carvana] Browser launch failed: ${launchErr.message}`);
+      throw launchErr;
+    }
     browser = result.browser;
     const page = result.page;
 
     // --- Step 1: Navigate to sell-my-car ---
     console.log('[carvana] Step 1: Navigating to Carvana sell page...');
-    await page.goto(CARVANA_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    try {
+      await page.goto(CARVANA_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    } catch (navErr) {
+      console.error(`[carvana] Navigation failed: ${navErr.message}`);
+      await screenshot(page, '00-nav-failure').catch(() => {});
+      throw navErr;
+    }
     await humanDelay(3000, 6000);
     await screenshot(page, '01-landing');
 
