@@ -112,8 +112,8 @@ ENVEOF
             --exclude='.env' \
             "$REPO_DIR/car-offers/" /opt/car-offers/
 
-        # npm install (only if needed, validate result)
-        if [ ! -d /opt/car-offers/node_modules/express ]; then
+        # npm install (if package.json changed or node_modules missing)
+        if [ "$REPO_DIR/car-offers/package.json" -nt /opt/car-offers/node_modules/.package-lock.json ] || [ ! -d /opt/car-offers/node_modules/express ]; then
             echo "$(date): npm install for car-offers..." >> "$LOG"
             cd /opt/car-offers && "$NPM_BIN" install --production >> "$LOG" 2>&1
             if [ -d /opt/car-offers/node_modules/express ]; then

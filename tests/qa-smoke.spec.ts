@@ -237,6 +237,21 @@ test.describe('Gym Intelligence', () => {
   });
 });
 
+test.describe('Car Offers Dashboard', () => {
+  test('dashboard loads', async ({ page }) => {
+    await page.goto('/car-offers/dashboard');
+    await expect(page.locator('h1')).toContainText('Car Offers Dashboard');
+  });
+
+  test('status API returns JSON', async ({ request }) => {
+    const resp = await request.get('/car-offers/api/status');
+    expect(resp.ok()).toBeTruthy();
+    const data = await resp.json();
+    expect(data.service).toBeTruthy();
+    expect(data.proxy).toBeTruthy();
+  });
+});
+
 test.describe('Server Health', () => {
   test('debug.json reports healthy server state', async ({ request }) => {
     const resp = await request.get('/debug.json');
