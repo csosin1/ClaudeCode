@@ -748,6 +748,57 @@ app.get('/api/retest-proxy', async (_req, res) => {
   await runProxyTest();
 });
 
+// --- Browser diagnostic: can Chromium launch at all? ---
+app.get('/api/diag-browser', async (_req, res) => {
+  let browser = null;
+  const steps = [];
+  try {
+    steps.push('Loading playwright...');
+    let pw;
+    try {
+      pw = require('playwright');
+    } catch (e) {
+      steps.push(`playwright require failed: ${e.message}`);
+      return res.json({ ok: false, steps, error: e.message });
+    }
+
+    steps.push('Checking chromium executable...');
+    const execPath = pw.chromium.executablePath();
+    steps.push(`Executable: ${execPath}`);
+
+    const fs = require('fs');
+    const exists = fs.existsSync(execPath);
+    steps.push(`Exists: ${exists}`);
+    if (!exists) {
+      return res.json({ ok: false, steps, error: 'Chromium binary not found. Run: npx playwright install chromium' });
+    }
+
+    steps.push('Launching headless Chromium (no proxy)...');
+    browser = await pw.chromium.launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--no-zygote', '--single-process', '--disable-gpu', '--disable-dev-shm-usage'],
+    });
+    steps.push('Browser launched OK');
+
+    const page = await browser.newPage();
+    steps.push('Page created OK');
+
+    await page.goto('data:text/html,<h1>test</h1>', { timeout: 10000 });
+    const title = await page.textContent('h1');
+    steps.push(`Page loaded: ${title}`);
+
+    await browser.close();
+    browser = null;
+    steps.push('Browser closed OK');
+
+    return res.json({ ok: true, steps });
+  } catch (err) {
+    if (browser) try { await browser.close(); } catch (_) {}
+    steps.push(`Error: ${err.message}`);
+    return res.json({ ok: false, steps, error: err.message });
+  }
+});
+
 // --- API endpoint ---
 app.post('/api/carvana', async (req, res) => {
   const { vin, mileage, zip } = req.body || {};

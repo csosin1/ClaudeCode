@@ -51,39 +51,68 @@ async function randomMouseMove(page, selector) {
  * Returns { browser, page }.
  */
 async function launchBrowser(options = {}) {
-  const launchOptions = {
-    headless: true,
-    args: [
-      '--disable-blink-features=AutomationControlled',
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-gpu',
-      '--disable-dev-shm-usage',
-      '--disable-software-rasterizer',
-    ],
-  };
+  const args = [
+    '--disable-blink-features=AutomationControlled',
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--disable-gpu',
+    '--disable-dev-shm-usage',
+    '--disable-software-rasterizer',
+    '--disable-extensions',
+    '--disable-background-networking',
+    '--disable-default-apps',
+    '--disable-sync',
+    '--disable-translate',
+    '--no-first-run',
+    '--no-zygote',
+    '--single-process',
+    '--mute-audio',
+  ];
 
-  // Configure residential proxy if fully available (host + port + user + password)
-  // Skip proxy if password is missing — direct connection as fallback
+  // Build proxy config
+  let proxyConfig = null;
   if (config.PROXY_HOST && config.PROXY_PASS) {
     const sessionId = Math.random().toString(36).substring(7);
     const stickyUsername = config.PROXY_USER ? `${config.PROXY_USER}-session-${sessionId}` : '';
-    // Decodo uses ports 10001-10007 — override if .env has old port 7000
     const proxyPort = (config.PROXY_PORT === '7000') ? '10001' : (config.PROXY_PORT || '10001');
 
-    launchOptions.proxy = {
+    proxyConfig = {
       server: `http://${config.PROXY_HOST}:${proxyPort}`,
     };
     if (stickyUsername) {
-      launchOptions.proxy.username = stickyUsername;
-      launchOptions.proxy.password = config.PROXY_PASS;
+      proxyConfig.username = stickyUsername;
+      proxyConfig.password = config.PROXY_PASS;
     }
     console.log(`[browser] Using proxy: ${config.PROXY_HOST}:${proxyPort}`);
   } else {
     console.log('[browser] No proxy configured — using direct connection');
   }
 
-  const browser = await chromium.launch(launchOptions);
+  const launchOptions = {
+    headless: true,
+    args,
+  };
+  if (proxyConfig) {
+    launchOptions.proxy = proxyConfig;
+  }
+
+  // Try playwright-extra (stealth) first, fall back to regular playwright
+  let browser;
+  try {
+    browser = await chromium.launch(launchOptions);
+    console.log('[browser] Launched via playwright-extra (stealth)');
+  } catch (stealthErr) {
+    console.warn(`[browser] playwright-extra launch failed: ${stealthErr.message}`);
+    console.log('[browser] Falling back to regular playwright...');
+    try {
+      const pw = require('playwright');
+      browser = await pw.chromium.launch(launchOptions);
+      console.log('[browser] Launched via regular playwright');
+    } catch (fallbackErr) {
+      console.error(`[browser] Regular playwright also failed: ${fallbackErr.message}`);
+      throw new Error(`Browser launch failed. Stealth: ${stealthErr.message}. Fallback: ${fallbackErr.message}`);
+    }
+  }
 
   const context = await browser.newContext({
     userAgent: USER_AGENT,
