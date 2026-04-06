@@ -1,12 +1,15 @@
 name: Server Check
 
-# Project chats post "/check" on issue #4 to trigger this.
-# Results are posted back as an issue comment.
+# Runs every 10 minutes and on-demand via workflow_dispatch.
+# Writes results to issue #4 as a comment (replaces old pinned comment).
+# Also triggered by issue comments starting with /check.
 on:
+  schedule:
+    - cron: '*/10 * * * *'
   workflow_dispatch:
     inputs:
       target:
-        description: 'What to check: "all", "car-offers", "gym-intelligence", or a URL path like "/car-offers/api/status"'
+        description: '"all", "car-offers", "gym-intelligence", or a URL path'
         required: false
         default: 'all'
   issue_comment:
@@ -20,33 +23,33 @@ jobs:
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 2
-    # Only run if: workflow_dispatch OR issue comment starting with /check
+    # Skip issue_comment events that don't start with /check
     if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'issue_comment' && startsWith(github.event.comment.body, '/check'))
+      github.event_name != 'issue_comment' ||
+      startsWith(github.event.comment.body, '/check')
 
     steps:
       - name: Run server checks
         id: check
         run: |
           BASE="http://159.223.127.125"
-          REPORT=$(mktemp)
+          REPORT="/tmp/server-check-report.md"
 
           # Parse target
+          TARGET="all"
           if [ "${{ github.event_name }}" = "issue_comment" ]; then
-            # Extract target: "/check car-offers" → "car-offers", "/check" → "all"
-            RAW_BODY=$(cat <<'BODY_EOF'
+            RAW=$(cat <<'BODYEOF'
           ${{ github.event.comment.body }}
-          BODY_EOF
+          BODYEOF
             )
-            TARGET=$(echo "$RAW_BODY" | head -1 | sed 's|^/check||' | xargs)
+            TARGET=$(echo "$RAW" | head -1 | sed 's|^/check||' | xargs)
             [ -z "$TARGET" ] && TARGET="all"
-          else
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             TARGET="${{ github.event.inputs.target }}"
             [ -z "$TARGET" ] && TARGET="all"
           fi
 
-          echo "## Server Check: \`$TARGET\`" >> "$REPORT"
+          echo "## 🔍 Server Check: \`$TARGET\`" > "$REPORT"
           echo "" >> "$REPORT"
 
           check_url() {
@@ -61,25 +64,27 @@ jobs:
 
           fetch_json() {
             local label="$1" url="$2"
-            BODY=$(curl -sf --max-time 10 "$url" 2>/dev/null || echo '{"error":"request failed"}')
+            BODY=$(curl -sf --max-time 10 "$url" 2>/dev/null || echo '{"error":"request failed or timed out"}')
             PRETTY=$(echo "$BODY" | python3 -m json.tool 2>/dev/null || echo "$BODY")
             echo "" >> "$REPORT"
-            echo "### $label" >> "$REPORT"
+            echo "<details><summary><b>$label</b></summary>" >> "$REPORT"
+            echo "" >> "$REPORT"
             echo '```json' >> "$REPORT"
             echo "$PRETTY" >> "$REPORT"
             echo '```' >> "$REPORT"
+            echo "</details>" >> "$REPORT"
           }
 
-          # Custom URL path (e.g. /check /car-offers/api/status)
+          # Custom URL path
           if echo "$TARGET" | grep -q '^/'; then
             check_url "$TARGET" "$BASE$TARGET"
+            BODY=$(curl -sf --max-time 10 "$BASE$TARGET" 2>/dev/null || echo "(no response)")
             echo "" >> "$REPORT"
             echo '```' >> "$REPORT"
-            curl -sf --max-time 10 "$BASE$TARGET" >> "$REPORT" 2>/dev/null || echo "(no response)" >> "$REPORT"
-            echo "" >> "$REPORT"
+            echo "$BODY" >> "$REPORT"
             echo '```' >> "$REPORT"
           else
-            # Always show status.json
+            # Core status
             fetch_json "status.json" "$BASE/status.json"
             fetch_json "debug.json" "$BASE/debug.json"
 
@@ -97,7 +102,6 @@ jobs:
               echo "" >> "$REPORT"
               echo "### Gym Intelligence" >> "$REPORT"
               check_url "Main page" "$BASE/gym-intelligence/"
-              # Try project-specific endpoints
               for ep in /gym-intelligence/api/country-counts /gym-db-status.json; do
                 RESP=$(curl -sf --max-time 10 "$BASE$ep" 2>/dev/null)
                 if [ -n "$RESP" ]; then
@@ -109,31 +113,61 @@ jobs:
 
           echo "" >> "$REPORT"
           echo "---" >> "$REPORT"
-          echo "_Completed $(date -u +%Y-%m-%dT%H:%M:%SZ)_" >> "$REPORT"
+          echo "_$(date -u +%Y-%m-%dT%H:%M:%SZ) · trigger: ${{ github.event_name }}_" >> "$REPORT"
 
-          # Output for next step
           cat "$REPORT"
           cat "$REPORT" >> "$GITHUB_STEP_SUMMARY"
 
-          # Save report path for comment posting
-          echo "report=$REPORT" >> "$GITHUB_OUTPUT"
-
-      - name: Post results to issue
-        if: github.event_name == 'issue_comment'
+      - name: Post results to issue #4
+        if: always()
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
-            const reportPath = '${{ steps.check.outputs.report }}';
-            let body = 'Server check completed. See workflow run for details.';
+            let body = 'Server check completed but report not available. See workflow run.';
             try {
-              body = fs.readFileSync(reportPath, 'utf8');
+              body = fs.readFileSync('/tmp/server-check-report.md', 'utf8');
             } catch (e) {
-              console.log('Could not read report file:', e.message);
+              console.log('Report file not found:', e.message);
             }
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body: body
-            });
+
+            // For scheduled runs: update the pinned status comment (last bot comment)
+            // For issue_comment: reply on the same issue
+            const issueNumber = 4;
+
+            if ('${{ github.event_name }}' === 'schedule') {
+              // Find and update existing bot comment, or create new one
+              const comments = await github.rest.issues.listComments({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                per_page: 100
+              });
+              const botComment = comments.data
+                .filter(c => c.user.login === 'github-actions[bot]')
+                .pop();
+              if (botComment) {
+                await github.rest.issues.updateComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: botComment.id,
+                  body: body
+                });
+              } else {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issueNumber,
+                  body: body
+                });
+              }
+            } else {
+              // For dispatch and issue_comment: always create new comment
+              const targetIssue = context.issue?.number || issueNumber;
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: targetIssue,
+                body: body
+              });
+            }
