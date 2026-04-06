@@ -118,20 +118,33 @@ LREOF
     touch /opt/.gym_intelligence_logs_initialized
 fi
 
-# Repair: link any unlinked locations to chains
+# Repair: reactivate wrongly-deactivated locations + link unlinked chains
 "$PROJECT_DIR/venv/bin/python" -c "
 import sys; sys.path.insert(0, '$PROJECT_DIR')
 from db import get_connection, init_db
 from collect import assign_chains, update_chain_location_counts
 init_db()
 conn = get_connection()
-unlinked = conn.execute('SELECT COUNT(*) as n FROM locations WHERE chain_id IS NULL AND active=1').fetchone()['n']
+
+# Reactivate all locations that were wrongly marked inactive
+inactive = conn.execute('SELECT COUNT(*) as n FROM locations WHERE active=0').fetchone()['n']
+if inactive > 0:
+    conn.execute('UPDATE locations SET active = 1')
+    print(f'Reactivated {inactive} locations.')
+
+# Link unlinked locations to chains
+unlinked = conn.execute('SELECT COUNT(*) as n FROM locations WHERE chain_id IS NULL').fetchone()['n']
 if unlinked > 0:
     print(f'Linking {unlinked} unlinked locations to chains...')
     assign_chains(conn)
-    update_chain_location_counts(conn)
-    conn.commit()
-    print('Done.')
+
+update_chain_location_counts(conn)
+conn.commit()
+
+# Report counts
+for row in conn.execute('SELECT country, COUNT(*) as c FROM locations WHERE active=1 GROUP BY country').fetchall():
+    print(f'  {row[\"country\"]}: {row[\"c\"]} locations')
+print(f'Total: {conn.execute(\"SELECT COUNT(*) as n FROM locations WHERE active=1\").fetchone()[\"n\"]}')
 conn.close()
 " >> "$LOG" 2>&1 || true
 

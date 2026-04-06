@@ -327,6 +327,7 @@ def run_collection(progress_cb=None):
     today = date.today().isoformat()
     all_seen = set()
     total_locations = 0
+    collected_countries = set()
 
     with get_db() as conn:
         country_names = {
@@ -350,6 +351,8 @@ def run_collection(progress_cb=None):
                 conn.commit()
                 log(f"  Chains linked and committed.")
 
+                collected_countries.add(country_code)
+
                 # Pause between countries to avoid rate limiting
                 if i < len(country_list):
                     time.sleep(30)
@@ -357,13 +360,28 @@ def run_collection(progress_cb=None):
                 log(f"  {cname}: FAILED — {e}")
                 logger.error("Failed to collect %s: %s", country_code, e)
 
-        # Final: mark locations not seen in this pull as inactive
-        if all_seen:
-            placeholders = ",".join(["?"] * len(all_seen))
-            conn.execute(
-                f"UPDATE locations SET active = 0 WHERE osm_id NOT IN ({placeholders}) AND active = 1",
-                list(all_seen),
-            )
+        # Only mark inactive for countries we actually collected
+        # This prevents wiping data from countries that were rate-limited
+        if collected_countries:
+            for cc in collected_countries:
+                country_osm_ids = [oid for oid in all_seen]
+                # Get OSM IDs we saw for this country
+                seen_for_country = conn.execute(
+                    "SELECT osm_id FROM locations WHERE country = ? AND osm_id IN ({})".format(
+                        ",".join(["?"] * len(all_seen))
+                    ),
+                    [cc] + list(all_seen),
+                ).fetchall()
+                seen_ids_country = {r["osm_id"] for r in seen_for_country}
+
+                if seen_ids_country:
+                    # Mark locations in this country that we didn't see as inactive
+                    placeholders = ",".join(["?"] * len(seen_ids_country))
+                    conn.execute(
+                        f"UPDATE locations SET active = 0 WHERE country = ? AND osm_id NOT IN ({placeholders}) AND active = 1",
+                        [cc] + list(seen_ids_country),
+                    )
+            log(f"Updated active status for {len(collected_countries)} countries")
 
         # Final chain assignment (catches any stragglers)
         log("Final chain normalization...")
