@@ -226,3 +226,4 @@ LREOF
 else
     : # No changes — silent
 fi
+# trigger deploy with fixed port
