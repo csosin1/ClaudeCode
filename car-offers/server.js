@@ -877,6 +877,15 @@ app.get('/api/auto-run', async (_req, res) => {
   }
 });
 
+// --- Last Carvana run result (full wizardLog for diagnostics) ---
+app.get('/api/last-run', (_req, res) => {
+  if (!selfTest.lastCarvanaRun) {
+    return res.json({ status: 'pending', message: 'No Carvana run completed yet. Check back in 2-5 minutes.' });
+  }
+  // Return full result including wizardLog
+  res.json(selfTest.lastCarvanaRun);
+});
+
 // --- Retest proxy endpoint ---
 app.get('/api/retest-proxy', async (_req, res) => {
   res.json({ ok: true, message: 'Proxy retest started. Check /car-offers/api/status in 20-30s.' });
