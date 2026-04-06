@@ -277,17 +277,23 @@ SVCEOF
 LREOF
             touch /opt/.gym_intelligence_logs_initialized
         fi
-        # Test: verify Overpass API works from droplet (re-run each deploy until success)
-        if [ -f /opt/gym-intelligence/test_collect.py ] && ! grep -q '"status": "success"' /opt/gym-intelligence/test_results.json 2>/dev/null; then
-            echo "$(date): Running gym-intelligence Overpass API test..." >> "$LOG"
-            cd /opt/gym-intelligence
-            /opt/gym-intelligence/venv/bin/python test_collect.py >> "$LOG" 2>&1
-            # Copy results to web-accessible location
-            if [ -f /opt/gym-intelligence/test_results.json ]; then
-                cp /opt/gym-intelligence/test_results.json /var/www/landing/gym-test.json
-                echo "$(date): Test results at /gym-test.json" >> "$LOG"
+        # Test + collect: run until DB is populated
+        if [ -f /opt/gym-intelligence/test_collect.py ]; then
+            # Check if DB already has data
+            GYM_COUNT=$(/opt/gym-intelligence/venv/bin/python -c "
+from db import get_connection
+c = get_connection()
+r = c.execute('SELECT COUNT(*) as n FROM locations WHERE active=1').fetchone()
+print(r['n'])
+c.close()
+" 2>/dev/null || echo "0")
+            if [ "$GYM_COUNT" -lt 10 ]; then
+                echo "$(date): Running gym data collection (currently $GYM_COUNT locations)..." >> "$LOG"
+                rm -f /opt/gym-intelligence/test_results.json
+                cd /opt/gym-intelligence
+                /opt/gym-intelligence/venv/bin/python test_collect.py >> "$LOG" 2>&1
+                echo "$(date): Collection script finished." >> "$LOG"
             fi
-            echo "$(date): Overpass test complete." >> "$LOG"
         fi
     fi
 
