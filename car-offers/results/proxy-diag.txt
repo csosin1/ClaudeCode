@@ -1,0 +1,135 @@
+=== Startup Results ===
+{
+    "proxyResult": {
+        "ok": true,
+        "ip": "90.77.99.179",
+        "method": "curl",
+        "port": "10001"
+    },
+    "proxyTestedAt": "2026-04-06T19:00:28.678Z",
+    "startedAt": "2026-04-06T19:00:17.922Z",
+    "lastCarvanaRun": null,
+    "networkDiag": {
+        "timestamp": "2026-04-06T19:00:22.944Z",
+        "tests": {
+            "dns_resolve": {
+                "ok": true,
+                "output": "dataroute0.com.\n37.19.211.193\n149.88.97.66\n37.19.211.219\n169.150.204.216\n89.222.99.194\n138.199.35.66\n212.11.41.34"
+            },
+            "tcp_proxy": {
+                "ok": true,
+                "output": "TCP OK"
+            },
+            "curl_httpbin_proxy": {
+                "ok": true,
+                "output": "{\n  \"origin\": \"90.77.99.179\"\n}"
+            },
+            "curl_decodo_proxy": {
+                "ok": true,
+                "output": "{\n    \"browser\": {\n        \"name\": \"curl\",\n        \"version\": \"8.5.0\"\n    },\n    \"platform\": {\n        \"name\": \"\",\n        \"os\": \"\",\n        \"type\": \"desktop\"\n    },\n    \"engine\": {\n        \"name\": \"\",\n        \"version\": \"\"\n    },\n    \"isp\": {\n        \"asn\": 12479,\n        \"isp\": \"Orange Espana\",\n        \"organization\": \"Orange Espana\",\n        \"domain\": \"\"\n    },\n    \"city\": {\n        \"name\": \"Villacarrillo\",\n        \"code\": \"AN\",\n        \"zip_code\": \"23300\",\n        \"state\": \"Andalusia\",\n     "
+            },
+            "curl_httpbin_direct": {
+                "ok": true,
+                "output": "{\n  \"origin\": \"159.223.127.125\"\n}"
+            },
+            "curl_example_proxy": {
+                "ok": true,
+                "output": "<!doctype html><html lang=\"en\"><head><title>Example Domain</title><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><style>body{background:#eee;width:60vw;margin:15vh auto;font-family:system-ui,sans-serif}h1{font-size:1.5em}div{opacity:0.8}a:link,a:visited{color:#348}</style></head><body><div><h1>Example Domain</h1><p>This domain is for use in documentation examples without needing permission. Avoid use in operations.</p><p><a href=\"https://iana.org/domains/example\">Learn more<"
+            },
+            "curl_session_proxy": {
+                "ok": true,
+                "output": "Access denied. We couldn't log you in with the details provided. Please confirm your username and password and try again."
+            }
+        }
+    },
+    "networkDiagAt": "2026-04-06T19:00:22.944Z"
+}
+
+=== Debug Config ===
+{
+    "timestamp": "2026-04-06T19:00:56.071Z",
+    "proxy_host": "gate.decodo.com",
+    "proxy_port": "10001",
+    "proxy_user": "spjax0kgms",
+    "proxy_pass_set": true,
+    "proxy_pass_length": 18,
+    "project_email": "(not set)",
+    "node_version": "v22.22.2",
+    "uptime_seconds": 38
+}
+
+=== Status ===
+{
+    "service": {
+        "startedAt": "2026-04-06T19:00:17.922Z",
+        "uptime_seconds": 38,
+        "node_version": "v22.22.2"
+    },
+    "proxy": {
+        "configured": true,
+        "host": "gate.decodo.com",
+        "port": "10001",
+        "user": "spjax0kgms",
+        "pass_set": true,
+        "pass_length": 18,
+        "test_result": {
+            "ok": true,
+            "ip": "90.77.99.179",
+            "method": "curl",
+            "port": "10001"
+        },
+        "tested_at": "2026-04-06T19:00:28.678Z"
+    },
+    "networkDiag": {
+        "timestamp": "2026-04-06T19:00:22.944Z",
+        "tests": {
+            "dns_resolve": {
+                "ok": true,
+                "output": "dataroute0.com.\n37.19.211.193\n149.88.97.66\n37.19.211.219\n169.150.204.216\n89.222.99.194\n138.199.35.66\n212.11.41.34"
+            },
+            "tcp_proxy": {
+                "ok": true,
+                "output": "TCP OK"
+            },
+            "curl_httpbin_proxy": {
+                "ok": true,
+                "output": "{\n  \"origin\": \"90.77.99.179\"\n}"
+            },
+            "curl_decodo_proxy": {
+                "ok": true,
+                "output": "{\n    \"browser\": {\n        \"name\": \"curl\",\n        \"version\": \"8.5.0\"\n    },\n    \"platform\": {\n        \"name\": \"\",\n        \"os\": \"\",\n        \"type\": \"desktop\"\n    },\n    \"engine\": {\n        \"name\": \"\",\n        \"version\": \"\"\n    },\n    \"isp\": {\n        \"asn\": 12479,\n        \"isp\": \"Orange Espana\",\n        \"organization\": \"Orange Espana\",\n        \"domain\": \"\"\n    },\n    \"city\": {\n        \"name\": \"Villacarrillo\",\n        \"code\": \"AN\",\n        \"zip_code\": \"23300\",\n        \"state\": \"Andalusia\",\n     "
+            },
+            "curl_httpbin_direct": {
+                "ok": true,
+                "output": "{\n  \"origin\": \"159.223.127.125\"\n}"
+            },
+            "curl_example_proxy": {
+                "ok": true,
+                "output": "<!doctype html><html lang=\"en\"><head><title>Example Domain</title><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><style>body{background:#eee;width:60vw;margin:15vh auto;font-family:system-ui,sans-serif}h1{font-size:1.5em}div{opacity:0.8}a:link,a:visited{color:#348}</style></head><body><div><h1>Example Domain</h1><p>This domain is for use in documentation examples without needing permission. Avoid use in operations.</p><p><a href=\"https://iana.org/domains/example\">Learn more<"
+            },
+            "curl_session_proxy": {
+                "ok": true,
+                "output": "Access denied. We couldn't log you in with the details provided. Please confirm your username and password and try again."
+            }
+        }
+    },
+    "networkDiagAt": "2026-04-06T19:00:22.944Z",
+    "workingPort": null,
+    "lastCarvanaRun": null
+}
+
+=== Browser Diagnostic ===
+{
+    "ok": true,
+    "steps": [
+        "Loading playwright...",
+        "Checking chromium executable...",
+        "Executable: /root/.cache/ms-playwright/chromium-1217/chrome-linux64/chrome",
+        "Exists: true",
+        "Launching headless Chromium (no proxy)...",
+        "Browser launched OK",
+        "Page created OK",
+        "Page loaded: test",
+        "Browser closed OK"
+    ]
+}
