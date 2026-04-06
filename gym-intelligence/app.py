@@ -3,14 +3,74 @@
 import csv
 import io
 import json
+import os
 import subprocess
 import sys
 import threading
 from datetime import date
+from pathlib import Path
 
-import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
+# ---------------------------------------------------------------------------
+# .env loading — find the .env file (works in /opt/gym-intelligence/ or dev)
+# ---------------------------------------------------------------------------
+ENV_PATH = Path("/opt/gym-intelligence/.env")
+if not ENV_PATH.exists():
+    # Fallback to local .env for development
+    ENV_PATH = Path(__file__).parent / ".env"
+
+
+def _load_env():
+    """Load key=value pairs from .env file into os.environ."""
+    if ENV_PATH.exists():
+        for line in ENV_PATH.read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            os.environ[key.strip()] = value.strip()
+
+
+def _save_env_key(key: str, value: str):
+    """Write or update a single key in the .env file."""
+    lines = []
+    found = False
+    if ENV_PATH.exists():
+        for line in ENV_PATH.read_text().splitlines():
+            stripped = line.strip()
+            if stripped.startswith(f"{key}=") or stripped == f"{key}=":
+                lines.append(f"{key}={value}")
+                found = True
+            else:
+                lines.append(line)
+    if not found:
+        lines.append(f"{key}={value}")
+    # Ensure parent directory exists (for dev mode)
+    ENV_PATH.parent.mkdir(parents=True, exist_ok=True)
+    ENV_PATH.write_text("\n".join(lines) + "\n")
+    os.environ[key] = value
+
+
+def _get_api_key() -> str:
+    """Return the current ANTHROPIC_API_KEY or empty string."""
+    _load_env()
+    return os.environ.get("ANTHROPIC_API_KEY", "").strip()
+
+
+# Load env on startup
+_load_env()
+
+# ---------------------------------------------------------------------------
+# Lazy imports for heavy dependencies that may not be installed yet
+# ---------------------------------------------------------------------------
+try:
+    import pandas as pd
+    import plotly.express as px
+    import plotly.graph_objects as go
+except ImportError:
+    pd = None
+    px = None
+    go = None
+
 import streamlit as st
 
 from db import COUNTRY_NAMES, get_connection, init_db
@@ -24,13 +84,23 @@ st.set_page_config(
 init_db()
 
 # ---------------------------------------------------------------------------
-# Navigation
+# Navigation — include Setup page
 # ---------------------------------------------------------------------------
+PAGES = ["Market Overview", "Chain Explorer", "Competitive Analysis", "Admin / Refresh", "Setup"]
 page = st.selectbox(
     "Navigate",
-    ["Market Overview", "Chain Explorer", "Competitive Analysis", "Admin / Refresh"],
+    PAGES,
     label_visibility="collapsed",
 )
+
+# ---------------------------------------------------------------------------
+# Show API key warning on non-Setup pages if key is missing
+# ---------------------------------------------------------------------------
+if page != "Setup" and not _get_api_key():
+    st.warning(
+        "ANTHROPIC_API_KEY is not set. AI-powered features (classification, analysis) "
+        "will not work. Go to the **Setup** page to configure it."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -197,9 +267,53 @@ def get_last_refresh():
 
 
 # ---------------------------------------------------------------------------
+# Page: Setup (API key configuration)
+# ---------------------------------------------------------------------------
+if page == "Setup":
+    st.title("Setup")
+    st.markdown(
+        "Configure secrets and API keys for Gym Intelligence. "
+        "These are stored on the server in `/opt/gym-intelligence/.env` and are "
+        "**never** sent back to the browser."
+    )
+
+    current_key = _get_api_key()
+    key_status = "Set" if current_key else "Not set"
+    key_masked = f"{current_key[:8]}...{current_key[-4:]}" if len(current_key) > 12 else ("(empty)" if not current_key else "***")
+
+    st.subheader("Anthropic API Key")
+    st.metric("Status", key_status)
+    st.text(f"Current: {key_masked}")
+
+    with st.form("api_key_form"):
+        new_key = st.text_input(
+            "ANTHROPIC_API_KEY",
+            type="password",
+            placeholder="sk-ant-api03-...",
+            help="Enter your Anthropic API key. Required for AI classification and quarterly analysis.",
+        )
+        submitted = st.form_submit_button("Save API Key", use_container_width=True, type="primary")
+
+        if submitted:
+            if new_key and new_key.strip():
+                _save_env_key("ANTHROPIC_API_KEY", new_key.strip())
+                st.success("API key saved successfully. AI features are now enabled.")
+                st.rerun()
+            else:
+                st.error("Please enter a valid API key.")
+
+    st.divider()
+    st.subheader("Server Info")
+    st.text(f"Python: {sys.version}")
+    st.text(f"Working dir: {os.getcwd()}")
+    st.text(f"Env file: {ENV_PATH}")
+    st.text(f"Env file exists: {ENV_PATH.exists()}")
+
+
+# ---------------------------------------------------------------------------
 # Page 1: Market Overview
 # ---------------------------------------------------------------------------
-if page == "Market Overview":
+elif page == "Market Overview":
     st.title("Market Overview")
 
     dates = load_snapshot_dates()
@@ -230,6 +344,10 @@ if page == "Market Overview":
     data = load_market_data(selected_date, country_param, min_locs)
     if not data:
         st.info("No direct competitor data for this selection.")
+        st.stop()
+
+    if pd is None:
+        st.error("pandas/plotly not installed. Charts unavailable.")
         st.stop()
 
     # Group small chains as "Other"
@@ -306,6 +424,10 @@ elif page == "Chain Explorer":
     detail = load_chain_detail(selected_chain)
     if not detail:
         st.error("Chain not found.")
+        st.stop()
+
+    if pd is None:
+        st.error("pandas/plotly not installed. Charts unavailable.")
         st.stop()
 
     # Profile card
