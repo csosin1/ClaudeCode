@@ -25,29 +25,21 @@ jobs:
           with open("d.html") as f: html=f.read()
           with open("deploy/dashboard_check.txt","w") as o:
               o.write(f"Size: {len(html)}\n\n")
-              # Check what tabs exist for 2020-P1
-              tabs_match = re.search(r'id="2020_P1_Documents"', html)
-              o.write(f"Documents tab exists for 2020-P1: {bool(tabs_match)}\n")
-              # List all tab buttons for 2020-P1
-              buttons = re.findall(r'onclick="showTab\(\'2020_P1_([^\']+)\'', html)
-              o.write(f"2020-P1 tabs: {buttons}\n")
-              # Check for docs directory links
+              tabs = re.findall(r'onclick="showTab\(\'2020_P1_([^\']+)\'', html)
+              o.write(f"2020-P1 tabs: {tabs}\n")
+              o.write(f"'Documents' in HTML: {'Documents' in html}\n")
+              o.write(f"'Servicer Certificates' in HTML: {'Servicer Certificates' in html}\n")
+              o.write(f"'Prospectus' in HTML: {'Prospectus' in html}\n")
               doc_links = re.findall(r'href="docs/[^"]*"', html)
-              o.write(f"Doc links found: {len(doc_links)}\n")
-              for dl in doc_links[:10]:
-                  o.write(f"  {dl}\n")
-              # Check for SEC filing links
-              sec_links = re.findall(r'href="https://www\.sec\.gov[^"]*"', html)
-              o.write(f"SEC links: {len(sec_links)}\n")
-              # Check for "Servicer Certificates" text
-              o.write(f"'Servicer Certificates' in page: {'Servicer Certificates' in html}\n")
-              o.write(f"'Documents' in page: {'Documents' in html}\n")
-              o.write(f"'Prospectus' in page: {'Prospectus' in html}\n")
-              # Check if docs/ PDFs are accessible
-              import subprocess
-              r = subprocess.run(["curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
-                  "http://159.223.127.125/CarvanaLoanDashBoard/preview/docs/2020-P1/"], capture_output=True, text=True)
-              o.write(f"\nDocs dir HTTP status: {r.stdout}\n")
+              o.write(f"Local doc links: {len(doc_links)}\n")
+              sec_links = re.findall(r'SEC.Filing|EDGAR', html)
+              o.write(f"SEC/EDGAR link count: {len(sec_links)}\n")
+              # Show first 500 chars of Documents section
+              doc_match = re.search(r'id="2020_P1_Documents".*?(?=<div id="|$)', html, re.DOTALL)
+              if doc_match:
+                  o.write(f"\n2020-P1 Documents section (first 500 chars):\n{doc_match.group(0)[:500]}\n")
+              else:
+                  o.write(f"\nNo Documents section found for 2020-P1\n")
           PYEOF
 
       - name: Commit
@@ -55,4 +47,4 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add deploy/dashboard_check.txt
-          git diff --cached --quiet || (git commit -m "QA check - documents tab" && git push)
+          git diff --cached --quiet || (git commit -m "QA check - docs tab v2" && git push)
