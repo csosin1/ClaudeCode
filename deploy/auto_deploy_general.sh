@@ -178,7 +178,6 @@ LREOF
     fi
 
     # === STEP 4: LIGHTWEIGHT DIAGNOSTICS ===
-    # Minimal health check — just enough for QA to verify server state
     mkdir -p /var/www/landing
     {
         echo "{"
@@ -188,39 +187,6 @@ LREOF
         echo "  \"port_3100\": $(ss -tlnp | grep -q ':3100' && echo true || echo false)"
         echo "}"
     } > /var/www/landing/debug.json
-
-    # === STEP 5: AUTO-TEST (proxy + carvana, one-shot, background) ===
-    rm -f /opt/.car_offers_autotest*
-    if [ ! -f /opt/.car_offers_portfix_test ]; then
-        (
-            # Wait for service to be ready
-            sleep 15
-            for i in 1 2 3 4 5; do
-                curl -sf http://127.0.0.1:3100/ > /dev/null 2>&1 && break
-                sleep 5
-            done
-
-            echo "$(date): Auto-test: testing proxy..." >> "$LOG"
-            PROXY_RESULT=$(curl -sf http://127.0.0.1:3100/api/test-proxy --max-time 30 2>&1)
-            echo "$PROXY_RESULT" > /var/www/landing/proxy-test.json
-            echo "$(date): Proxy test result: $PROXY_RESULT" >> "$LOG"
-
-            # Only run Carvana if proxy works
-            if echo "$PROXY_RESULT" | grep -q '"ok":true'; then
-                echo "$(date): Auto-test: proxy OK, running Carvana test..." >> "$LOG"
-                CARVANA_RESULT=$(curl -sf -X POST http://127.0.0.1:3100/api/carvana \
-                    -H 'Content-Type: application/json' \
-                    -d '{"vin":"1HGCV2F9XNA008352","mileage":"48000","zip":"06880"}' \
-                    --max-time 200 2>&1)
-                echo "$CARVANA_RESULT" > /var/www/landing/carvana-result.json
-                echo "$(date): Carvana test result: $CARVANA_RESULT" >> "$LOG"
-            else
-                echo "$(date): Auto-test: proxy FAILED, skipping Carvana." >> "$LOG"
-                echo "$PROXY_RESULT" > /var/www/landing/carvana-result.json
-            fi
-            touch /opt/.car_offers_portfix_test
-        ) &
-    fi
 
     echo "$(date): Deploy complete." >> "$LOG"
 else

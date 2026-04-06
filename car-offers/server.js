@@ -397,6 +397,23 @@ app.get('/', (_req, res) => {
 </html>`);
 });
 
+// --- Debug endpoint (returns server state for QA) ---
+app.get('/api/debug', (_req, res) => {
+  try { config.reloadConfig(); } catch (_) {}
+  const info = {
+    timestamp: new Date().toISOString(),
+    proxy_host: config.PROXY_HOST,
+    proxy_port: config.PROXY_PORT,
+    proxy_user: config.PROXY_USER,
+    proxy_pass_set: !!config.PROXY_PASS,
+    proxy_pass_length: (config.PROXY_PASS || '').length,
+    project_email: config.PROJECT_EMAIL || '(not set)',
+    node_version: process.version,
+    uptime_seconds: Math.floor(process.uptime()),
+  };
+  res.json(info);
+});
+
 // --- Proxy test endpoint ---
 app.get('/api/test-proxy', async (_req, res) => {
   try { config.reloadConfig(); } catch (_) {}
