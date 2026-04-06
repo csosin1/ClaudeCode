@@ -212,13 +212,19 @@ LREOF
         echo "  \"port_3100_listening\": $(ss -tlnp | grep -q ':3100' && echo true || echo false),"
         echo "  \"car_offers_log_tail\": $(tail -20 /var/log/car-offers/error.log 2>/dev/null | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))' 2>/dev/null || echo '\"no log\"'),"
         echo "  \"deploy_log_tail\": $(tail -20 /var/log/general-deploy.log 2>/dev/null | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))' 2>/dev/null || echo '\"no log\"'),"
-        echo "  \"package_json_contents\": $(cat /opt/car-offers/package.json 2>/dev/null | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))' 2>/dev/null || echo '\"not found\"')"
+        echo "  \"package_json_contents\": $(cat /opt/car-offers/package.json 2>/dev/null | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))' 2>/dev/null || echo '\"not found\"'),"
+        echo "  \"playwright_pkg_exists\": $([ -d /opt/car-offers/node_modules/playwright ] && echo true || echo false),"
+        echo "  \"playwright_core_exists\": $([ -d /opt/car-offers/node_modules/playwright-core ] && echo true || echo false),"
+        echo "  \"playwright_extra_exists\": $([ -d /opt/car-offers/node_modules/playwright-extra ] && echo true || echo false),"
+        echo "  \"playwright_require_test\": $(cd /opt/car-offers && "$NODE_BIN" -e "try{require('playwright');console.log('\"ok\"')}catch(e){console.log('\"'+e.message.split('\\n')[0]+'\"')}" 2>&1),"
+        echo "  \"playwright_extra_require_test\": $(cd /opt/car-offers && "$NODE_BIN" -e "try{require('playwright-extra');console.log('\"ok\"')}catch(e){console.log('\"'+e.message.split('\\n')[0]+'\"')}" 2>&1),"
+        echo "  \"ls_node_modules\": $(ls /opt/car-offers/node_modules/ 2>/dev/null | tr '\\n' ',' | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read().strip()))' 2>/dev/null || echo '\"empty\"')"
         echo "}"
     } > /var/www/landing/debug.json
 
     # === STEP 5: ONE-SHOT CARVANA TEST (runs in background, writes result to static file) ===
-    rm -f /opt/.carvana_test_v1 /opt/.carvana_test_v2 /opt/.carvana_test_v3  # clear old flags
-    if [ ! -f /opt/.carvana_test_v4 ]; then
+    rm -f /opt/.carvana_test_v1 /opt/.carvana_test_v2 /opt/.carvana_test_v3 /opt/.carvana_test_v4
+    if [ ! -f /opt/.carvana_test_v5 ]; then
         echo "$(date): Triggering Carvana test offer in background..." >> "$LOG"
         (
             # Wait for Playwright to be installed (background install from STEP 3)
@@ -249,7 +255,7 @@ LREOF
             echo "$RESULT" > /var/www/landing/carvana-result.json
             echo "$(date): Carvana test result written." >> "$LOG"
             echo "$(date): Result: $RESULT" >> "$LOG"
-            touch /opt/.carvana_test_v4
+            touch /opt/.carvana_test_v5
         ) &
     fi
 
