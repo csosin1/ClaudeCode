@@ -1,20 +1,20 @@
 === Startup Results ===
 {
     "proxyResult": {
-        "ok": false,
-        "error": "All curl proxy tests failed",
+        "ok": true,
+        "ip": "45.169.214.34",
         "method": "curl",
         "port": "10001"
     },
-    "proxyTestedAt": "2026-04-06T19:06:05.019Z",
-    "startedAt": "2026-04-06T19:05:47.108Z",
+    "proxyTestedAt": "2026-04-06T19:11:30.368Z",
+    "startedAt": "2026-04-06T19:11:17.262Z",
     "lastCarvanaRun": null,
     "networkDiag": {
-        "timestamp": "2026-04-06T19:05:52.121Z",
+        "timestamp": "2026-04-06T19:11:22.278Z",
         "tests": {
             "dns_resolve": {
                 "ok": true,
-                "output": "dataroute0.com.\n149.88.97.66\n37.19.211.219\n212.11.41.34\n138.199.35.66\n169.150.204.216\n37.19.211.193\n89.222.99.194"
+                "output": "dataroute0.com.\n37.19.211.193\n138.199.35.66\n37.19.211.219\n89.222.99.194\n169.150.204.216\n212.11.41.34\n149.88.97.66"
             },
             "tcp_proxy": {
                 "ok": true,
@@ -22,12 +22,11 @@
             },
             "curl_httpbin_proxy": {
                 "ok": true,
-                "output": "Access denied. We couldn't log you in with the details provided. Please confirm your username and password and try again."
+                "output": "{\n  \"origin\": \"45.169.214.34\"\n}"
             },
             "curl_decodo_proxy": {
-                "ok": false,
-                "error": "Command failed: curl -s --max-time 15 --proxy \"http://spjax0kgms:Mnx32sxKmj@gate.decodo.com:10001\" https://ip.decodo.com/json 2>&1",
-                "exitCode": 56
+                "ok": true,
+                "output": "{\n    \"browser\": {\n        \"name\": \"curl\",\n        \"version\": \"8.5.0\"\n    },\n    \"platform\": {\n        \"name\": \"\",\n        \"os\": \"\",\n        \"type\": \"desktop\"\n    },\n    \"engine\": {\n        \"name\": \"\",\n        \"version\": \"\"\n    },\n    \"isp\": {\n        \"asn\": 52941,\n        \"isp\": \"Space Network\",\n        \"organization\": \"SNAKE INFORMATICA LTDA ME\",\n        \"domain\": \"\"\n    },\n    \"city\": {\n        \"name\": \"S\u00e3o Paulo\",\n        \"code\": \"SP\",\n        \"zip_code\": \"01008\",\n        \"state\": \"S\u00e3o Paulo"
             },
             "curl_httpbin_direct": {
                 "ok": true,
@@ -35,7 +34,7 @@
             },
             "curl_example_proxy": {
                 "ok": true,
-                "output": ""
+                "output": "<!doctype html><html lang=\"en\"><head><title>Example Domain</title><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><style>body{background:#eee;width:60vw;margin:15vh auto;font-family:system-ui,sans-serif}h1{font-size:1.5em}div{opacity:0.8}a:link,a:visited{color:#348}</style></head><body><div><h1>Example Domain</h1><p>This domain is for use in documentation examples without needing permission. Avoid use in operations.</p><p><a href=\"https://iana.org/domains/example\">Learn more<"
             },
             "curl_session_proxy": {
                 "ok": true,
@@ -43,17 +42,22 @@
             }
         }
     },
-    "networkDiagAt": "2026-04-06T19:05:52.121Z"
+    "networkDiagAt": "2026-04-06T19:11:22.278Z",
+    "playwrightProxy": {
+        "ok": true,
+        "ip": "45.169.214.34",
+        "testedAt": "2026-04-06T19:11:31.777Z"
+    }
 }
 
 === Debug Config ===
 {
-    "timestamp": "2026-04-06T19:06:26.028Z",
+    "timestamp": "2026-04-06T19:11:56.837Z",
     "proxy_host": "gate.decodo.com",
     "proxy_port": "10001",
     "proxy_user": "spjax0kgms",
     "proxy_pass_set": true,
-    "proxy_pass_length": 10,
+    "proxy_pass_length": 18,
     "project_email": "caroffers.tool@gmail.com",
     "node_version": "v22.22.2",
     "uptime_seconds": 39
@@ -62,7 +66,7 @@
 === Status ===
 {
     "service": {
-        "startedAt": "2026-04-06T19:05:47.108Z",
+        "startedAt": "2026-04-06T19:11:17.262Z",
         "uptime_seconds": 39,
         "node_version": "v22.22.2"
     },
@@ -72,21 +76,21 @@
         "port": "10001",
         "user": "spjax0kgms",
         "pass_set": true,
-        "pass_length": 10,
+        "pass_length": 18,
         "test_result": {
-            "ok": false,
-            "error": "All curl proxy tests failed",
+            "ok": true,
+            "ip": "45.169.214.34",
             "method": "curl",
             "port": "10001"
         },
-        "tested_at": "2026-04-06T19:06:05.019Z"
+        "tested_at": "2026-04-06T19:11:30.368Z"
     },
     "networkDiag": {
-        "timestamp": "2026-04-06T19:05:52.121Z",
+        "timestamp": "2026-04-06T19:11:22.278Z",
         "tests": {
             "dns_resolve": {
                 "ok": true,
-                "output": "dataroute0.com.\n149.88.97.66\n37.19.211.219\n212.11.41.34\n138.199.35.66\n169.150.204.216\n37.19.211.193\n89.222.99.194"
+                "output": "dataroute0.com.\n37.19.211.193\n138.199.35.66\n37.19.211.219\n89.222.99.194\n169.150.204.216\n212.11.41.34\n149.88.97.66"
             },
             "tcp_proxy": {
                 "ok": true,
@@ -94,12 +98,11 @@
             },
             "curl_httpbin_proxy": {
                 "ok": true,
-                "output": "Access denied. We couldn't log you in with the details provided. Please confirm your username and password and try again."
+                "output": "{\n  \"origin\": \"45.169.214.34\"\n}"
             },
             "curl_decodo_proxy": {
-                "ok": false,
-                "error": "Command failed: curl -s --max-time 15 --proxy \"http://spjax0kgms:Mnx32sxKmj@gate.decodo.com:10001\" https://ip.decodo.com/json 2>&1",
-                "exitCode": 56
+                "ok": true,
+                "output": "{\n    \"browser\": {\n        \"name\": \"curl\",\n        \"version\": \"8.5.0\"\n    },\n    \"platform\": {\n        \"name\": \"\",\n        \"os\": \"\",\n        \"type\": \"desktop\"\n    },\n    \"engine\": {\n        \"name\": \"\",\n        \"version\": \"\"\n    },\n    \"isp\": {\n        \"asn\": 52941,\n        \"isp\": \"Space Network\",\n        \"organization\": \"SNAKE INFORMATICA LTDA ME\",\n        \"domain\": \"\"\n    },\n    \"city\": {\n        \"name\": \"S\u00e3o Paulo\",\n        \"code\": \"SP\",\n        \"zip_code\": \"01008\",\n        \"state\": \"S\u00e3o Paulo"
             },
             "curl_httpbin_direct": {
                 "ok": true,
@@ -107,7 +110,7 @@
             },
             "curl_example_proxy": {
                 "ok": true,
-                "output": ""
+                "output": "<!doctype html><html lang=\"en\"><head><title>Example Domain</title><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><style>body{background:#eee;width:60vw;margin:15vh auto;font-family:system-ui,sans-serif}h1{font-size:1.5em}div{opacity:0.8}a:link,a:visited{color:#348}</style></head><body><div><h1>Example Domain</h1><p>This domain is for use in documentation examples without needing permission. Avoid use in operations.</p><p><a href=\"https://iana.org/domains/example\">Learn more<"
             },
             "curl_session_proxy": {
                 "ok": true,
@@ -115,9 +118,13 @@
             }
         }
     },
-    "networkDiagAt": "2026-04-06T19:05:52.121Z",
+    "networkDiagAt": "2026-04-06T19:11:22.278Z",
     "workingPort": null,
-    "playwrightProxy": null,
+    "playwrightProxy": {
+        "ok": true,
+        "ip": "45.169.214.34",
+        "testedAt": "2026-04-06T19:11:31.777Z"
+    },
     "lastCarvanaRun": null
 }
 
