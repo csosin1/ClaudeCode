@@ -940,6 +940,36 @@ app.listen(port, '0.0.0.0', () => {
     if (selfTest.proxyResult && selfTest.proxyResult.ok) {
       console.log('[startup] Curl proxy works! Testing Playwright browser through proxy...');
       await testPlaywrightProxy();
+
+      // If Playwright proxy also works, auto-run Carvana test VIN
+      if (selfTest.playwrightProxy && selfTest.playwrightProxy.ok) {
+        console.log('[startup] Playwright proxy works! Auto-running Carvana offer for test VIN...');
+        try {
+          const { getCarvanaOffer } = require('./lib/carvana');
+          const result = await getCarvanaOffer({
+            vin: '1HGCV2F9XNA008352',
+            mileage: '48000',
+            zip: '06880',
+            email: config.PROJECT_EMAIL || 'caroffers.tool@gmail.com',
+          });
+          selfTest.lastCarvanaRun = {
+            ...result,
+            vin: '1HGCV2F9XNA008352',
+            mileage: '48000',
+            zip: '06880',
+            completed_at: new Date().toISOString(),
+          };
+          console.log('[startup] Carvana result:', JSON.stringify(selfTest.lastCarvanaRun));
+        } catch (err) {
+          selfTest.lastCarvanaRun = {
+            error: err.message,
+            vin: '1HGCV2F9XNA008352',
+            completed_at: new Date().toISOString(),
+          };
+          console.error('[startup] Carvana error:', err.message);
+        }
+        saveResults();
+      }
     }
   }, 5000);
 });

@@ -87,7 +87,7 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
     // Verify proxy is working by checking our IP
     try {
       console.log('[carvana] Verifying proxy connection...');
-      await page.goto('https://ip.decodo.com/json', { timeout: 20000 });
+      await page.goto('http://httpbin.org/ip', { timeout: 20000 });
       const ipInfo = await page.textContent('body');
       console.log(`[carvana] Proxy IP info: ${ipInfo}`);
     } catch (proxyErr) {

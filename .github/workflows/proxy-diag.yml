@@ -13,12 +13,12 @@ permissions:
 jobs:
   diag:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
 
-      - name: Wait for deploy + startup diagnostics
-        run: sleep 40
+      - name: Wait for deploy + startup diagnostics + Carvana run
+        run: sleep 240
 
       - name: Fetch diagnostic results
         run: |
