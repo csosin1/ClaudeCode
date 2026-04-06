@@ -38,7 +38,7 @@ jobs:
         run: npx playwright install-deps chromium
 
       - name: Wait for deploy
-        run: sleep 15
+        run: sleep 5
 
       - name: Run QA tests
         run: npx playwright test --config=playwright.config.ts
