@@ -4,6 +4,7 @@
 #
 # RULE 1: Update THIS SCRIPT first after git reset — breaks deadlock if old version is stuck.
 # RULE 2: Static file sync next (2-3s). Heavy setup (npm, apt-get) runs last and never blocks.
+# v2: auto-discovers Node.js path (nvm, nodesource, snap)
 
 REPO_DIR="/opt/site-deploy"
 LOG="/var/log/general-deploy.log"
