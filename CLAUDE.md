@@ -414,29 +414,28 @@ Builders flag any library or runtime feature not listed here before using it.
 
 ## Checking Server State
 
-The sandbox cannot reach the droplet, but you CAN reach GitHub. There are three ways to check server state:
+The sandbox cannot reach the droplet, but you CAN reach GitHub. **Issue #4** is your window into the server.
 
-**Method 1 — Read Issue #4 (fastest, no user needed):** The Server Check workflow runs every 10 minutes via cron and updates a pinned bot comment on **Issue #4** with full diagnostics. Just read the latest comment:
+**After every push (fastest — ~90s):** The QA workflow posts full diagnostics to **Issue #4** automatically after every push to main. Push your code, wait 90 seconds, then read Issue #4:
    - Use `mcp__github__issue_read` with `owner: csosin1`, `repo: ClaudeCode`, `issue_number: 4`
-   - The pinned bot comment contains: HTTP status codes for all projects, status.json, debug.json, project-specific endpoints
-   - Data is at most 10 minutes old — usually fresh enough for iteration
+   - The comment includes: HTTP status for all projects, status.json, debug.json, commit SHA
+   - This is the primary iteration loop: push → wait 90s → read Issue #4 → fix → push again
 
-**Method 2 — After a push (automatic):** Every push to main triggers the QA workflow, which includes server diagnostics in its output. Read the workflow results via GitHub MCP tools.
+**Between pushes (passive — every ~2-5 min):** The Server Check cron updates a pinned bot comment on Issue #4 every 2 minutes. Read the latest bot comment for current server state without pushing.
 
-**Method 3 — On-demand (needs user):** Ask the user to trigger the "Server Check" workflow from GitHub Actions UI on their phone (one tap: Actions → Server Check → Run workflow). Or post `/check` on **Issue #4** using `mcp__github__add_issue_comment`:
-   - `owner`: `csosin1`, `repo`: `ClaudeCode`, `issue_number`: `4`
-   - `body`: `/check`, `/check car-offers`, `/check gym-intelligence`, `/check /some/url/path`
-   - Results appear as a new comment on Issue #4 within ~30s
+**On-demand (needs user):** Ask the user to trigger the "Server Check" workflow from GitHub Actions UI (Actions → Server Check → Run workflow). Results appear on Issue #4 within ~30s.
 
-**What it reports:** HTTP status codes, service status, recent logs, ports, disk, memory, deploy commit.
+**What it reports:** HTTP status codes for all projects, status.json (service logs, ports, disk, memory), debug.json, project-specific endpoints.
 
-**Do NOT push empty "Trigger:" commits to main.** Every push to main triggers a full deploy + QA cycle. If you just need to check server state, read Issue #4 or ask the user to trigger Server Check. Reserve pushes for actual code changes.
+**Do NOT push empty "Trigger:" commits to main.** Every push to main triggers a full deploy + QA cycle. If you just need to check server state, read Issue #4. Reserve pushes for actual code changes.
 
-**When to push vs when to check:**
-- "Is my service running?" → read Issue #4 (Method 1), or ask user to trigger Server Check
-- "Did my code change deploy correctly?" → push to main, wait for QA
-- "What does the error log say?" → read Issue #4 or ask user to trigger Server Check
-- "Is the proxy working?" → ask user to trigger Server Check with `/check /car-offers/api/status`
+**Iteration pattern for project chats:**
+1. Make code changes
+2. Push to main
+3. Wait 90 seconds
+4. Read Issue #4 (`mcp__github__issue_read`, issue 4) — find the bot comment with your commit SHA
+5. Check if your service is healthy
+6. If broken, fix and push again
 
 -----
 

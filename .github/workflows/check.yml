@@ -1,19 +1,16 @@
 name: Server Check
 
-# Runs every 10 minutes and on-demand via workflow_dispatch.
-# Writes results to issue #4 as a comment (replaces old pinned comment).
-# Also triggered by issue comments starting with /check.
+# Runs every 2 minutes (passive monitoring) and on-demand via workflow_dispatch.
+# Updates a pinned bot comment on issue #4 with full diagnostics.
 on:
   schedule:
-    - cron: '*/10 * * * *'
+    - cron: '*/2 * * * *'
   workflow_dispatch:
     inputs:
       target:
         description: '"all", "car-offers", "gym-intelligence", or a URL path'
         required: false
         default: 'all'
-  issue_comment:
-    types: [created]
 
 permissions:
   issues: write
@@ -23,11 +20,6 @@ jobs:
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 2
-    # Skip issue_comment events that don't start with /check
-    if: >-
-      github.event_name != 'issue_comment' ||
-      startsWith(github.event.comment.body, '/check')
-
     steps:
       - name: Run server checks
         id: check
@@ -35,19 +27,9 @@ jobs:
           BASE="http://159.223.127.125"
           REPORT="/tmp/server-check-report.md"
 
-          # Parse target
-          TARGET="all"
-          if [ "${{ github.event_name }}" = "issue_comment" ]; then
-            RAW=$(cat <<'BODYEOF'
-          ${{ github.event.comment.body }}
-          BODYEOF
-            )
-            TARGET=$(echo "$RAW" | head -1 | sed 's|^/check||' | xargs)
-            [ -z "$TARGET" ] && TARGET="all"
-          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            TARGET="${{ github.event.inputs.target }}"
-            [ -z "$TARGET" ] && TARGET="all"
-          fi
+          # Parse target from workflow_dispatch input, default to "all"
+          TARGET="${{ github.event.inputs.target }}"
+          [ -z "$TARGET" ] && TARGET="all"
 
           echo "## 🔍 Server Check: \`$TARGET\`" > "$REPORT"
           echo "" >> "$REPORT"
@@ -118,7 +100,7 @@ jobs:
           cat "$REPORT"
           cat "$REPORT" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Post results to issue #4
+      - name: Update pinned comment on issue #4
         if: always()
         uses: actions/github-script@v7
         with:
@@ -131,43 +113,30 @@ jobs:
               console.log('Report file not found:', e.message);
             }
 
-            // For scheduled runs: update the pinned status comment (last bot comment)
-            // For issue_comment: reply on the same issue
             const issueNumber = 4;
 
-            if ('${{ github.event_name }}' === 'schedule') {
-              // Find and update existing bot comment, or create new one
-              const comments = await github.rest.issues.listComments({
+            // Find existing bot comment and update it, or create new one
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              per_page: 100
+            });
+            const botComment = comments.data
+              .filter(c => c.user.login === 'github-actions[bot]')
+              .pop();
+            if (botComment) {
+              await github.rest.issues.updateComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                issue_number: issueNumber,
-                per_page: 100
+                comment_id: botComment.id,
+                body: body
               });
-              const botComment = comments.data
-                .filter(c => c.user.login === 'github-actions[bot]')
-                .pop();
-              if (botComment) {
-                await github.rest.issues.updateComment({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  comment_id: botComment.id,
-                  body: body
-                });
-              } else {
-                await github.rest.issues.createComment({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: issueNumber,
-                  body: body
-                });
-              }
             } else {
-              // For dispatch and issue_comment: always create new comment
-              const targetIssue = context.issue?.number || issueNumber;
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                issue_number: targetIssue,
+                issue_number: issueNumber,
                 body: body
               });
             }
