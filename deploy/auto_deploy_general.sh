@@ -177,7 +177,7 @@ LREOF
         fi
     fi
 
-    # --- gym-intelligence (Streamlit on port 8502) ---
+    # --- gym-intelligence (Flask on port 8502) ---
     if [ -d "$REPO_DIR/gym-intelligence" ]; then
         mkdir -p /opt/gym-intelligence
         mkdir -p /var/log/gym-intelligence
@@ -195,6 +195,14 @@ LREOF
             cat > /opt/gym-intelligence/.env << 'ENVEOF'
 ANTHROPIC_API_KEY=
 ENVEOF
+        fi
+
+        # One-time: migrate from Streamlit to Flask (re-run pip install)
+        if [ -d /opt/gym-intelligence/venv ] && [ ! -f /opt/.gym-intelligence-flask-migrated ]; then
+            echo "$(date): Migrating gym-intelligence from Streamlit to Flask..." >> "$LOG"
+            /opt/gym-intelligence/venv/bin/pip install -r /opt/gym-intelligence/requirements.txt >> "$LOG" 2>&1
+            touch /opt/.gym-intelligence-flask-migrated
+            echo "$(date): Flask migration pip install done." >> "$LOG"
         fi
 
         # One-time: Python venv + pip install
@@ -231,25 +239,31 @@ ENVEOF
             /opt/gym-intelligence/venv/bin/pip install --upgrade pip >> "$LOG" 2>&1
             /opt/gym-intelligence/venv/bin/pip install -r /opt/gym-intelligence/requirements.txt >> "$LOG" 2>&1
 
-            # Verify streamlit installed
-            if /opt/gym-intelligence/venv/bin/python -c "import streamlit" 2>/dev/null; then
+            # Verify flask installed
+            if /opt/gym-intelligence/venv/bin/python -c "import flask" 2>/dev/null; then
                 touch /opt/.gym-intelligence-setup
                 echo "$(date): gym-intelligence venv setup complete." >> "$LOG"
             else
-                echo "$(date): ERROR — gym-intelligence pip install failed (streamlit missing)." >> "$LOG"
+                echo "$(date): ERROR — gym-intelligence pip install failed (flask missing)." >> "$LOG"
             fi
+        fi
+
+        # Re-run pip install if requirements.txt changed
+        if [ "$REPO_DIR/gym-intelligence/requirements.txt" -nt /opt/gym-intelligence/venv/lib/*/site-packages/pip 2>/dev/null ]; then
+            echo "$(date): gym-intelligence requirements changed, re-running pip install..." >> "$LOG"
+            /opt/gym-intelligence/venv/bin/pip install -r /opt/gym-intelligence/requirements.txt >> "$LOG" 2>&1
         fi
 
         # systemd service (always rewrite to pick up changes)
         cat > /etc/systemd/system/gym-intelligence.service << 'SVCEOF'
 [Unit]
-Description=Gym Intelligence (Streamlit on port 8502)
+Description=Gym Intelligence (Flask on port 8502)
 After=network.target
 
 [Service]
 Type=simple
 WorkingDirectory=/opt/gym-intelligence
-ExecStart=/opt/gym-intelligence/venv/bin/python -m streamlit run app.py --server.port=8502 --server.baseUrlPath=/gym-intelligence --server.headless=true --server.enableCORS=false --server.enableXsrfProtection=false
+ExecStart=/opt/gym-intelligence/venv/bin/python app.py
 Restart=always
 RestartSec=5
 Environment=HOME=/root

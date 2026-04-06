@@ -219,11 +219,9 @@ test.describe('Gym Intelligence', () => {
   test('page loads (setup or main)', async ({ page }) => {
     const response = await page.goto('/gym-intelligence/');
     expect(response?.status()).toBe(200);
-    // Streamlit apps take a moment to render — wait for any content
-    await page.waitForTimeout(3000);
     const body = await page.textContent('body');
     expect(
-      body?.includes('Gym Intelligence') || body?.includes('Market Overview') || body?.includes('Setup'),
+      body?.includes('Gym Intelligence') || body?.includes('Market') || body?.includes('Setup'),
       'Page should contain app content'
     ).toBeTruthy();
   });
@@ -232,7 +230,6 @@ test.describe('Gym Intelligence', () => {
     const errors: string[] = [];
     page.on('pageerror', (err) => errors.push(err.message));
     await page.goto('/gym-intelligence/');
-    await page.waitForTimeout(3000);
     expect(errors, 'Gym Intelligence should have no JS errors').toHaveLength(0);
   });
 });
