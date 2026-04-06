@@ -148,19 +148,19 @@ print(f'Total: {conn.execute(\"SELECT COUNT(*) as n FROM locations WHERE active=
 conn.close()
 " >> "$LOG" 2>&1 || true
 
-# Data collection: run until DB is populated
-GYM_COUNT=$("$PROJECT_DIR/venv/bin/python" -c "
-import sys; sys.path.insert(0,'$PROJECT_DIR')
+# Data collection: run if any countries are missing
+COUNTRY_COUNT=$("$PROJECT_DIR/venv/bin/python" -c "
+import sys; sys.path.insert(0, '$PROJECT_DIR')
 from db import get_connection, init_db
 init_db()
 c = get_connection()
-r = c.execute('SELECT COUNT(*) as n FROM locations WHERE active=1').fetchone()
-print(r['n'])
+countries = c.execute('SELECT COUNT(DISTINCT country) as n FROM locations WHERE active=1').fetchone()['n']
+print(countries)
 c.close()
 " 2>/dev/null || echo "0")
 
-if [ "$GYM_COUNT" -lt 10 ] && [ -f "$PROJECT_DIR/test_collect.py" ]; then
-    echo "$(date): Running gym data collection (currently $GYM_COUNT locations)..." >> "$LOG"
+if [ "$COUNTRY_COUNT" -lt 6 ]; then
+    echo "$(date): Only $COUNTRY_COUNT/6 countries collected, running collection..." >> "$LOG"
     cd "$PROJECT_DIR"
     timeout 600 "$PROJECT_DIR/venv/bin/python" test_collect.py >> "$LOG" 2>&1
     echo "$(date): Collection script finished." >> "$LOG"
