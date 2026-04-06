@@ -219,11 +219,9 @@ test.describe('Gym Intelligence', () => {
   test('page loads (setup or main)', async ({ page }) => {
     const response = await page.goto('/gym-intelligence/');
     expect(response?.status()).toBe(200);
-    // Streamlit apps take a moment to render — wait for any content
-    await page.waitForTimeout(3000);
     const body = await page.textContent('body');
     expect(
-      body?.includes('Gym Intelligence') || body?.includes('Market Overview') || body?.includes('Setup'),
+      body?.includes('Gym Intelligence') || body?.includes('Market') || body?.includes('Setup'),
       'Page should contain app content'
     ).toBeTruthy();
   });
@@ -232,8 +230,22 @@ test.describe('Gym Intelligence', () => {
     const errors: string[] = [];
     page.on('pageerror', (err) => errors.push(err.message));
     await page.goto('/gym-intelligence/');
-    await page.waitForTimeout(3000);
     expect(errors, 'Gym Intelligence should have no JS errors').toHaveLength(0);
+  });
+});
+
+test.describe('Car Offers Dashboard', () => {
+  test('dashboard loads', async ({ page }) => {
+    await page.goto('/car-offers/dashboard');
+    await expect(page.locator('h1')).toContainText('Car Offers Dashboard');
+  });
+
+  test('status API returns JSON', async ({ request }) => {
+    const resp = await request.get('/car-offers/api/status');
+    expect(resp.ok()).toBeTruthy();
+    const data = await resp.json();
+    expect(data.service).toBeTruthy();
+    expect(data.proxy).toBeTruthy();
   });
 });
 

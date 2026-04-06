@@ -64,26 +64,27 @@ async function launchBrowser(options = {}) {
     '--disable-sync',
     '--disable-translate',
     '--no-first-run',
-    '--no-zygote',
-    '--single-process',
     '--mute-audio',
+    '--js-flags=--max-old-space-size=256',
   ];
 
   // Build proxy config
+  // Decodo geo-targeting: use port 7000 with user- prefix and country/zip params
+  // Format: user-USERNAME-country-us-zip-ZIPCODE on gate.decodo.com:7000
   let proxyConfig = null;
   if (config.PROXY_HOST && config.PROXY_PASS) {
-    const sessionId = Math.random().toString(36).substring(7);
-    const stickyUsername = config.PROXY_USER ? `${config.PROXY_USER}-session-${sessionId}` : '';
-    const proxyPort = (config.PROXY_PORT === '7000') ? '10001' : (config.PROXY_PORT || '10001');
+    // Port 7000 is the standard Decodo residential rotating endpoint
+    // Ports 10001-10007 work but don't support advanced params
+    const proxyPort = '7000';
+    // user- prefix required when using parameters like country, zip, session
+    const proxyUser = `user-${config.PROXY_USER}-country-us-zip-06880`;
 
     proxyConfig = {
       server: `http://${config.PROXY_HOST}:${proxyPort}`,
+      username: proxyUser,
+      password: config.PROXY_PASS,
     };
-    if (stickyUsername) {
-      proxyConfig.username = stickyUsername;
-      proxyConfig.password = config.PROXY_PASS;
-    }
-    console.log(`[browser] Using proxy: ${config.PROXY_HOST}:${proxyPort}`);
+    console.log(`[browser] Using proxy: ${config.PROXY_HOST}:${proxyPort} user=${proxyUser}`);
   } else {
     console.log('[browser] No proxy configured — using direct connection');
   }
@@ -96,23 +97,11 @@ async function launchBrowser(options = {}) {
     launchOptions.proxy = proxyConfig;
   }
 
-  // Try playwright-extra (stealth) first, fall back to regular playwright
-  let browser;
-  try {
-    browser = await chromium.launch(launchOptions);
-    console.log('[browser] Launched via playwright-extra (stealth)');
-  } catch (stealthErr) {
-    console.warn(`[browser] playwright-extra launch failed: ${stealthErr.message}`);
-    console.log('[browser] Falling back to regular playwright...');
-    try {
-      const pw = require('playwright');
-      browser = await pw.chromium.launch(launchOptions);
-      console.log('[browser] Launched via regular playwright');
-    } catch (fallbackErr) {
-      console.error(`[browser] Regular playwright also failed: ${fallbackErr.message}`);
-      throw new Error(`Browser launch failed. Stealth: ${stealthErr.message}. Fallback: ${fallbackErr.message}`);
-    }
-  }
+  // Use regular playwright (stealth plugin crashes with proxy on port 7000)
+  // US residential IP from Decodo should be sufficient without stealth
+  const pw = require('playwright');
+  const browser = await pw.chromium.launch(launchOptions);
+  console.log('[browser] Launched via regular playwright');
 
   const context = await browser.newContext({
     userAgent: USER_AGENT,

@@ -67,36 +67,38 @@ KNOWN_CHAINS = {
 }
 
 
-def build_overpass_query(country_code: str) -> str:
-    """Build Overpass QL query for gym locations in a country."""
+def build_overpass_queries(country_code: str) -> list[tuple[str, str]]:
+    """Build separate Overpass queries per tag type to avoid 504 timeouts."""
     bbox = COUNTRY_BBOXES[country_code]
     bbox_str = f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}"
-    return f"""
-[out:json][timeout:300];
-(
-  node["leisure"="fitness_centre"]({bbox_str});
-  way["leisure"="fitness_centre"]({bbox_str});
-  node["leisure"="sports_centre"]["name"]({bbox_str});
-  way["leisure"="sports_centre"]["name"]({bbox_str});
-  node["amenity"="gym"]({bbox_str});
-  way["amenity"="gym"]({bbox_str});
-);
-out center body;
-"""
+    return [
+        ("fitness_centre", f'[out:json][timeout:90];(node["leisure"="fitness_centre"]({bbox_str});way["leisure"="fitness_centre"]({bbox_str}););out center body;'),
+        ("sports_centre", f'[out:json][timeout:90];(node["leisure"="sports_centre"]["name"]({bbox_str});way["leisure"="sports_centre"]["name"]({bbox_str}););out center body;'),
+        ("amenity=gym", f'[out:json][timeout:90];(node["amenity"="gym"]({bbox_str});way["amenity"="gym"]({bbox_str}););out center body;'),
+    ]
 
 
-def query_overpass(query: str, max_retries: int = 5) -> dict:
+def query_overpass(query: str, max_retries: int = 5, progress_cb=None) -> dict:
     """Query Overpass API with retry and exponential backoff."""
+    def log(msg):
+        logger.info(msg)
+        if progress_cb:
+            progress_cb(msg)
+
     for attempt in range(max_retries):
         try:
-            logger.info("Overpass query attempt %d/%d", attempt + 1, max_retries)
-            with httpx.Client(timeout=360) as client:
+            log(f"  Querying Overpass API (attempt {attempt + 1}/{max_retries})...")
+            with httpx.Client(timeout=120) as client:
                 resp = client.post(OVERPASS_URL, data={"data": query})
                 resp.raise_for_status()
-                return resp.json()
+                data = resp.json()
+                element_count = len(data.get("elements", []))
+                log(f"  Got {element_count} raw elements from Overpass")
+                return data
         except (httpx.HTTPError, httpx.TimeoutException, json.JSONDecodeError) as e:
-            wait = 2 ** (attempt + 1)
-            logger.warning("Overpass attempt %d failed: %s. Retrying in %ds", attempt + 1, e, wait)
+            is_rate_limit = "429" in str(e)
+            wait = (30 if is_rate_limit else 10) * (attempt + 1)
+            log(f"  Attempt {attempt + 1} failed: {'rate limited' if is_rate_limit else e}. Waiting {wait}s...")
             if attempt < max_retries - 1:
                 time.sleep(wait)
     raise RuntimeError(f"Overpass API failed after {max_retries} attempts")
@@ -191,16 +193,37 @@ def normalize_chain_name(name: str, brand: str | None, operator: str | None) -> 
     return cleaned
 
 
-def collect_country(country_code: str) -> list[dict]:
-    """Collect all gym locations for a country."""
+def collect_country(country_code: str, progress_cb=None) -> list[dict]:
+    """Collect all gym locations for a country using split queries."""
     logger.info("Collecting gyms for %s", country_code)
-    query = build_overpass_query(country_code)
-    data = query_overpass(query)
-    elements = data.get("elements", [])
-    logger.info("Got %d raw elements for %s", len(elements), country_code)
+    queries = build_overpass_queries(country_code)
+    all_elements = []
+    seen_ids = set()
+
+    for tag_label, query in queries:
+        try:
+            data = query_overpass(query, progress_cb=progress_cb)
+            elements = data.get("elements", [])
+            # Deduplicate
+            new = 0
+            for el in elements:
+                eid = el.get("id")
+                if eid not in seen_ids:
+                    seen_ids.add(eid)
+                    all_elements.append(el)
+                    new += 1
+            if progress_cb:
+                progress_cb(f"    {tag_label}: {new} new elements")
+            time.sleep(15)  # Wait between queries to avoid rate limiting
+        except Exception as e:
+            if progress_cb:
+                progress_cb(f"    {tag_label}: FAILED — {e}")
+            logger.error("Query %s failed for %s: %s", tag_label, country_code, e)
+
+    logger.info("Got %d total elements for %s", len(all_elements), country_code)
 
     locations = []
-    for el in elements:
+    for el in all_elements:
         loc = extract_location(el, country_code)
         if loc:
             locations.append(loc)
@@ -290,23 +313,42 @@ def write_snapshots(conn, today: str):
     logger.info("Wrote %d snapshot rows for %s", len(rows), today)
 
 
-def run_collection():
-    """Run the full data collection pipeline."""
+def run_collection(progress_cb=None):
+    """Run the full data collection pipeline.
+
+    progress_cb: optional callable(msg: str) for live progress updates.
+    """
+    def log(msg):
+        logger.info(msg)
+        if progress_cb:
+            progress_cb(msg)
+
     init_db()
     today = date.today().isoformat()
     all_seen = set()
+    total_locations = 0
 
     with get_db() as conn:
-        for country_code in COUNTRY_BBOXES:
+        country_names = {
+            "NL": "Netherlands", "BE": "Belgium", "FR": "France",
+            "ES": "Spain", "LU": "Luxembourg", "DE": "Germany",
+        }
+        country_list = list(COUNTRY_BBOXES.keys())
+        for i, country_code in enumerate(country_list, 1):
+            cname = country_names.get(country_code, country_code)
+            log(f"Collecting {cname} ({i}/{len(country_list)})...")
             try:
-                locations = collect_country(country_code)
+                locations = collect_country(country_code, progress_cb=progress_cb)
                 seen = upsert_locations(conn, locations, today)
                 all_seen.update(seen)
-                logger.info("Upserted %d locations for %s", len(locations), country_code)
+                total_locations += len(locations)
+                log(f"  {cname}: {len(locations)} gyms found ({total_locations} total)")
 
-                # Pause between countries to be kind to Overpass
-                time.sleep(10)
+                # Pause between countries to avoid rate limiting
+                if i < len(country_list):
+                    time.sleep(30)
             except Exception as e:
+                log(f"  {cname}: FAILED — {e}")
                 logger.error("Failed to collect %s: %s", country_code, e)
 
         # Mark locations not seen in this pull as inactive
@@ -318,11 +360,17 @@ def run_collection():
             )
 
         # Assign chains and update counts
+        log("Normalizing chain names...")
         assign_chains(conn)
         update_chain_location_counts(conn)
+
+        chain_count = conn.execute("SELECT COUNT(*) as c FROM chains WHERE location_count > 0").fetchone()["c"]
+        log(f"Identified {chain_count} distinct chains")
+
+        log("Writing snapshots...")
         write_snapshots(conn, today)
 
-    logger.info("Collection complete")
+    log(f"Collection complete: {total_locations} gyms across {len(country_list)} countries")
 
 
 if __name__ == "__main__":

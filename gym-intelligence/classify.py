@@ -184,21 +184,26 @@ Return ONLY valid JSON (no markdown fences) with these exact fields:
         raise ValueError(f"Could not parse classification response: {text}")
 
 
-def run_classification():
+def run_classification(progress_cb=None):
     """Run the classification pipeline."""
+    def log(msg):
+        logger.info(msg)
+        if progress_cb:
+            progress_cb(msg)
+
     init_db()
     client = anthropic.Anthropic()
 
     with get_db() as conn:
         chains = get_chains_to_classify(conn)
-        logger.info("Found %d chains to classify", len(chains))
+        log(f"Found {len(chains)} chains to classify")
 
-        for chain in chains:
+        for i, chain in enumerate(chains, 1):
             chain_id = chain["id"]
             chain_name = chain["canonical_name"]
             location_count = chain["location_count"]
 
-            logger.info("Classifying: %s (%d locations)", chain_name, location_count)
+            log(f"Classifying ({i}/{len(chains)}): {chain_name} ({location_count} locations)")
 
             try:
                 context = get_chain_context(conn, chain_id, chain_name)
@@ -234,17 +239,12 @@ def run_classification():
                     chain_id,
                 ))
 
-                logger.info(
-                    "Classified %s as %s (%s tier)",
-                    chain_name,
-                    result.get("competitive_classification"),
-                    result.get("price_tier"),
-                )
+                log(f"  → {chain_name}: {result.get('competitive_classification')} ({result.get('price_tier')} tier)")
 
             except Exception as e:
-                logger.error("Failed to classify %s: %s", chain_name, e)
+                log(f"  → {chain_name}: FAILED — {e}")
 
-    logger.info("Classification complete")
+    log("Classification complete")
 
 
 if __name__ == "__main__":

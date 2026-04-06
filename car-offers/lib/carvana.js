@@ -3,7 +3,7 @@ const config = require('./config');
 const path = require('path');
 
 const CARVANA_URL = 'https://www.carvana.com/sell-my-car';
-const TOTAL_TIMEOUT = 180_000; // 3 minutes total (proxy adds latency)
+const TOTAL_TIMEOUT = 300_000; // 5 minutes total (IP hunt + proxy latency)
 
 /**
  * Take a timestamped screenshot for debugging.
@@ -24,7 +24,13 @@ async function screenshot(page, label) {
  * Check if the page shows a CAPTCHA or bot-block screen.
  */
 async function isBlocked(page) {
-  const html = await page.content();
+  let html;
+  try {
+    html = await page.content();
+  } catch (err) {
+    console.error(`[carvana] isBlocked check failed (page may have crashed): ${err.message}`);
+    return false; // Can't check — let the flow continue and fail at the next step
+  }
   const blockedIndicators = [
     'perimeterx',
     'px-captcha',
@@ -63,16 +69,17 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
 
   function checkTimeout() {
     if (elapsed() > TOTAL_TIMEOUT) {
-      throw new Error('Total timeout exceeded (120s)');
+      throw new Error('Total timeout exceeded (300s)');
     }
   }
 
   try {
     console.log(`[carvana] Starting offer flow for VIN=${vin} mileage=${mileage} zip=${zip}`);
-    console.log(`[carvana] Proxy configured: ${!!(config.PROXY_HOST && config.PROXY_PASS)}`);
+    console.log(`[carvana] Proxy: host=${config.PROXY_HOST} port=${config.PROXY_PORT} user=${config.PROXY_USER} pass=${config.PROXY_PASS ? config.PROXY_PASS.length + 'chars' : 'NONE'}`);
 
-    // --- Launch browser ---
+    // --- Launch initial browser (will be replaced during US IP hunt) ---
     let result;
+    let page;
     try {
       result = await launchBrowser();
     } catch (launchErr) {
@@ -80,21 +87,20 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
       throw launchErr;
     }
     browser = result.browser;
-    const page = result.page;
+    page = result.page;
 
-    // --- Step 1: Navigate to sell-my-car ---
-    console.log('[carvana] Step 1: Navigating to Carvana sell page...');
-    // Verify proxy is working by checking our IP
+    // --- Step 1: Verify US IP and navigate to sell-my-car ---
+    console.log('[carvana] Step 1: Verifying US proxy IP...');
     try {
-      console.log('[carvana] Verifying proxy connection...');
-      await page.goto('https://ip.decodo.com/json', { timeout: 20000 });
+      await page.goto('http://httpbin.org/ip', { timeout: 20000 });
       const ipInfo = await page.textContent('body');
-      console.log(`[carvana] Proxy IP info: ${ipInfo}`);
+      console.log(`[carvana] Proxy IP: ${ipInfo}`);
     } catch (proxyErr) {
       console.error(`[carvana] Proxy verification failed: ${proxyErr.message}`);
-      throw new Error(`Proxy connection failed: ${proxyErr.message}. Check proxy credentials.`);
+      throw new Error(`Proxy connection failed: ${proxyErr.message}`);
     }
 
+    console.log('[carvana] Navigating to Carvana sell page...');
     try {
       await page.goto(CARVANA_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
     } catch (navErr) {
@@ -106,8 +112,12 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
     await screenshot(page, '01-landing');
 
     if (await isBlocked(page)) {
-      await screenshot(page, 'blocked');
-      return { error: 'blocked' };
+      const ssPath = await screenshot(page, 'blocked');
+      const pageTitle = await page.title().catch(() => 'unknown');
+      const bodySnippet = await page.textContent('body').then(t => t.substring(0, 500)).catch(() => '');
+      const pageUrl = page.url();
+      console.log(`[carvana] BLOCKED — title: ${pageTitle}, url: ${pageUrl}`);
+      return { error: 'blocked', details: { pageTitle, bodySnippet, screenshot: ssPath, url: pageUrl } };
     }
 
     // --- Step 2: Enter VIN ---

@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Gym Intelligence</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#1a1a2e;--card:#16213e;--border:#0f3460;--accent:#e94560;
+  --text:#eee;--text-dim:#aab;--radius:10px;
+}
+html{font-size:16px}
+body{
+  font-family:system-ui,-apple-system,BlinkMacSystemFont,sans-serif;
+  background:var(--bg);color:var(--text);
+  max-width:100%;overflow-x:hidden;
+  padding:0;margin:0;
+  -webkit-text-size-adjust:100%;
+}
+.tab-bar{
+  display:flex;position:sticky;top:0;z-index:100;
+  background:var(--card);border-bottom:2px solid var(--border);
+}
+.tab-btn{
+  flex:1;padding:14px 4px;border:none;background:transparent;
+  color:var(--text-dim);font-size:.9rem;font-weight:600;
+  cursor:pointer;min-height:44px;transition:all .15s;
+}
+.tab-btn.active{color:var(--accent);border-bottom:3px solid var(--accent);background:rgba(233,69,96,.08)}
+.tab-content{display:none;padding:12px}
+.tab-content.active{display:block}
+.card{
+  background:var(--card);border:1px solid var(--border);
+  border-radius:var(--radius);padding:14px;margin-bottom:12px;
+  box-shadow:0 2px 8px rgba(0,0,0,.3);
+}
+.card h3{font-size:1rem;margin-bottom:8px;color:var(--accent)}
+.card p,.card span{font-size:.88rem;color:var(--text-dim);line-height:1.5}
+.badge{
+  display:inline-block;padding:2px 8px;border-radius:12px;
+  font-size:.75rem;font-weight:600;margin:2px;
+}
+.badge-direct{background:#0f3460;color:#5dade2}
+.badge-budget{background:#145a32;color:#82e0aa}
+.badge-mid{background:#4a235a;color:#bb8fce}
+.badge-premium{background:#641e16;color:#f1948a}
+select,input[type=number],input[type=password],input[type=text]{
+  width:100%;padding:10px 12px;margin:6px 0 12px;
+  border:1px solid var(--border);border-radius:8px;
+  background:var(--bg);color:var(--text);font-size:.95rem;
+  min-height:44px;-webkit-appearance:none;
+}
+select{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23aab' d='M6 8L1 3h10z'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;padding-right:32px}
+button,.btn{
+  display:block;width:100%;padding:12px;min-height:44px;
+  border:none;border-radius:8px;font-size:.95rem;font-weight:600;
+  cursor:pointer;transition:all .15s;margin:6px 0;
+}
+.btn-primary{background:var(--accent);color:#fff}
+.btn-primary:active{background:#c0392b}
+.btn-secondary{background:var(--border);color:var(--text)}
+.btn-secondary:active{background:#1a4a7a}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.stat-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.stat-card{
+  flex:1;min-width:120px;background:var(--card);border:1px solid var(--border);
+  border-radius:var(--radius);padding:12px;text-align:center;
+}
+.stat-card .val{font-size:1.4rem;font-weight:700;color:var(--accent)}
+.stat-card .lbl{font-size:.75rem;color:var(--text-dim);margin-top:2px}
+label{font-size:.85rem;color:var(--text-dim);font-weight:600}
+.slider-row{display:flex;align-items:center;gap:10px;margin:6px 0 12px}
+.slider-row input[type=range]{flex:1;min-height:44px;accent-color:var(--accent)}
+.slider-row .val{min-width:28px;text-align:center;font-weight:600}
+.expand-toggle{
+  cursor:pointer;user-select:none;display:flex;align-items:center;
+  justify-content:space-between;padding:10px 0;
+}
+.expand-toggle::after{content:'\25BC';font-size:.7rem;transition:transform .2s}
+.expand-toggle.open::after{transform:rotate(180deg)}
+.expand-body{display:none;padding:8px 0}
+.expand-body.open{display:block}
+.chart-wrap{position:relative;width:100%;margin-bottom:12px}
+.chart-wrap canvas{width:100%!important}
+#map{width:100%;height:350px;border-radius:var(--radius);margin:12px 0}
+.log-box{
+  background:#111;border:1px solid var(--border);border-radius:8px;
+  padding:10px;font-family:monospace;font-size:.8rem;color:#8f8;
+  max-height:250px;overflow-y:auto;margin:8px 0;white-space:pre-wrap;
+}
+.review-card{border-left:3px solid var(--accent)}
+.review-card select,.review-card input{margin-bottom:8px}
+.md-content{line-height:1.7;font-size:.9rem}
+.md-content h1,.md-content h2,.md-content h3{color:var(--accent);margin:16px 0 8px}
+.md-content ul,.md-content ol{padding-left:20px;margin:8px 0}
+.md-content li{margin:4px 0}
+.md-content strong{color:#fff}
+.md-content p{margin:8px 0}
+.hidden{display:none}
+.spinner{display:inline-block;width:18px;height:18px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite;vertical-align:middle;margin-right:6px}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+
+<div class="tab-bar">
+  <button class="tab-btn active" data-tab="market">Market</button>
+  <button class="tab-btn" data-tab="chains">Chains</button>
+  <button class="tab-btn" data-tab="analysis">Analysis</button>
+  <button class="tab-btn" data-tab="admin">Admin</button>
+</div>
+
+<!-- ===== TAB 1: MARKET OVERVIEW ===== -->
+<div id="tab-market" class="tab-content active">
+  <div class="card">
+    <label>Country</label>
+    <select id="mkt-country">
+      <option value="All Europe">All Europe</option>
+      <option value="NL">Netherlands</option>
+      <option value="BE">Belgium</option>
+      <option value="FR">France</option>
+      <option value="ES">Spain</option>
+      <option value="LU">Luxembourg</option>
+      <option value="DE">Germany</option>
+    </select>
+    <label>Min Locations</label>
+    <div class="slider-row">
+      <input type="range" id="mkt-min" min="1" max="50" value="5">
+      <span class="val" id="mkt-min-val">5</span>
+    </div>
+  </div>
+  <div class="chart-wrap"><canvas id="mkt-chart"></canvas></div>
+  <div id="mkt-cards"></div>
+</div>
+
+<!-- ===== TAB 2: CHAIN EXPLORER ===== -->
+<div id="tab-chains" class="tab-content">
+  <div class="card">
+    <label>Select Chain</label>
+    <select id="chain-select"><option value="">Loading...</option></select>
+  </div>
+  <div id="chain-profile" class="card hidden"></div>
+  <div id="chain-growth" class="stat-row hidden"></div>
+  <div class="chart-wrap"><canvas id="chain-chart"></canvas></div>
+  <div id="map"></div>
+</div>
+
+<!-- ===== TAB 3: COMPETITIVE ANALYSIS ===== -->
+<div id="tab-analysis" class="tab-content">
+  <div class="card">
+    <label>Select Analysis</label>
+    <select id="analysis-select"><option value="">Loading...</option></select>
+  </div>
+  <div id="analysis-meta" class="stat-row hidden"></div>
+  <div id="analysis-body" class="card hidden"><div class="md-content"></div></div>
+</div>
+
+<!-- ===== TAB 4: ADMIN ===== -->
+<div id="tab-admin" class="tab-content">
+  <div id="admin-status" class="stat-row"></div>
+
+  <div class="card">
+    <h3>1. Collect Gym Data</h3>
+    <p style="color:var(--text-dim);font-size:.85rem;margin-bottom:10px">Pulls gym locations from OpenStreetMap. No API key needed. Takes 10-30 min for all 6 countries.</p>
+    <button class="btn btn-primary" id="btn-collect" onclick="startCollect()">Collect Gym Data from OSM</button>
+    <div id="refresh-log" class="log-box hidden"></div>
+  </div>
+
+  <div class="card">
+    <h3>2. Classify + Analyze (needs API key)</h3>
+    <p style="color:var(--text-dim);font-size:.85rem;margin-bottom:10px">Classifies chains with Claude and generates competitive analysis.</p>
+    <button class="btn btn-primary" id="btn-refresh" onclick="startRefresh()">Run Full Pipeline</button>
+  </div>
+
+  <div class="card">
+    <h3>API Key</h3>
+    <p id="key-status" style="margin-bottom:8px;font-size:.85rem"></p>
+    <input type="password" id="api-key-input" placeholder="sk-ant-...">
+    <button class="btn btn-primary" onclick="saveKey()">Save API Key</button>
+  </div>
+
+  <div class="card">
+    <h3>Chains Pending Review</h3>
+    <div id="review-list"></div>
+  </div>
+
+  <div class="card">
+    <h3>Export</h3>
+    <button class="btn btn-secondary" onclick="location.href=API+'export'">Download CSV Export (ZIP)</button>
+  </div>
+</div>
+
+<script>
+// ---- Config ----
+const BASE = document.location.pathname.replace(/\/$/, '');
+const API = BASE + '/api/';
+
+// ---- Tab navigation ----
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+    if (btn.dataset.tab === 'chains' && !chainsLoaded) loadChainList();
+    if (btn.dataset.tab === 'analysis' && !analysisListLoaded) loadAnalysisList();
+    if (btn.dataset.tab === 'admin') loadAdmin();
+  });
+});
+
+// ---- Utility ----
+async function api(path) {
+  try {
+    const r = await fetch(API + path);
+    if (!r.ok) return null;
+    return await r.json();
+  } catch(e) {
+    console.warn('API error:', path, e);
+    return null;
+  }
+}
+
+function esc(s) {
+  if (!s) return '';
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function tierBadge(tier) {
+  const cls = tier === 'budget' ? 'badge-budget' : tier === 'premium' ? 'badge-premium' : 'badge-mid';
+  return `<span class="badge ${cls}">${esc(tier) || 'unknown'}</span>`;
+}
+
+function classBadge(c) {
+  return `<span class="badge badge-direct">${(c || 'unknown').replace(/_/g, ' ')}</span>`;
+}
+
+// ---- TAB 1: Market Overview ----
+let mktChart = null;
+let snapshotDates = [];
+
+async function initMarket() {
+  snapshotDates = (await api('snapshot-dates')) || [];
+  loadMarketData();
+}
+
+const mktMin = document.getElementById('mkt-min');
+const mktMinVal = document.getElementById('mkt-min-val');
+mktMin.addEventListener('input', () => { mktMinVal.textContent = mktMin.value; });
+mktMin.addEventListener('change', loadMarketData);
+document.getElementById('mkt-country').addEventListener('change', loadMarketData);
+
+async function loadMarketData() {
+  const mktCards = document.getElementById('mkt-cards');
+  if (!snapshotDates.length) {
+    mktCards.innerHTML = '<div class="card" style="text-align:center;padding:30px"><h3 style="margin-bottom:10px">No data yet</h3><p style="color:var(--text-dim)">Go to the <strong>Admin</strong> tab and tap <strong>Collect Gym Data from OSM</strong> to pull gym locations from OpenStreetMap.</p></div>';
+    return;
+  }
+  const date = snapshotDates[0];
+  const country = document.getElementById('mkt-country').value;
+  const min = mktMin.value;
+  const data = (await api(`market-data?date=${encodeURIComponent(date)}&country=${encodeURIComponent(country)}&min_locations=${min}`)) || [];
+  if (!data.length) { mktCards.innerHTML = '<div class="card" style="text-align:center;padding:20px;color:var(--text-dim)">No competitor data for this selection.</div>'; return; }
+
+  // Chart
+  const labels = data.map(d => d.canonical_name);
+  const values = data.map(d => d.total_locations);
+  const shares = data.map(d => d.market_share);
+
+  if (mktChart) mktChart.destroy();
+  const ctx = document.getElementById('mkt-chart').getContext('2d');
+  mktChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Locations',
+        data: values,
+        backgroundColor: 'rgba(233,69,96,0.7)',
+        borderColor: 'rgba(233,69,96,1)',
+        borderWidth: 1
+      }]
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            afterLabel: (ctx) => `Market share: ${shares[ctx.dataIndex]}%`
+          }
+        }
+      },
+      scales: {
+        x: { ticks: { color: '#aab' }, grid: { color: 'rgba(255,255,255,.05)' } },
+        y: { ticks: { color: '#eee', font: { size: 11 } }, grid: { display: false } }
+      }
+    }
+  });
+  // Dynamic height
+  document.getElementById('mkt-chart').parentElement.style.height = Math.max(250, labels.length * 32) + 'px';
+
+  // Cards
+  mktCards.innerHTML = data.map(d => `
+    <div class="card">
+      <div class="expand-toggle" onclick="this.classList.toggle('open');this.nextElementSibling.classList.toggle('open')">
+        <span><strong>${esc(d.canonical_name)}</strong></span>
+        <span style="color:var(--accent);font-weight:700">${d.market_share}%</span>
+      </div>
+      <div class="expand-body">
+        <p><strong>${d.total_locations}</strong> locations &middot; ${tierBadge(d.price_tier)} &middot; ${classBadge(d.competitive_classification)}</p>
+        <p>18-mo cost: ${d.normalized_18mo_cost ? '\u20AC' + d.normalized_18mo_cost.toFixed(0) : 'N/A'} &middot; Model: ${d.membership_model || 'unknown'}</p>
+      </div>
+    </div>
+  `).join('');
+}
+
+// ---- TAB 2: Chain Explorer ----
+let chainsLoaded = false;
+let chainChart = null;
+let leafletMap = null;
+let markerLayer = null;
+
+async function loadChainList() {
+  chainsLoaded = true;
+  const chains = (await api('chains?min_locations=1')) || [];
+  const sel = document.getElementById('chain-select');
+  sel.innerHTML = '<option value="">-- select a chain --</option>' +
+    chains.map(c => `<option value="${esc(c.canonical_name)}">${esc(c.canonical_name)} (${c.location_count})</option>`).join('');
+}
+
+document.getElementById('chain-select').addEventListener('change', async function() {
+  const name = this.value;
+  if (!name) return;
+  const encoded = encodeURIComponent(name);
+
+  // Load all data in parallel
+  const [profile, snapshots, locations] = await Promise.all([
+    api('chain/' + encoded).then(d => d || {}),
+    api('chain/' + encoded + '/snapshots').then(d => d || []),
+    api('chain/' + encoded + '/locations').then(d => d || [])
+  ]);
+  if (!profile.canonical_name) return;
+
+  // Profile card
+  const pCard = document.getElementById('chain-profile');
+  pCard.classList.remove('hidden');
+  pCard.innerHTML = `
+    <h3>${esc(profile.canonical_name)}</h3>
+    <p>${classBadge(profile.competitive_classification)} ${tierBadge(profile.price_tier)}</p>
+    <p style="margin-top:8px">18-mo cost: ${profile.normalized_18mo_cost ? '\u20AC' + profile.normalized_18mo_cost.toFixed(0) : 'N/A'} &middot; Model: ${profile.membership_model || 'unknown'}</p>
+    <p style="margin-top:8px">Locations: <strong>${profile.location_count}</strong></p>
+    ${profile.ai_classification_rationale ? '<p style="margin-top:8px;font-size:.82rem;color:var(--text-dim)"><em>Rationale: ' + esc(profile.ai_classification_rationale) + '</em></p>' : ''}
+  `;
+
+  // Growth metrics
+  const growthDiv = document.getElementById('chain-growth');
+  if (snapshots.length >= 2) {
+    const countries = [...new Set(snapshots.map(s => s.country))];
+    const dates = [...new Set(snapshots.map(s => s.snapshot_date))].sort();
+    const latest = dates[dates.length - 1];
+    const earliest = dates[0];
+    const totalNow = snapshots.filter(s => s.snapshot_date === latest).reduce((a, s) => a + s.location_count, 0);
+    const totalThen = snapshots.filter(s => s.snapshot_date === earliest).reduce((a, s) => a + s.location_count, 0);
+    const growth = totalThen > 0 ? ((totalNow - totalThen) / totalThen * 100).toFixed(1) : 'N/A';
+    growthDiv.classList.remove('hidden');
+    growthDiv.innerHTML = `
+      <div class="stat-card"><div class="val">${totalNow}</div><div class="lbl">Current Locations</div></div>
+      <div class="stat-card"><div class="val">${countries.length}</div><div class="lbl">Countries</div></div>
+      <div class="stat-card"><div class="val">${growth}%</div><div class="lbl">Growth</div></div>
+    `;
+  } else {
+    growthDiv.classList.add('hidden');
+  }
+
+  // Line chart: locations over time by country
+  if (chainChart) chainChart.destroy();
+  const countries = [...new Set(snapshots.map(s => s.country))];
+  const dates = [...new Set(snapshots.map(s => s.snapshot_date))].sort();
+  const colors = ['#e94560','#5dade2','#82e0aa','#f4d03f','#bb8fce','#f0b27a'];
+  const datasets = countries.map((c, i) => ({
+    label: c,
+    data: dates.map(d => {
+      const m = snapshots.find(s => s.snapshot_date === d && s.country === c);
+      return m ? m.location_count : 0;
+    }),
+    borderColor: colors[i % colors.length],
+    backgroundColor: 'transparent',
+    tension: 0.3,
+    pointRadius: 3
+  }));
+  const ctx2 = document.getElementById('chain-chart').getContext('2d');
+  chainChart = new Chart(ctx2, {
+    type: 'line',
+    data: { labels: dates, datasets },
+    options: {
+      responsive: true,
+      plugins: { legend: { labels: { color: '#eee' } } },
+      scales: {
+        x: { ticks: { color: '#aab', maxRotation: 45 }, grid: { color: 'rgba(255,255,255,.05)' } },
+        y: { ticks: { color: '#aab' }, grid: { color: 'rgba(255,255,255,.05)' } }
+      }
+    }
+  });
+
+  // Map
+  if (!leafletMap) {
+    leafletMap = L.map('map').setView([50, 5], 5);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors',
+      maxZoom: 18
+    }).addTo(leafletMap);
+    markerLayer = L.layerGroup().addTo(leafletMap);
+  }
+  markerLayer.clearLayers();
+  const bounds = [];
+  locations.forEach(loc => {
+    if (loc.lat && loc.lon) {
+      const m = L.marker([loc.lat, loc.lon]).bindPopup(
+        `<strong>${esc(loc.name || profile.canonical_name)}</strong><br>${esc(loc.city || '')}<br><small>${esc(loc.address_full || '')}</small>`
+      );
+      markerLayer.addLayer(m);
+      bounds.push([loc.lat, loc.lon]);
+    }
+  });
+  if (bounds.length) {
+    leafletMap.fitBounds(bounds, { padding: [20, 20] });
+  }
+  // Invalidate size after tab switch
+  setTimeout(() => leafletMap.invalidateSize(), 200);
+});
+
+// ---- TAB 3: Competitive Analysis ----
+let analysisListLoaded = false;
+
+async function loadAnalysisList() {
+  analysisListLoaded = true;
+  const list = (await api('analyses')) || [];
+  const sel = document.getElementById('analysis-select');
+  sel.innerHTML = '<option value="">-- select analysis --</option>' +
+    list.map(a => `<option value="${a.id}">${a.analysis_date} (${a.model_used})</option>`).join('');
+}
+
+document.getElementById('analysis-select').addEventListener('change', async function() {
+  const id = this.value;
+  if (!id) return;
+  const data = (await api('analysis/' + id)) || {};
+  if (!data.analysis_date) return;
+
+  const meta = document.getElementById('analysis-meta');
+  meta.classList.remove('hidden');
+  meta.innerHTML = `
+    <div class="stat-card"><div class="val">${data.analysis_date}</div><div class="lbl">Date</div></div>
+    <div class="stat-card"><div class="val">${data.model_used}</div><div class="lbl">Model</div></div>
+  `;
+
+  const body = document.getElementById('analysis-body');
+  body.classList.remove('hidden');
+  body.querySelector('.md-content').innerHTML = marked.parse(data.analysis_text || '', {breaks: true});
+});
+
+// ---- TAB 4: Admin ----
+let refreshPollId = null;
+
+async function loadAdmin() {
+  const status = (await api('status')) || { last_refresh: 'N/A', total_locations: 0, api_key_set: false };
+  document.getElementById('admin-status').innerHTML = `
+    <div class="stat-card"><div class="val">${status.last_refresh || 'Never'}</div><div class="lbl">Last Refresh</div></div>
+    <div class="stat-card"><div class="val">${(status.total_locations || 0).toLocaleString()}</div><div class="lbl">Active Locations</div></div>
+  `;
+  document.getElementById('key-status').textContent = status.api_key_set
+    ? 'Key configured: ' + status.api_key_preview
+    : 'Not set yet (only needed for classification & analysis)';
+
+  loadUnknownChains();
+}
+
+async function startCollect() {
+  const btn = document.getElementById('btn-collect');
+  btn.disabled = true;
+  btn.textContent = 'Collecting...';
+  const logEl = document.getElementById('refresh-log');
+  logEl.classList.remove('hidden');
+  logEl.textContent = 'Starting collection...';
+  await fetch(API + 'collect-only', { method: 'POST' });
+  if (refreshPollId) clearInterval(refreshPollId);
+  refreshPollId = setInterval(pollRefresh, 2000);
+}
+
+async function loadUnknownChains() {
+  const chains = (await api('unknown-chains')) || [];
+  const list = document.getElementById('review-list');
+  if (!chains.length) {
+    list.innerHTML = '<p style="color:var(--text-dim)">No chains pending review.</p>';
+    return;
+  }
+  list.innerHTML = chains.map(c => `
+    <div class="card review-card" id="review-${c.id}">
+      <h3>${esc(c.canonical_name)} <small style="color:var(--text-dim)">(${c.location_count} loc)</small></h3>
+      <label>Classification</label>
+      <select data-field="classification">
+        <option value="unknown">unknown</option>
+        <option value="direct_competitor">direct competitor</option>
+        <option value="non_competitor">non-competitor</option>
+      </select>
+      <label>Price Tier</label>
+      <select data-field="tier">
+        <option value="unknown">unknown</option>
+        <option value="budget">budget</option>
+        <option value="mid_market">mid-market</option>
+        <option value="premium">premium</option>
+      </select>
+      <label>Membership Model</label>
+      <select data-field="model">
+        <option value="unknown">unknown</option>
+        <option value="commitment">commitment</option>
+        <option value="flexible">flexible</option>
+        <option value="mixed">mixed</option>
+      </select>
+      <label>18-mo Cost (&euro;)</label>
+      <input type="number" data-field="cost" placeholder="e.g. 450" min="0" step="1">
+      <button class="btn btn-primary" onclick="saveReview(${c.id})">Save Review</button>
+    </div>
+  `).join('');
+}
+
+async function saveReview(id) {
+  const card = document.getElementById('review-' + id);
+  const body = {
+    id,
+    classification: card.querySelector('[data-field=classification]').value,
+    price_tier: card.querySelector('[data-field=tier]').value,
+    membership_model: card.querySelector('[data-field=model]').value,
+    cost: card.querySelector('[data-field=cost]').value || null
+  };
+  const r = await fetch(API + 'review-chain', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  if (r.ok) {
+    card.style.opacity = '.4';
+    card.querySelector('.btn').textContent = 'Saved';
+    card.querySelector('.btn').disabled = true;
+  }
+}
+
+async function startRefresh() {
+  const btn = document.getElementById('btn-refresh');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Running...';
+  document.getElementById('btn-collect').disabled = true;
+  const logBox = document.getElementById('refresh-log');
+  logBox.classList.remove('hidden');
+  logBox.textContent = 'Starting full pipeline...\n';
+
+  await fetch(API + 'refresh', { method: 'POST' });
+  if (refreshPollId) clearInterval(refreshPollId);
+  refreshPollId = setInterval(pollRefresh, 2000);
+}
+
+async function pollRefresh() {
+  const data = (await api('refresh-status')) || { log: [], running: false };
+  const logBox = document.getElementById('refresh-log');
+  logBox.textContent = (data.log || []).join('\n') || 'Waiting...';
+  logBox.scrollTop = logBox.scrollHeight;
+  if (!data.running) {
+    clearInterval(refreshPollId);
+    document.getElementById('btn-refresh').disabled = false;
+    document.getElementById('btn-refresh').textContent = 'Run Full Pipeline';
+    document.getElementById('btn-collect').disabled = false;
+    document.getElementById('btn-collect').textContent = 'Collect Gym Data from OSM';
+    loadAdmin();
+    initMarket(); // reload market data
+  }
+}
+
+async function saveKey() {
+  const key = document.getElementById('api-key-input').value.trim();
+  if (!key) return;
+  const r = await fetch(API + 'save-key', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ key })
+  });
+  if (r.ok) {
+    document.getElementById('api-key-input').value = '';
+    loadAdmin();
+  }
+}
+
+// ---- Init ----
+initMarket().catch(e => console.warn('initMarket error:', e));
+</script>
+</body>
+</html>

@@ -54,3 +54,13 @@
 - **What went wrong:** Updated the deploy script with Node.js discovery code, but the fix didn't take effect on the first deploy. The old script was already loaded in memory; it copies the new script to /opt/ (STEP 0) but continues running the old logic.
 - **Root cause:** The self-update mechanism copies the new script for the NEXT run. The currently-executing bash process still has the old script in memory.
 - **What to do differently:** After any critical deploy script fix, always push a second trivial commit to trigger a follow-up deploy that will execute the new script. The pattern is: push fix → deploys (copies new script) → push trigger → deploys (runs new script).
+
+## 2026-04-06 Infra Relay Bottleneck
+- **What went wrong:** Project chats (car-offers, gym-intelligence) repeatedly modified Orchestrator-only files (deploy script, QA workflow) despite explicit rules. They did this because the relay cycle (chat → CHANGES.md → user → infra chat → apply → push → deploy → check) took 5-10 minutes per iteration. Both chats were debugging live server issues (proxy config, Overpass API 504s, venv setup) that required many rapid iterations.
+- **Root cause:** The ownership model was too centralized. Every deploy script change — even project-specific ones — required a round-trip through the infra chat. Project chats also had no way to check server state without pushing commits.
+- **What to do differently:** (1) Split deploy scripts: each project owns `deploy/<project>.sh`, sourced by the main script. Project chats can iterate on their own deploy logic without touching shared infra. (2) Added `/status.json` endpoint with service status, recent logs, ports, disk, memory — so chats can diagnose without pushing. (3) Service only starts after deps are ready (no more first-deploy 502s).
+
+## 2026-04-06 First-Deploy 502s
+- **What went wrong:** Every new project's first deploy returned 502 because systemd started the service before pip/npm install finished. Required a second push to trigger a redeploy after deps were ready.
+- **Root cause:** The deploy script wrote the systemd unit and ran `systemctl restart` unconditionally, even when deps hadn't been installed yet.
+- **What to do differently:** Gate `systemctl restart` behind a dep check (e.g., `import flask` or checking for `node_modules/express`). Skip service start if deps aren't ready — the next deploy will catch it.

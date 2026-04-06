@@ -15,13 +15,15 @@ The user prompts from an iPhone. Claude does everything — writes code, deploys
 - All server-side changes go through the deploy pipeline (push to `main` → auto-deploy)
 - All external downloads must happen in code that runs on the droplet, not here
 - All live-site testing runs via GitHub Actions, not from this sandbox
+- **To check server state**: trigger the "Server Check" workflow via GitHub API (see "Checking Server State" section below). Do NOT push empty "Trigger:" commits to main — use the workflow instead.
 - See "Production Environment" section for details
 
-**Infrastructure ownership — do not modify these files:**
-- The infrastructure chat owns all deploy scripts, workflows, QA tests, and harness config
-- See the "Parallelism Rules" section for the full list of Orchestrator-only files
-- If you need a new deploy step, nginx route, QA test, or workflow change: write your proposed change into `CHANGES.md` and **ask the user** to take it to the infrastructure chat for implementation. Do not apply infrastructure changes yourself.
-- Directly editing infrastructure files causes merge conflicts and deploy breakage — don't do it
+**Infrastructure ownership — what you can and can't modify:**
+- **Your project's deploy script** (`deploy/<your-project>.sh`): You own it. Edit it directly.
+- **Everything else in deploy/**: Orchestrator-only. Do not modify `auto_deploy_general.sh`, `update_nginx.sh`, `landing.html`, `NGINX_VERSION`, or `setup_*.sh`.
+- **Workflows, QA tests, harness config**: Orchestrator-only. See "Parallelism Rules" for the full list.
+- If you need nginx routes, QA tests, landing page cards, or workflow changes: write your proposal into `CHANGES.md` and **ask the user** to take it to the infrastructure chat.
+- **Diagnostics**: Check `http://159.223.127.125/status.json` for service status, recent logs, ports, disk, and memory — no need to push commits just to check server state.
 
 -----
 
@@ -298,10 +300,11 @@ The dangerous moment is **after pushing to main but before reading QA results**.
 - The following files are **Orchestrator-only**. No other agent or chat may modify them:
   - `CLAUDE.md`
   - `.claude/agents/*.md`
-  - `deploy/landing.html`
+  - `deploy/auto_deploy_general.sh`
   - `deploy/update_nginx.sh`
   - `deploy/NGINX_VERSION`
-  - `deploy/auto_deploy_general.sh`
+  - `deploy/landing.html`
+  - `deploy/setup_*.sh`
   - `.github/workflows/*.yml`
   - `tests/qa-smoke.spec.ts`
   - `playwright.config.ts`
@@ -309,7 +312,9 @@ The dangerous moment is **after pushing to main but before reading QA results**.
   - `LESSONS.md`
   - `RUNBOOK.md`
   - `CHANGES.md`
-- **How other chats propose infrastructure changes:** If a chat needs a new deploy step, nginx route, QA test, or workflow change, it writes the proposed change into `CHANGES.md` and **tells the user** to take the request to the infrastructure chat. The infrastructure chat reviews and applies the change. Other chats must never directly edit infrastructure files — doing so causes merge conflicts and deploy breakage. Example message to the user: "I need a new nginx route for /my-project/. I've written the details in CHANGES.md — please ask your infrastructure chat to apply it."
+- **Project deploy scripts** (`deploy/<project>.sh`): Owned by the project chat. Each project chat can modify its own deploy script directly. The main deploy script sources these automatically. Available variables: `$REPO_DIR`, `$LOG`, `$NODE_BIN`, `$NPM_BIN`, `$NPX_BIN`.
+- **Diagnostics**: Project chats can read `http://159.223.127.125/status.json` to check service status, recent logs, ports, disk, and memory without pushing commits.
+- **How other chats propose infrastructure changes:** If a chat needs a new nginx route, QA test, landing page card, or workflow change, it writes the proposed change into `CHANGES.md` and **tells the user** to take the request to the infrastructure chat. Example message to the user: "I need a new nginx route for /my-project/. I've written the details in CHANGES.md — please ask your infrastructure chat to apply it."
 
 -----
 
@@ -398,11 +403,33 @@ Runtimes:        [auto-detected at setup]
 Process manager: [auto-detected at setup]
 ```
 
-**SSH is not available.** The Claude Code sandbox cannot reach the droplet via SSH or direct HTTP. All server-side changes — nginx config, cron jobs, log setup, directory creation — must be made through the auto-deploy pipeline by modifying files in `deploy/`. Never attempt SSH, scp, or direct server commands. Never create standalone "run this on the server" scripts. If something needs to happen on the droplet, put it in `deploy/auto_deploy_general.sh` (one-time gated with a flag file) or `deploy/update_nginx.sh` (triggered by bumping `NGINX_VERSION`).
+**SSH is not available.** The Claude Code sandbox cannot reach the droplet via SSH or direct HTTP. All server-side changes — nginx config, cron jobs, log setup, directory creation — must be made through the auto-deploy pipeline by modifying files in `deploy/`. Never attempt SSH, scp, or direct server commands. Never create standalone "run this on the server" scripts. If something needs to happen on the droplet, put it in your project's deploy script (`deploy/<project>.sh`) or propose changes to the main deploy script via `CHANGES.md`. To **read** server state without pushing, use the Server Check workflow (see "Checking Server State" section).
 
 **External downloads are blocked from the sandbox.** The sandbox network proxy only allows traffic to package registries, GitHub, and Anthropic domains. HTTP requests to any other host (SEC EDGAR, financial APIs, external data sources, the droplet IP) will fail with a 403. Code that downloads external data must run on the droplet, not in the sandbox. Write the download logic, push it via the deploy pipeline, and let it execute on the server where there are no network restrictions.
 
 Builders flag any library or runtime feature not listed here before using it.
+
+-----
+
+## Checking Server State
+
+The sandbox cannot reach the droplet, but you CAN reach GitHub. There are two ways to check server state:
+
+**Method 1 — After a push (automatic):** Every push to main triggers the QA workflow, which includes server diagnostics in its output. Read the workflow results via GitHub MCP tools.
+
+**Method 2 — Without pushing (manual trigger):** Ask the user to trigger the "Server Check" workflow from GitHub Actions UI on their phone (one tap: Actions → Server Check → Run workflow). Or post `/check` on **Issue #4** using `mcp__github__add_issue_comment`:
+   - `owner`: `csosin1`, `repo`: `ClaudeCode`, `issue_number`: `4`
+   - `body`: `/check`, `/check car-offers`, `/check gym-intelligence`, `/check /some/url/path`
+
+**What it reports:** HTTP status codes, service status, recent logs, ports, disk, memory, deploy commit.
+
+**Do NOT push empty "Trigger:" commits to main.** Every push to main triggers a full deploy + QA cycle. If you just need to check server state, ask the user to trigger the Server Check workflow. Reserve pushes for actual code changes.
+
+**When to push vs when to check:**
+- "Is my service running?" → ask user to trigger Server Check, or read last QA run
+- "Did my code change deploy correctly?" → push to main, wait for QA
+- "What does the error log say?" → ask user to trigger Server Check
+- "Is the proxy working?" → ask user to trigger Server Check with `/car-offers/api/status`
 
 -----
 
@@ -642,6 +669,7 @@ Fix cycles used: [0-2]
 
 1. Clarify location before writing code
 1. Create `/opt/<project>/` (or `games/<name>/` for static games)
+1. **Create `deploy/<project>.sh`** — the project's own deploy script. This file is owned by the project chat and sourced by the main deploy script automatically. It handles: code sync, dependency install, systemd service, observability. Use `deploy/car-offers.sh` or `deploy/gym-intelligence.sh` as a template. Available variables from parent: `$REPO_DIR`, `$LOG`, `$NODE_BIN`, `$NPM_BIN`, `$NPX_BIN`.
 1. Add nginx location block in `deploy/update_nginx.sh`
 1. Bump `NGINX_VERSION`
 1. Add link card to every relevant hub page:
@@ -651,6 +679,8 @@ Fix cycles used: [0-2]
 1. If a new sub-folder group is created (e.g. `/carvana/`), create a hub `index.html` for it with cards linking to each project in the group, and add a card on the main landing page pointing to the hub
 1. Configure error logging and health check
 1. Add to `RUNBOOK.md`
+
+**Steps 1-2 and the deploy script (step 3) can be done by the project chat.** Steps 4-8 require the infrastructure chat — propose them via `CHANGES.md`.
 
 **Every project must be reachable by tapping links from the landing page.** No project should exist without a link card. If a user can't navigate to it from http://159.223.127.125/, it's not done.
 

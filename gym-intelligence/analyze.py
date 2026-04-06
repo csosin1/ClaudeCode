@@ -159,27 +159,28 @@ Be specific and data-driven. Reference actual chain names and location counts. I
     return response.content[0].text
 
 
-def run_analysis():
+def run_analysis(progress_cb=None):
     """Run the quarterly analysis pipeline."""
+    def log(msg):
+        logger.info(msg)
+        if progress_cb:
+            progress_cb(msg)
+
     init_db()
     client = anthropic.Anthropic()
 
     with get_db() as conn:
         current = get_current_snapshot(conn)
         if not current.get("data"):
-            logger.warning("No snapshot data found. Run collect.py first.")
+            log("No snapshot data found. Run collection first.")
             return
 
         previous = get_previous_snapshot(conn)
         classifications = get_chain_classifications(conn)
         basicfit = get_basicfit_context(conn)
 
-        logger.info(
-            "Generating analysis: %d current entries, %d previous entries, %d chains",
-            len(current.get("data", [])),
-            len(previous.get("data", [])),
-            len(classifications),
-        )
+        log(f"Generating analysis: {len(current.get('data', []))} entries, {len(classifications)} chains")
+        log("Calling Claude for competitive report (this may take 30-60s)...")
 
         analysis = generate_analysis(client, current, previous, classifications, basicfit)
 
@@ -188,7 +189,7 @@ def run_analysis():
             (date.today().isoformat(), analysis, MODEL),
         )
 
-        logger.info("Analysis stored successfully (%d chars)", len(analysis))
+        log(f"Analysis stored ({len(analysis)} chars)")
 
 
 if __name__ == "__main__":
