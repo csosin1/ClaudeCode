@@ -414,23 +414,29 @@ Builders flag any library or runtime feature not listed here before using it.
 
 ## Checking Server State
 
-The sandbox cannot reach the droplet, but you CAN reach GitHub. There are two ways to check server state:
+The sandbox cannot reach the droplet, but you CAN reach GitHub. There are three ways to check server state:
 
-**Method 1 — After a push (automatic):** Every push to main triggers the QA workflow, which includes server diagnostics in its output. Read the workflow results via GitHub MCP tools.
+**Method 1 — Read Issue #4 (fastest, no user needed):** The Server Check workflow runs every 10 minutes via cron and updates a pinned bot comment on **Issue #4** with full diagnostics. Just read the latest comment:
+   - Use `mcp__github__issue_read` with `owner: csosin1`, `repo: ClaudeCode`, `issue_number: 4`
+   - The pinned bot comment contains: HTTP status codes for all projects, status.json, debug.json, project-specific endpoints
+   - Data is at most 10 minutes old — usually fresh enough for iteration
 
-**Method 2 — Without pushing (manual trigger):** Ask the user to trigger the "Server Check" workflow from GitHub Actions UI on their phone (one tap: Actions → Server Check → Run workflow). Or post `/check` on **Issue #4** using `mcp__github__add_issue_comment`:
+**Method 2 — After a push (automatic):** Every push to main triggers the QA workflow, which includes server diagnostics in its output. Read the workflow results via GitHub MCP tools.
+
+**Method 3 — On-demand (needs user):** Ask the user to trigger the "Server Check" workflow from GitHub Actions UI on their phone (one tap: Actions → Server Check → Run workflow). Or post `/check` on **Issue #4** using `mcp__github__add_issue_comment`:
    - `owner`: `csosin1`, `repo`: `ClaudeCode`, `issue_number`: `4`
    - `body`: `/check`, `/check car-offers`, `/check gym-intelligence`, `/check /some/url/path`
+   - Results appear as a new comment on Issue #4 within ~30s
 
 **What it reports:** HTTP status codes, service status, recent logs, ports, disk, memory, deploy commit.
 
-**Do NOT push empty "Trigger:" commits to main.** Every push to main triggers a full deploy + QA cycle. If you just need to check server state, ask the user to trigger the Server Check workflow. Reserve pushes for actual code changes.
+**Do NOT push empty "Trigger:" commits to main.** Every push to main triggers a full deploy + QA cycle. If you just need to check server state, read Issue #4 or ask the user to trigger Server Check. Reserve pushes for actual code changes.
 
 **When to push vs when to check:**
-- "Is my service running?" → ask user to trigger Server Check, or read last QA run
+- "Is my service running?" → read Issue #4 (Method 1), or ask user to trigger Server Check
 - "Did my code change deploy correctly?" → push to main, wait for QA
-- "What does the error log say?" → ask user to trigger Server Check
-- "Is the proxy working?" → ask user to trigger Server Check with `/car-offers/api/status`
+- "What does the error log say?" → read Issue #4 or ask user to trigger Server Check
+- "Is the proxy working?" → ask user to trigger Server Check with `/check /car-offers/api/status`
 
 -----
 
