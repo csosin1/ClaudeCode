@@ -1,72 +1,60 @@
-=== Fetched at Mon Apr  6 20:08:40 UTC 2026 ===
+=== Fetched at Mon Apr  6 20:26:55 UTC 2026 ===
 
 === Startup Results ===
 {
     "proxyResult": {
         "ok": true,
-        "ip": "200.207.231.29",
+        "ip": "68.193.77.79",
         "method": "curl",
-        "port": "10001"
+        "port": "7000"
     },
-    "proxyTestedAt": "2026-04-06T20:03:08.325Z",
-    "startedAt": "2026-04-06T20:02:56.247Z",
-    "lastCarvanaRun": {
-        "error": "Could not get a US proxy IP after 15 attempts. This proxy plan may not include US IPs.",
-        "details": {
-            "vin": "1HGCV2F9XNA008352",
-            "mileage": "48000",
-            "zip": "06880",
-            "attempts": 15
-        },
-        "vin": "1HGCV2F9XNA008352",
-        "mileage": "48000",
-        "zip": "06880",
-        "completed_at": "2026-04-06T20:03:41.687Z"
-    },
+    "proxyTestedAt": "2026-04-06T20:26:13.633Z",
+    "startedAt": "2026-04-06T20:26:05.749Z",
+    "lastCarvanaRun": null,
     "networkDiag": {
-        "timestamp": "2026-04-06T20:03:01.265Z",
+        "timestamp": "2026-04-06T20:26:10.766Z",
         "tests": {
             "dns_resolve": {
                 "ok": true,
-                "output": "dataroute0.com.\n212.11.41.34\n138.199.35.66\n89.222.99.194\n169.150.204.216\n37.19.211.193\n37.19.211.219\n149.88.97.66"
+                "output": "dataroute0.com.\n149.88.97.66\n138.199.35.66\n89.222.99.194\n212.11.41.34\n169.150.204.216\n37.19.211.193\n37.19.211.219"
             },
             "tcp_proxy": {
                 "ok": true,
                 "output": "TCP OK"
             },
-            "curl_httpbin_proxy": {
+            "curl_httpbin_geo": {
                 "ok": true,
-                "output": "{\n  \"origin\": \"200.207.231.29\"\n}"
+                "output": "{\n  \"origin\": \"68.193.77.79\"\n}"
             },
-            "curl_decodo_proxy": {
+            "curl_decodo_geo": {
                 "ok": true,
-                "output": "{\n    \"browser\": {\n        \"name\": \"curl\",\n        \"version\": \"8.5.0\"\n    },\n    \"platform\": {\n        \"name\": \"\",\n        \"os\": \"\",\n        \"type\": \"desktop\"\n    },\n    \"engine\": {\n        \"name\": \"\",\n        \"version\": \"\"\n    },\n    \"isp\": {\n        \"asn\": 27699,\n        \"isp\": \"Vivo\",\n        \"organization\": \"Vivo\",\n        \"domain\": \"\"\n    },\n    \"city\": {\n        \"name\": \"S\u00e3o Caetano do Sul\",\n        \"code\": \"SP\",\n        \"zip_code\": \"09500\",\n        \"state\": \"S\u00e3o Paulo\",\n        \"time_zone"
+                "output": "{\n    \"browser\": {\n        \"name\": \"curl\",\n        \"version\": \"8.5.0\"\n    },\n    \"platform\": {\n        \"name\": \"\",\n        \"os\": \"\",\n        \"type\": \"desktop\"\n    },\n    \"engine\": {\n        \"name\": \"\",\n        \"version\": \"\"\n    },\n    \"isp\": {\n        \"asn\": 5650,\n        \"isp\": \"Frontier Communications\",\n        \"organization\": \"Frontier Communications\",\n        \"domain\": \"\"\n    },\n    \"city\": {\n        \"name\": \"Stamford\",\n        \"code\": \"CT\",\n        \"zip_code\": \"06902\",\n        \"state\": \"Con"
             },
             "curl_httpbin_direct": {
                 "ok": true,
                 "output": "{\n  \"origin\": \"159.223.127.125\"\n}"
             },
-            "curl_example_proxy": {
+            "curl_carvana_geo": {
                 "ok": true,
-                "output": "<!doctype html><html lang=\"en\"><head><title>Example Domain</title><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><style>body{background:#eee;width:60vw;margin:15vh auto;font-family:system-ui,sans-serif}h1{font-size:1.5em}div{opacity:0.8}a:link,a:visited{color:#348}</style></head><body><div><h1>Example Domain</h1><p>This domain is for use in documentation examples without needing permission. Avoid use in operations.</p><p><a href=\"https://iana.org/domains/example\">Learn more<"
+                "output": "403"
             },
-            "curl_session_proxy": {
+            "curl_httpbin_plain": {
                 "ok": true,
-                "output": "Access denied. We couldn't log you in with the details provided. Please confirm your username and password and try again."
+                "output": "{\n  \"origin\": \"177.137.144.32\"\n}"
             }
         }
     },
-    "networkDiagAt": "2026-04-06T20:03:01.265Z",
+    "networkDiagAt": "2026-04-06T20:26:10.766Z",
     "playwrightProxy": {
         "ok": true,
-        "ip": "200.207.231.29",
-        "testedAt": "2026-04-06T20:03:09.926Z"
+        "ip": "47.165.83.188",
+        "testedAt": "2026-04-06T20:26:14.640Z"
     }
 }
 
 === Debug Config ===
 {
-    "timestamp": "2026-04-06T20:08:40.784Z",
+    "timestamp": "2026-04-06T20:26:55.921Z",
     "proxy_host": "gate.decodo.com",
     "proxy_port": "10001",
     "proxy_user": "spjax0kgms",
@@ -74,14 +62,14 @@
     "proxy_pass_length": 18,
     "project_email": "caroffers.tool@gmail.com",
     "node_version": "v22.22.2",
-    "uptime_seconds": 344
+    "uptime_seconds": 50
 }
 
 === Status ===
 {
     "service": {
-        "startedAt": "2026-04-06T20:02:56.247Z",
-        "uptime_seconds": 344,
+        "startedAt": "2026-04-06T20:26:05.749Z",
+        "uptime_seconds": 50,
         "node_version": "v22.22.2"
     },
     "proxy": {
@@ -93,65 +81,53 @@
         "pass_length": 18,
         "test_result": {
             "ok": true,
-            "ip": "200.207.231.29",
+            "ip": "68.193.77.79",
             "method": "curl",
-            "port": "10001"
+            "port": "7000"
         },
-        "tested_at": "2026-04-06T20:03:08.325Z"
+        "tested_at": "2026-04-06T20:26:13.633Z"
     },
     "networkDiag": {
-        "timestamp": "2026-04-06T20:03:01.265Z",
+        "timestamp": "2026-04-06T20:26:10.766Z",
         "tests": {
             "dns_resolve": {
                 "ok": true,
-                "output": "dataroute0.com.\n212.11.41.34\n138.199.35.66\n89.222.99.194\n169.150.204.216\n37.19.211.193\n37.19.211.219\n149.88.97.66"
+                "output": "dataroute0.com.\n149.88.97.66\n138.199.35.66\n89.222.99.194\n212.11.41.34\n169.150.204.216\n37.19.211.193\n37.19.211.219"
             },
             "tcp_proxy": {
                 "ok": true,
                 "output": "TCP OK"
             },
-            "curl_httpbin_proxy": {
+            "curl_httpbin_geo": {
                 "ok": true,
-                "output": "{\n  \"origin\": \"200.207.231.29\"\n}"
+                "output": "{\n  \"origin\": \"68.193.77.79\"\n}"
             },
-            "curl_decodo_proxy": {
+            "curl_decodo_geo": {
                 "ok": true,
-                "output": "{\n    \"browser\": {\n        \"name\": \"curl\",\n        \"version\": \"8.5.0\"\n    },\n    \"platform\": {\n        \"name\": \"\",\n        \"os\": \"\",\n        \"type\": \"desktop\"\n    },\n    \"engine\": {\n        \"name\": \"\",\n        \"version\": \"\"\n    },\n    \"isp\": {\n        \"asn\": 27699,\n        \"isp\": \"Vivo\",\n        \"organization\": \"Vivo\",\n        \"domain\": \"\"\n    },\n    \"city\": {\n        \"name\": \"S\u00e3o Caetano do Sul\",\n        \"code\": \"SP\",\n        \"zip_code\": \"09500\",\n        \"state\": \"S\u00e3o Paulo\",\n        \"time_zone"
+                "output": "{\n    \"browser\": {\n        \"name\": \"curl\",\n        \"version\": \"8.5.0\"\n    },\n    \"platform\": {\n        \"name\": \"\",\n        \"os\": \"\",\n        \"type\": \"desktop\"\n    },\n    \"engine\": {\n        \"name\": \"\",\n        \"version\": \"\"\n    },\n    \"isp\": {\n        \"asn\": 5650,\n        \"isp\": \"Frontier Communications\",\n        \"organization\": \"Frontier Communications\",\n        \"domain\": \"\"\n    },\n    \"city\": {\n        \"name\": \"Stamford\",\n        \"code\": \"CT\",\n        \"zip_code\": \"06902\",\n        \"state\": \"Con"
             },
             "curl_httpbin_direct": {
                 "ok": true,
                 "output": "{\n  \"origin\": \"159.223.127.125\"\n}"
             },
-            "curl_example_proxy": {
+            "curl_carvana_geo": {
                 "ok": true,
-                "output": "<!doctype html><html lang=\"en\"><head><title>Example Domain</title><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><style>body{background:#eee;width:60vw;margin:15vh auto;font-family:system-ui,sans-serif}h1{font-size:1.5em}div{opacity:0.8}a:link,a:visited{color:#348}</style></head><body><div><h1>Example Domain</h1><p>This domain is for use in documentation examples without needing permission. Avoid use in operations.</p><p><a href=\"https://iana.org/domains/example\">Learn more<"
+                "output": "403"
             },
-            "curl_session_proxy": {
+            "curl_httpbin_plain": {
                 "ok": true,
-                "output": "Access denied. We couldn't log you in with the details provided. Please confirm your username and password and try again."
+                "output": "{\n  \"origin\": \"177.137.144.32\"\n}"
             }
         }
     },
-    "networkDiagAt": "2026-04-06T20:03:01.265Z",
+    "networkDiagAt": "2026-04-06T20:26:10.766Z",
     "workingPort": null,
     "playwrightProxy": {
         "ok": true,
-        "ip": "200.207.231.29",
-        "testedAt": "2026-04-06T20:03:09.926Z"
+        "ip": "47.165.83.188",
+        "testedAt": "2026-04-06T20:26:14.640Z"
     },
-    "lastCarvanaRun": {
-        "error": "Could not get a US proxy IP after 15 attempts. This proxy plan may not include US IPs.",
-        "details": {
-            "vin": "1HGCV2F9XNA008352",
-            "mileage": "48000",
-            "zip": "06880",
-            "attempts": 15
-        },
-        "vin": "1HGCV2F9XNA008352",
-        "mileage": "48000",
-        "zip": "06880",
-        "completed_at": "2026-04-06T20:03:41.687Z"
-    }
+    "lastCarvanaRun": null
 }
 
 === Browser Diagnostic ===
