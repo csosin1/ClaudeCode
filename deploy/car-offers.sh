@@ -61,6 +61,13 @@ if [ ! -f "$PROJECT_DIR/.playwright_installed" ]; then
     fi
 fi
 
+# Xvfb (one-time) — virtual display for headed mode (bypasses Cloudflare headless detection)
+if ! command -v Xvfb >/dev/null 2>&1; then
+    echo "$(date): Installing Xvfb for headed browser mode..." >> "$LOG"
+    apt-get install -y xvfb >> "$LOG" 2>&1
+    echo "$(date): Xvfb installed." >> "$LOG"
+fi
+
 # systemd service
 cat > /etc/systemd/system/$PROJECT.service << SVCEOF
 [Unit]
@@ -82,6 +89,9 @@ WantedBy=multi-user.target
 SVCEOF
 systemctl daemon-reload
 systemctl enable $PROJECT >> "$LOG" 2>&1
+
+# Clear stale startup-results to force fresh Carvana run on restart
+rm -f "$PROJECT_DIR/startup-results.json" 2>/dev/null
 
 # Only start service if deps are ready (prevents 502 on first deploy)
 if [ -d "$PROJECT_DIR/node_modules/express" ]; then

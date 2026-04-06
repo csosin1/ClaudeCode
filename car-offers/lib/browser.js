@@ -171,7 +171,28 @@ async function launchBrowser(options = {}) {
     console.log('[browser] No proxy configured — using direct connection');
   }
 
-  const launchOptions = { headless: true, args };
+  // Use headed mode with Xvfb if available — much harder for Cloudflare to detect
+  // Xvfb provides a virtual display so headed mode works without a physical screen
+  let useHeaded = false;
+  try {
+    const { execSync } = require('child_process');
+    execSync('which Xvfb', { stdio: 'pipe' });
+    // Start Xvfb if not already running
+    try {
+      execSync('pgrep -x Xvfb', { stdio: 'pipe' });
+      console.log('[browser] Xvfb already running');
+    } catch {
+      execSync('Xvfb :99 -screen 0 1920x1080x24 &', { stdio: 'pipe' });
+      console.log('[browser] Started Xvfb on :99');
+    }
+    process.env.DISPLAY = ':99';
+    useHeaded = true;
+    console.log('[browser] Using HEADED mode with Xvfb (better anti-detection)');
+  } catch {
+    console.log('[browser] Xvfb not available — using headless mode');
+  }
+
+  const launchOptions = { headless: !useHeaded, args };
   if (proxyConfig) {
     launchOptions.proxy = proxyConfig;
   }

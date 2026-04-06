@@ -162,28 +162,71 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
         break;
       }
 
-      // Cloudflare detected — wait progressively longer for the challenge to auto-resolve
-      // Cloudflare JS challenges can take 15-45 seconds to complete
-      const waitSecs = [30, 45, 60][attempt] || 60;
-      log(`[carvana] Cloudflare challenge detected (attempt ${attempt}). Waiting ${waitSecs}s...`);
+      // Cloudflare detected — try to handle the challenge
+      log(`[carvana] Cloudflare challenge detected (attempt ${attempt})`);
       await screenshot(page, `blocked-attempt-${attempt}`);
 
-      // Simulate human behavior during the wait — Cloudflare watches mouse/keyboard
-      for (let w = 0; w < Math.floor(waitSecs / 10); w++) {
-        await humanDelay(8000, 12000);
-        await simulateHumanBehavior(page);
+      // Try to find and interact with Cloudflare Turnstile/challenge widget
+      // Cloudflare uses an iframe for its challenge — we need to click inside it
+      try {
+        const cfFrames = page.frames().filter(f =>
+          f.url().includes('challenges.cloudflare.com') ||
+          f.url().includes('turnstile') ||
+          f.url().includes('cf-chl')
+        );
+        log(`[carvana] Found ${cfFrames.length} Cloudflare challenge frames`);
+        for (const frame of cfFrames) {
+          try {
+            // Look for the checkbox/verify button inside the challenge iframe
+            const checkbox = await frame.$('input[type="checkbox"], .cb-i, #challenge-stage, .spacer');
+            if (checkbox) {
+              log('[carvana] Found Cloudflare checkbox — clicking...');
+              await humanDelay(1000, 2000);
+              await checkbox.click();
+              await humanDelay(5000, 10000);
+            }
+            // Some challenges just have a "Verify" button
+            const verifyBtn = await frame.$('button, input[type="submit"]');
+            if (verifyBtn) {
+              log('[carvana] Found Cloudflare verify button — clicking...');
+              await humanDelay(1000, 2000);
+              await verifyBtn.click();
+              await humanDelay(5000, 10000);
+            }
+          } catch (frameErr) {
+            log(`[carvana] Challenge frame interaction failed: ${frameErr.message}`);
+          }
+        }
+      } catch (cfErr) {
+        log(`[carvana] Cloudflare frame detection failed: ${cfErr.message}`);
+      }
+
+      // Wait for the challenge to resolve (JS execution + potential redirect)
+      const waitSecs = [20, 30, 45][attempt] || 45;
+      log(`[carvana] Waiting ${waitSecs}s for challenge resolution...`);
+
+      // Try waitForURL — if Cloudflare resolves, the URL will change
+      try {
+        await page.waitForURL('**/sell-my-car**', { timeout: waitSecs * 1000 });
+        log('[carvana] URL changed — challenge may have resolved');
+      } catch {
+        // URL didn't change — continue with human simulation
+        for (let w = 0; w < Math.floor(waitSecs / 10); w++) {
+          await humanDelay(8000, 12000);
+          await simulateHumanBehavior(page);
+        }
       }
 
       // Check if challenge resolved
       if (!(await isBlocked(page))) {
         carvanaLoaded = true;
-        log('[carvana] Cloudflare challenge resolved after waiting!');
+        log('[carvana] Cloudflare challenge resolved!');
         break;
       }
 
       // Try refreshing the page for next attempt
       if (attempt < 2) {
-        log('[carvana] Refreshing page for next attempt...');
+        log('[carvana] Refreshing for next attempt...');
         await humanDelay(5000, 10000);
       }
     }
