@@ -646,6 +646,13 @@ app.get('/dashboard', (_req, res) => {
   </div>
 
   <div class="card">
+    <details>
+      <summary style="color:#94a3b8;font-size:0.8rem;cursor:pointer;">Raw JSON (tap to expand)</summary>
+      <pre id="rawJson" style="font-size:0.65rem;color:#64748b;overflow-x:auto;max-height:400px;margin-top:8px;white-space:pre-wrap;word-break:break-all;"></pre>
+    </details>
+  </div>
+
+  <div class="card">
     <a href="/car-offers/setup" style="color:#38bdf8;text-decoration:none;font-size:0.9rem;">Setup Page &rarr;</a>
   </div>
 
@@ -656,6 +663,7 @@ app.get('/dashboard', (_req, res) => {
         const data = await resp.json();
         renderProxy(data.proxy);
         if (data.lastCarvanaRun) renderResult(data.lastCarvanaRun);
+        document.getElementById('rawJson').textContent = JSON.stringify(data, null, 2);
       } catch (e) {
         document.getElementById('proxyInfo').innerHTML = '<span class="fail">Failed to load: ' + e.message + '</span>';
       }
@@ -669,9 +677,12 @@ app.get('/dashboard', (_req, res) => {
       html += row('Password', p.pass_set ? '<span class="ok">Set (' + p.pass_length + ' chars)</span>' : '<span class="fail">NOT SET</span>');
       if (p.test_result) {
         if (p.test_result.ok) {
-          html += row('Test', '<span class="ok">PASS — IP: ' + (p.test_result.ip || '?') + ' (' + (p.test_result.country || '?') + ')</span>');
+          const loc = p.test_result.location || p.test_result.ip || '?';
+          html += row('Test', '<span class="ok">PASS — ' + esc(loc) + '</span>');
+          html += row('Method', esc(p.test_result.method || '?') + ' port ' + esc(p.test_result.port || '?'));
         } else {
           html += row('Test', '<span class="fail">FAIL — ' + esc(p.test_result.error || 'unknown') + '</span>');
+          html += row('Method', esc(p.test_result.method || '?'));
         }
         html += row('Tested', p.tested_at ? new Date(p.tested_at).toLocaleString() : 'never');
       } else {
@@ -684,13 +695,37 @@ app.get('/dashboard', (_req, res) => {
       const card = document.getElementById('resultCard');
       const content = document.getElementById('resultContent');
       card.style.display = 'block';
+      let html = '';
       if (r.offer) {
-        content.innerHTML = '<div class="offer-big">' + esc(r.offer) + '</div>' +
-          row('VIN', r.vin || '') + row('Completed', r.completed_at ? new Date(r.completed_at).toLocaleString() : '');
+        html += '<div class="offer-big">' + esc(r.offer) + '</div>';
+        html += row('VIN', r.vin || '');
+        html += row('Completed', r.completed_at ? new Date(r.completed_at).toLocaleString() : '');
       } else if (r.error) {
-        content.innerHTML = '<div class="error-big">' + esc(r.error) + '</div>' +
-          row('VIN', r.vin || '') + row('Completed', r.completed_at ? new Date(r.completed_at).toLocaleString() : '');
+        html += '<div class="error-big">' + esc(r.error) + '</div>';
+        html += row('VIN', r.vin || '');
+        html += row('Completed', r.completed_at ? new Date(r.completed_at).toLocaleString() : '');
+        // Show full diagnostic details when there's an error
+        if (r.details) {
+          const d = r.details;
+          if (d.pageState) {
+            html += '<div style="margin-top:12px;padding-top:12px;border-top:1px solid #334155;">';
+            html += '<div style="color:#94a3b8;font-size:0.8rem;margin-bottom:8px;">PAGE DIAGNOSTICS</div>';
+            if (d.pageState.url) html += row('URL', esc(d.pageState.url));
+            if (d.pageState.title) html += row('Title', esc(d.pageState.title));
+            if (d.pageState.bodySnippet) {
+              html += '<div style="margin-top:8px;font-size:0.75rem;color:#94a3b8;">Body text (first 500 chars):</div>';
+              html += '<div style="font-size:0.7rem;color:#64748b;word-break:break-all;padding:8px;background:#0f172a;border-radius:6px;margin-top:4px;max-height:200px;overflow-y:auto;">' + esc(d.pageState.bodySnippet.substring(0, 500)) + '</div>';
+            }
+            html += '</div>';
+          }
+          if (d.pageTitle) html += row('Page Title', esc(d.pageTitle));
+          if (d.bodySnippet && !d.pageState) {
+            html += '<div style="font-size:0.7rem;color:#64748b;word-break:break-all;padding:8px;background:#0f172a;border-radius:6px;margin-top:4px;">' + esc(d.bodySnippet.substring(0, 500)) + '</div>';
+          }
+          if (d.url) html += row('Page URL', esc(d.url));
+        }
       }
+      content.innerHTML = html;
     }
 
     function row(label, value) {
