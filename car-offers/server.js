@@ -96,7 +96,7 @@ app.get('/setup', (_req, res) => {
   <p class="subtitle">Configure proxy &amp; email for Carvana lookups</p>
   ${msg === 'saved' ? '<div class="alert alert-ok">Configuration saved! <a href="/" style="color:#4ade80;font-weight:600;">Go to Car Offer Tool &rarr;</a></div>' : ''}
   ${msg === 'required' ? '<div class="alert alert-warn">Please configure your proxy and email first.</div>' : ''}
-  <form class="card" method="POST" action="/api/setup">
+  <form class="card" method="POST" action="api/setup">
     <label for="proxyHost">Proxy Host</label>
     <input type="text" id="proxyHost" name="proxyHost" placeholder="proxy.example.com" value="${escapeAttr(config.PROXY_HOST || 'gate.decodo.com')}">
 
@@ -145,7 +145,7 @@ app.post('/api/setup', (req, res) => {
   if (req.headers['content-type'] === 'application/json') {
     return res.json({ ok: true, message: 'Configuration saved.' });
   }
-  res.redirect('/setup?msg=saved');
+  res.redirect('setup?msg=saved');
 });
 
 /** Escape a string for use inside an HTML attribute value (double-quoted). */
@@ -161,7 +161,7 @@ function escapeAttr(str) {
 app.get('/', (_req, res) => {
   // Redirect to setup if not configured
   if (!config.isConfigured()) {
-    return res.redirect('/setup?msg=required');
+    return res.redirect('setup?msg=required');
   }
 
   res.send(`<!DOCTYPE html>
