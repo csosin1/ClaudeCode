@@ -257,15 +257,16 @@ mktMin.addEventListener('change', loadMarketData);
 document.getElementById('mkt-country').addEventListener('change', loadMarketData);
 
 async function loadMarketData() {
-  const cards = document.getElementById('mkt-cards');
+  const mktCards = document.getElementById('mkt-cards');
   if (!snapshotDates.length) {
-    cards.innerHTML = '<div class="card" style="text-align:center;padding:30px"><h3 style="margin-bottom:10px">No data yet</h3><p style="color:var(--text-dim)">Go to the <strong>Admin</strong> tab and tap <strong>Collect Gym Data from OSM</strong> to pull gym locations from OpenStreetMap.</p></div>';
+    mktCards.innerHTML = '<div class="card" style="text-align:center;padding:30px"><h3 style="margin-bottom:10px">No data yet</h3><p style="color:var(--text-dim)">Go to the <strong>Admin</strong> tab and tap <strong>Collect Gym Data from OSM</strong> to pull gym locations from OpenStreetMap.</p></div>';
     return;
   }
   const date = snapshotDates[0];
   const country = document.getElementById('mkt-country').value;
   const min = mktMin.value;
-  const data = await api(`market-data?date=${encodeURIComponent(date)}&country=${encodeURIComponent(country)}&min_locations=${min}`);
+  const data = (await api(`market-data?date=${encodeURIComponent(date)}&country=${encodeURIComponent(country)}&min_locations=${min}`)) || [];
+  if (!data.length) { mktCards.innerHTML = '<div class="card" style="text-align:center;padding:20px;color:var(--text-dim)">No competitor data for this selection.</div>'; return; }
 
   // Chart
   const labels = data.map(d => d.canonical_name);
@@ -308,8 +309,7 @@ async function loadMarketData() {
   document.getElementById('mkt-chart').parentElement.style.height = Math.max(250, labels.length * 32) + 'px';
 
   // Cards
-  const cards = document.getElementById('mkt-cards');
-  cards.innerHTML = data.map(d => `
+  mktCards.innerHTML = data.map(d => `
     <div class="card">
       <div class="expand-toggle" onclick="this.classList.toggle('open');this.nextElementSibling.classList.toggle('open')">
         <span><strong>${esc(d.canonical_name)}</strong></span>
@@ -331,7 +331,7 @@ let markerLayer = null;
 
 async function loadChainList() {
   chainsLoaded = true;
-  const chains = await api('chains?min_locations=1');
+  const chains = (await api('chains?min_locations=1')) || [];
   const sel = document.getElementById('chain-select');
   sel.innerHTML = '<option value="">-- select a chain --</option>' +
     chains.map(c => `<option value="${esc(c.canonical_name)}">${esc(c.canonical_name)} (${c.location_count})</option>`).join('');
@@ -344,10 +344,11 @@ document.getElementById('chain-select').addEventListener('change', async functio
 
   // Load all data in parallel
   const [profile, snapshots, locations] = await Promise.all([
-    api('chain/' + encoded),
-    api('chain/' + encoded + '/snapshots'),
-    api('chain/' + encoded + '/locations')
+    api('chain/' + encoded).then(d => d || {}),
+    api('chain/' + encoded + '/snapshots').then(d => d || []),
+    api('chain/' + encoded + '/locations').then(d => d || [])
   ]);
+  if (!profile.canonical_name) return;
 
   // Profile card
   const pCard = document.getElementById('chain-profile');
@@ -442,7 +443,7 @@ let analysisListLoaded = false;
 
 async function loadAnalysisList() {
   analysisListLoaded = true;
-  const list = await api('analyses');
+  const list = (await api('analyses')) || [];
   const sel = document.getElementById('analysis-select');
   sel.innerHTML = '<option value="">-- select analysis --</option>' +
     list.map(a => `<option value="${a.id}">${a.analysis_date} (${a.model_used})</option>`).join('');
@@ -451,7 +452,8 @@ async function loadAnalysisList() {
 document.getElementById('analysis-select').addEventListener('change', async function() {
   const id = this.value;
   if (!id) return;
-  const data = await api('analysis/' + id);
+  const data = (await api('analysis/' + id)) || {};
+  if (!data.analysis_date) return;
 
   const meta = document.getElementById('analysis-meta');
   meta.classList.remove('hidden');
@@ -494,7 +496,7 @@ async function startCollect() {
 }
 
 async function loadUnknownChains() {
-  const chains = await api('unknown-chains');
+  const chains = (await api('unknown-chains')) || [];
   const list = document.getElementById('review-list');
   if (!chains.length) {
     list.innerHTML = '<p style="color:var(--text-dim)">No chains pending review.</p>';
