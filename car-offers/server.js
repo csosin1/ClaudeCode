@@ -281,6 +281,16 @@ app.post('/api/setup', (req, res) => {
     return res.json({ ok: true, message: 'Configuration saved.' });
   }
   res.redirect('/car-offers/setup?msg=saved');
+
+  // Re-run diagnostics in background after config change
+  setTimeout(async () => {
+    console.log('[setup] Config changed — re-running diagnostics...');
+    await runFullDiagnostic();
+    if (selfTest.proxyResult && selfTest.proxyResult.ok) {
+      console.log('[setup] Curl proxy works! Testing Playwright browser...');
+      await testPlaywrightProxy();
+    }
+  }, 2000);
 });
 
 /** Escape a string for use inside an HTML attribute value (double-quoted). */
@@ -921,7 +931,7 @@ app.listen(port, '0.0.0.0', () => {
   // Run full diagnostics 5 seconds after startup
   setTimeout(async () => {
     try { config.reloadConfig(); } catch (_) {}
-    console.log(`[startup] Proxy password: ${config.PROXY_PASS ? config.PROXY_PASS.length + ' chars' : 'NOT SET'}`);
+    console.log(`[startup] Config: host=${config.PROXY_HOST} port=${config.PROXY_PORT} user=${config.PROXY_USER} pass=${config.PROXY_PASS ? config.PROXY_PASS.length + ' chars' : 'NOT SET'}`);
 
     console.log('[startup] Running full curl-based diagnostics...');
     await runFullDiagnostic();
