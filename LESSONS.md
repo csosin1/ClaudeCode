@@ -74,3 +74,8 @@
 - **What went wrong:** Project chats created `.github/workflows/proxy-diag.yml` and `.github/workflows/check-dashboard.yml` directly, even though `.github/workflows/*.yml` is Orchestrator-only.
 - **Root cause:** The chats needed a feedback loop and the existing infrastructure didn't provide one. They improvised.
 - **What to do differently:** The Server Check workflow now fills this gap. Project chats should never create workflows. If they need a custom check, propose it via CHANGES.md.
+
+## 2026-04-06 Missing Workflow Permissions — Silent Failure
+- **What went wrong:** Added a `github-script` step to `qa.yml` that posts issue comments, but didn't add `permissions: issues: write`. The step failed silently — no error in the workflow, no comment posted. Took 4 push+wait cycles to diagnose because there was no visible error signal.
+- **Root cause:** GitHub Actions defaults to read-only permissions for the GITHUB_TOKEN. `actions/github-script` swallows permission errors instead of failing the step. No checklist existed for workflow modifications.
+- **What to do differently:** (1) Every workflow file MUST have an explicit `permissions` block — never rely on defaults. (2) When adding a step that calls a GitHub API (issues, PRs, deployments, etc.), always add the corresponding permission. (3) When a workflow step produces no output and no error, suspect a permissions issue first. (4) Common permissions needed: `issues: write` for issue comments, `contents: write` for pushing/creating files, `pull-requests: write` for PR comments, `actions: read` for reading workflow results.

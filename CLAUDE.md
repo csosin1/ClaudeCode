@@ -667,7 +667,12 @@ Fix cycles used: [0-2]
 
 **Deploy script self-update is two-deploy:** When you fix the deploy script itself, the fix doesn't take effect on the current run — the old script is already in memory. Push the fix, then push a second trivial commit to trigger a deploy that runs the new script. Pattern: fix → deploy (copies new script) → trigger commit → deploy (runs new script).
 
-**Automated QA:** Every push to `main` triggers a GitHub Actions workflow (`.github/workflows/qa.yml`) that runs Playwright tests against the live site at 390px mobile and 1280px desktop. Tests cover: page loads, link integrity, JS errors, security (dotfile/env blocking), performance (<8s load), and webhook health. Results visible in the GitHub Actions tab. Screenshots uploaded as artifacts.
+**Automated QA:** Every push to `main` triggers a GitHub Actions workflow (`.github/workflows/qa.yml`) that runs Playwright tests against the live site at 390px mobile and 1280px desktop. Tests cover: page loads, link integrity, JS errors, security (dotfile/env blocking), performance (<8s load), and webhook health. Results visible in the GitHub Actions tab. Screenshots uploaded as artifacts. After tests complete, full server diagnostics are posted to Issue #4 automatically.
+
+**GitHub Actions workflow rules:**
+- Every `.yml` workflow file MUST have an explicit `permissions` block — never rely on defaults. GitHub defaults to read-only, and `actions/github-script` fails silently on permission errors.
+- Common permissions: `issues: write` (issue comments), `contents: write` (push/create files), `pull-requests: write` (PR comments), `actions: read` (read workflow results).
+- When adding a step that calls any GitHub API, add the matching permission in the same commit. Don't assume it will work — permission failures are silent.
 
 **Project isolation:** Own directory, nginx route, deploy script. Never write outside project directory. One deploy never breaks another.
 
