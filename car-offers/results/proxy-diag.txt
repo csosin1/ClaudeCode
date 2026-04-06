@@ -1,33 +1,22 @@
-=== Fetched at Mon Apr  6 20:47:57 UTC 2026 ===
+=== Fetched at Mon Apr  6 20:57:06 UTC 2026 ===
 
 === Startup Results ===
 {
     "proxyResult": {
         "ok": true,
-        "ip": "107.191.156.100",
+        "ip": "47.165.83.188",
         "method": "curl",
         "port": "7000"
     },
-    "proxyTestedAt": "2026-04-06T20:45:02.951Z",
-    "startedAt": "2026-04-06T20:44:55.062Z",
-    "lastCarvanaRun": {
-        "error": "page.content: Target page, context or browser has been closed",
-        "details": {
-            "vin": "1HGCV2F9XNA008352",
-            "mileage": "48000",
-            "zip": "06880"
-        },
-        "vin": "1HGCV2F9XNA008352",
-        "mileage": "48000",
-        "zip": "06880",
-        "completed_at": "2026-04-06T20:46:53.110Z"
-    },
+    "proxyTestedAt": "2026-04-06T20:55:34.977Z",
+    "startedAt": "2026-04-06T20:55:26.759Z",
+    "lastCarvanaRun": null,
     "networkDiag": {
-        "timestamp": "2026-04-06T20:45:00.076Z",
+        "timestamp": "2026-04-06T20:55:31.775Z",
         "tests": {
             "dns_resolve": {
                 "ok": true,
-                "output": "dataroute0.com.\n212.11.41.34\n89.222.99.194\n37.19.211.193\n169.150.204.216\n138.199.35.66\n149.88.97.66\n37.19.211.219"
+                "output": "dataroute0.com.\n138.199.35.66\n169.150.204.216\n149.88.97.66\n37.19.211.219\n212.11.41.34\n89.222.99.194\n37.19.211.193"
             },
             "tcp_proxy": {
                 "ok": true,
@@ -35,7 +24,7 @@
             },
             "curl_httpbin_geo": {
                 "ok": true,
-                "output": "{\n  \"origin\": \"107.191.156.100\"\n}"
+                "output": "{\n  \"origin\": \"47.165.83.188\"\n}"
             },
             "curl_decodo_geo": {
                 "ok": true,
@@ -51,21 +40,21 @@
             },
             "curl_httpbin_plain": {
                 "ok": true,
-                "output": "{\n  \"origin\": \"179.60.64.23\"\n}"
+                "output": "{\n  \"origin\": \"157.100.89.17\"\n}"
             }
         }
     },
-    "networkDiagAt": "2026-04-06T20:45:00.076Z",
+    "networkDiagAt": "2026-04-06T20:55:31.775Z",
     "playwrightProxy": {
-        "ok": true,
-        "ip": "68.192.51.162",
-        "testedAt": "2026-04-06T20:45:03.911Z"
+        "ok": false,
+        "error": "Unexpected token 'A', \"Access den\"... is not valid JSON",
+        "testedAt": "2026-04-06T20:55:36.362Z"
     }
 }
 
 === Debug Config ===
 {
-    "timestamp": "2026-04-06T20:47:57.866Z",
+    "timestamp": "2026-04-06T20:57:06.420Z",
     "proxy_host": "gate.decodo.com",
     "proxy_port": "10001",
     "proxy_user": "spjax0kgms",
@@ -73,14 +62,14 @@
     "proxy_pass_length": 18,
     "project_email": "caroffers.tool@gmail.com",
     "node_version": "v22.22.2",
-    "uptime_seconds": 183
+    "uptime_seconds": 99
 }
 
 === Status ===
 {
     "service": {
-        "startedAt": "2026-04-06T20:44:55.062Z",
-        "uptime_seconds": 183,
+        "startedAt": "2026-04-06T20:55:26.759Z",
+        "uptime_seconds": 99,
         "node_version": "v22.22.2"
     },
     "proxy": {
@@ -92,18 +81,18 @@
         "pass_length": 18,
         "test_result": {
             "ok": true,
-            "ip": "107.191.156.100",
+            "ip": "47.165.83.188",
             "method": "curl",
             "port": "7000"
         },
-        "tested_at": "2026-04-06T20:45:02.951Z"
+        "tested_at": "2026-04-06T20:55:34.977Z"
     },
     "networkDiag": {
-        "timestamp": "2026-04-06T20:45:00.076Z",
+        "timestamp": "2026-04-06T20:55:31.775Z",
         "tests": {
             "dns_resolve": {
                 "ok": true,
-                "output": "dataroute0.com.\n212.11.41.34\n89.222.99.194\n37.19.211.193\n169.150.204.216\n138.199.35.66\n149.88.97.66\n37.19.211.219"
+                "output": "dataroute0.com.\n138.199.35.66\n169.150.204.216\n149.88.97.66\n37.19.211.219\n212.11.41.34\n89.222.99.194\n37.19.211.193"
             },
             "tcp_proxy": {
                 "ok": true,
@@ -111,7 +100,7 @@
             },
             "curl_httpbin_geo": {
                 "ok": true,
-                "output": "{\n  \"origin\": \"107.191.156.100\"\n}"
+                "output": "{\n  \"origin\": \"47.165.83.188\"\n}"
             },
             "curl_decodo_geo": {
                 "ok": true,
@@ -127,29 +116,18 @@
             },
             "curl_httpbin_plain": {
                 "ok": true,
-                "output": "{\n  \"origin\": \"179.60.64.23\"\n}"
+                "output": "{\n  \"origin\": \"157.100.89.17\"\n}"
             }
         }
     },
-    "networkDiagAt": "2026-04-06T20:45:00.076Z",
+    "networkDiagAt": "2026-04-06T20:55:31.775Z",
     "workingPort": null,
     "playwrightProxy": {
-        "ok": true,
-        "ip": "68.192.51.162",
-        "testedAt": "2026-04-06T20:45:03.911Z"
+        "ok": false,
+        "error": "Unexpected token 'A', \"Access den\"... is not valid JSON",
+        "testedAt": "2026-04-06T20:55:36.362Z"
     },
-    "lastCarvanaRun": {
-        "error": "page.content: Target page, context or browser has been closed",
-        "details": {
-            "vin": "1HGCV2F9XNA008352",
-            "mileage": "48000",
-            "zip": "06880"
-        },
-        "vin": "1HGCV2F9XNA008352",
-        "mileage": "48000",
-        "zip": "06880",
-        "completed_at": "2026-04-06T20:46:53.110Z"
-    }
+    "lastCarvanaRun": null
 }
 
 === Browser Diagnostic ===
