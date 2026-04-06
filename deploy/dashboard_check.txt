@@ -1,11 +1,10 @@
 Size: 1123932
 
-Documents tab exists for 2020-P1: False
 2020-P1 tabs: ['Pool_Summary', 'Delinquencies', 'Losses', 'Cash_Waterfall', 'Recovery', 'Notes_and_OC']
-Doc links found: 0
-SEC links: 0
-'Servicer Certificates' in page: False
-'Documents' in page: False
-'Prospectus' in page: False
+'Documents' in HTML: False
+'Servicer Certificates' in HTML: False
+'Prospectus' in HTML: False
+Local doc links: 0
+SEC/EDGAR link count: 1
 
-Docs dir HTTP status: 200
+No Documents section found for 2020-P1
