@@ -1,14 +1,12 @@
 name: Server Check
 
-# Two ways to trigger (no push to main needed):
-# 1. workflow_dispatch — from GitHub Actions UI
-# 2. Issue comment — post "/check" or "/check car-offers" on any issue
-# Project chats use mcp__github__add_issue_comment to trigger this.
+# Project chats post "/check" on issue #4 to trigger this.
+# Results are posted back as an issue comment.
 on:
   workflow_dispatch:
     inputs:
       target:
-        description: 'What to check: "all", "car-offers", "gym-intelligence", "status", or a URL path like "/car-offers/api/status"'
+        description: 'What to check: "all", "car-offers", "gym-intelligence", or a URL path like "/car-offers/api/status"'
         required: false
         default: 'all'
   issue_comment:
@@ -16,115 +14,109 @@ on:
 
 permissions:
   issues: write
+  contents: read
 
 jobs:
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 2
-    # For issue_comment trigger: only run if comment starts with "/check"
+    # Only run if: workflow_dispatch OR issue comment starting with /check
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'issue_comment' && startsWith(github.event.comment.body, '/check'))
 
     steps:
-      - name: Parse target
-        id: parse
+      - name: Run server checks
+        id: check
         run: |
+          BASE="http://159.223.127.125"
+          REPORT=$(mktemp)
+
+          # Parse target
           if [ "${{ github.event_name }}" = "issue_comment" ]; then
-            # Extract target from comment: "/check car-offers" → "car-offers"
-            COMMENT="${{ github.event.comment.body }}"
-            TARGET=$(echo "$COMMENT" | sed 's|^/check\s*||' | tr -d '\r\n' | xargs)
+            # Extract target: "/check car-offers" → "car-offers", "/check" → "all"
+            RAW_BODY=$(cat <<'BODY_EOF'
+          ${{ github.event.comment.body }}
+          BODY_EOF
+            )
+            TARGET=$(echo "$RAW_BODY" | head -1 | sed 's|^/check||' | xargs)
             [ -z "$TARGET" ] && TARGET="all"
           else
             TARGET="${{ github.event.inputs.target }}"
             [ -z "$TARGET" ] && TARGET="all"
           fi
-          echo "target=$TARGET" >> $GITHUB_OUTPUT
-          echo "Checking: $TARGET"
 
-      - name: Check server status
-        run: |
-          BASE="http://159.223.127.125"
-          TARGET="${{ steps.parse.outputs.target }}"
-
-          echo "## Server Check: $TARGET" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Server Check: \`$TARGET\`" >> "$REPORT"
+          echo "" >> "$REPORT"
 
           check_url() {
-            local label="$1"
-            local url="$2"
-            echo "--- Checking $label ($url) ---"
+            local label="$1" url="$2"
             STATUS=$(curl -sf -o /dev/null -w '%{http_code}' --max-time 10 "$url" 2>/dev/null || echo "000")
             if [ "$STATUS" = "200" ]; then
-              echo "✅ $label: $STATUS"
-              echo "- ✅ **$label**: $STATUS" >> $GITHUB_STEP_SUMMARY
+              echo "- ✅ **$label**: $STATUS" >> "$REPORT"
             else
-              echo "❌ $label: $STATUS"
-              echo "- ❌ **$label**: $STATUS" >> $GITHUB_STEP_SUMMARY
+              echo "- ❌ **$label**: $STATUS" >> "$REPORT"
             fi
           }
 
           fetch_json() {
-            local label="$1"
-            local url="$2"
-            echo ""
-            echo "--- $label ---"
+            local label="$1" url="$2"
             BODY=$(curl -sf --max-time 10 "$url" 2>/dev/null || echo '{"error":"request failed"}')
-            echo "$BODY"
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "### $label" >> $GITHUB_STEP_SUMMARY
-            echo '```json' >> $GITHUB_STEP_SUMMARY
-            echo "$BODY" | python3 -m json.tool 2>/dev/null || echo "$BODY" >> $GITHUB_STEP_SUMMARY
-            echo "$BODY" | python3 -m json.tool >> $GITHUB_STEP_SUMMARY 2>/dev/null || true
-            echo '```' >> $GITHUB_STEP_SUMMARY
+            PRETTY=$(echo "$BODY" | python3 -m json.tool 2>/dev/null || echo "$BODY")
+            echo "" >> "$REPORT"
+            echo "### $label" >> "$REPORT"
+            echo '```json' >> "$REPORT"
+            echo "$PRETTY" >> "$REPORT"
+            echo '```' >> "$REPORT"
           }
 
-          # Custom URL path
-          if [[ "$TARGET" == /* ]]; then
-            check_url "Custom: $TARGET" "$BASE$TARGET"
-            echo ""
-            echo "--- Response body ---"
-            BODY=$(curl -sf --max-time 10 "$BASE$TARGET" 2>/dev/null || echo "(no response)")
-            echo "$BODY"
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            echo "$BODY" >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            exit 0
-          fi
-
-          # Status check (always)
-          if [ "$TARGET" = "all" ] || [ "$TARGET" = "status" ]; then
+          # Custom URL path (e.g. /check /car-offers/api/status)
+          if echo "$TARGET" | grep -q '^/'; then
+            check_url "$TARGET" "$BASE$TARGET"
+            echo "" >> "$REPORT"
+            echo '```' >> "$REPORT"
+            curl -sf --max-time 10 "$BASE$TARGET" >> "$REPORT" 2>/dev/null || echo "(no response)" >> "$REPORT"
+            echo "" >> "$REPORT"
+            echo '```' >> "$REPORT"
+          else
+            # Always show status.json
             fetch_json "status.json" "$BASE/status.json"
             fetch_json "debug.json" "$BASE/debug.json"
-          fi
 
-          # Car-offers
-          if [ "$TARGET" = "all" ] || [ "$TARGET" = "car-offers" ]; then
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "### Car Offers" >> $GITHUB_STEP_SUMMARY
-            check_url "Car Offers main page" "$BASE/car-offers/"
-            check_url "Car Offers dashboard" "$BASE/car-offers/dashboard"
-            check_url "Car Offers API status" "$BASE/car-offers/api/status"
-            fetch_json "Car Offers /api/status" "$BASE/car-offers/api/status"
-          fi
+            # Car-offers
+            if [ "$TARGET" = "all" ] || [ "$TARGET" = "car-offers" ]; then
+              echo "" >> "$REPORT"
+              echo "### Car Offers" >> "$REPORT"
+              check_url "Main page" "$BASE/car-offers/"
+              check_url "Dashboard" "$BASE/car-offers/dashboard"
+              fetch_json "/api/status" "$BASE/car-offers/api/status"
+            fi
 
-          # Gym Intelligence
-          if [ "$TARGET" = "all" ] || [ "$TARGET" = "gym-intelligence" ]; then
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "### Gym Intelligence" >> $GITHUB_STEP_SUMMARY
-            check_url "Gym Intelligence main page" "$BASE/gym-intelligence/"
-            DB_STATUS=$(curl -sf --max-time 10 "$BASE/gym-db-status.json" 2>/dev/null)
-            if [ -n "$DB_STATUS" ]; then
-              fetch_json "Gym DB Status" "$BASE/gym-db-status.json"
+            # Gym Intelligence
+            if [ "$TARGET" = "all" ] || [ "$TARGET" = "gym-intelligence" ]; then
+              echo "" >> "$REPORT"
+              echo "### Gym Intelligence" >> "$REPORT"
+              check_url "Main page" "$BASE/gym-intelligence/"
+              # Try project-specific endpoints
+              for ep in /gym-intelligence/api/country-counts /gym-db-status.json; do
+                RESP=$(curl -sf --max-time 10 "$BASE$ep" 2>/dev/null)
+                if [ -n "$RESP" ]; then
+                  fetch_json "$ep" "$BASE$ep"
+                fi
+              done
             fi
           fi
 
-          echo ""
-          echo "--- Done ---"
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "---" >> $GITHUB_STEP_SUMMARY
-          echo "_Check completed at $(date -u)_" >> $GITHUB_STEP_SUMMARY
+          echo "" >> "$REPORT"
+          echo "---" >> "$REPORT"
+          echo "_Completed $(date -u +%Y-%m-%dT%H:%M:%SZ)_" >> "$REPORT"
+
+          # Output for next step
+          cat "$REPORT"
+          cat "$REPORT" >> "$GITHUB_STEP_SUMMARY"
+
+          # Save report path for comment posting
+          echo "report=$REPORT" >> "$GITHUB_OUTPUT"
 
       - name: Post results to issue
         if: github.event_name == 'issue_comment'
@@ -132,10 +124,16 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const summary = fs.readFileSync(process.env.GITHUB_STEP_SUMMARY, 'utf8');
+            const reportPath = '${{ steps.check.outputs.report }}';
+            let body = 'Server check completed. See workflow run for details.';
+            try {
+              body = fs.readFileSync(reportPath, 'utf8');
+            } catch (e) {
+              console.log('Could not read report file:', e.message);
+            }
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: summary || 'Server check completed. See workflow run for details.'
+              body: body
             });

@@ -31,13 +31,17 @@ jobs:
         env:
           BASE_URL: http://159.223.127.125
 
-      - name: Server diagnostics (on failure)
-        if: failure()
+      - name: Server diagnostics
+        if: always()
         run: |
           echo "### Server Diagnostics" >> $GITHUB_STEP_SUMMARY
           echo '```json' >> $GITHUB_STEP_SUMMARY
-          curl -sf http://159.223.127.125/debug.json 2>/dev/null || echo '{"error":"debug.json not available"}'
-          curl -sf http://159.223.127.125/debug.json >> $GITHUB_STEP_SUMMARY 2>/dev/null || echo '{"error":"debug.json not available"}' >> $GITHUB_STEP_SUMMARY
+          curl -sf http://159.223.127.125/status.json 2>/dev/null | python3 -m json.tool >> $GITHUB_STEP_SUMMARY 2>/dev/null || echo '{"error":"status.json not available"}' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### debug.json" >> $GITHUB_STEP_SUMMARY
+          echo '```json' >> $GITHUB_STEP_SUMMARY
+          curl -sf http://159.223.127.125/debug.json 2>/dev/null | python3 -m json.tool >> $GITHUB_STEP_SUMMARY 2>/dev/null || echo '{"error":"debug.json not available"}' >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
 
       - name: Upload screenshots
