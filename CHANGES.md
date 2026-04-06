@@ -296,3 +296,30 @@ Also update the **Server Health** test `debug.json reports healthy server state`
 - WebSocket headers (`Upgrade`, `Connection`) are set in nginx for Streamlit live reload
 - The `.env` template is created one-time with empty `ANTHROPIC_API_KEY=` — user fills it in via the Setup page in the app
 - The app defaults to the Setup page when no API key is configured (first-run experience)
+
+## 2026-04-06 Gym Intelligence — Streamlit to Flask Migration
+
+### What was built
+Replaced the Streamlit UI with a lightweight Flask app and single-page HTML frontend for fast mobile loading (sub-2-second page loads vs 30+ seconds with Streamlit). The Flask backend was already in place from a prior migration; this change adds the complete frontend template and cleans up requirements.
+
+### Files modified
+- `gym-intelligence/templates/index.html` (new) — Full single-page app with four tabs: Market Overview, Chain Explorer, Competitive Analysis, Admin. Built with vanilla JS, Chart.js for charts, Leaflet/OpenStreetMap for maps, and marked.js for markdown rendering. Mobile-first dark theme, touch-friendly controls, no frameworks.
+- `gym-intelligence/requirements.txt` (updated) — Removed streamlit, plotly, pandas (no longer needed). Kept flask, anthropic, httpx, thefuzz.
+- `CHANGES.md` (updated) — This entry.
+
+### Frontend features
+- **Market tab**: Country filter, min-locations slider, horizontal bar chart of market share, expandable chain detail cards
+- **Chains tab**: Chain selector dropdown, profile card with classification/tier/rationale, line chart of locations over time by country, Leaflet map with location markers and popups, growth metric cards
+- **Analysis tab**: Analysis selector, metadata cards, rendered markdown analysis text
+- **Admin tab**: Status dashboard, background data refresh with live log polling, chain review forms with inline save, CSV export download, API key management
+
+### Proposed infra changes (for infra chat)
+- **systemd ExecStart**: Update from `python -m streamlit run app.py --server.port=8502 ...` to `/opt/gym-intelligence/venv/bin/python app.py`. The Flask app serves on port 8502 directly.
+- **nginx**: WebSocket proxy headers (`Upgrade`, `Connection`) and the `_stcore/` location block are no longer needed (Flask does not use WebSockets). They can be removed for cleanliness but will not cause harm if left in place.
+- **Setup verification**: Change the deploy script check from `import streamlit` to `import flask` to verify the venv was set up correctly.
+- **pip install**: The new requirements.txt is much smaller; a `pip install -r requirements.txt` in the venv will pick up flask and drop streamlit/plotly/pandas.
+
+### Proposed QA test update
+- The existing test should still check that `/gym-intelligence/` returns 200
+- Update expected body text: check for "Market" or "Gym Intelligence" (the page now renders instantly, no 3-second Streamlit wait needed)
+- The "no JS errors" test should continue to pass
