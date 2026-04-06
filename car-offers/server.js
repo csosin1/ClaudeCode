@@ -539,6 +539,40 @@ app.get('/api/startup-results', (_req, res) => {
   res.json({ error: 'No results yet — server may still be starting up' });
 });
 
+/**
+ * Test Playwright browser through proxy (after curl confirms proxy works).
+ */
+async function testPlaywrightProxy() {
+  let browser = null;
+  try {
+    const proxyPort = (config.PROXY_PORT === '7000') ? '10001' : (config.PROXY_PORT || '10001');
+    const pw = require('playwright');
+    browser = await pw.chromium.launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--no-zygote', '--single-process', '--disable-gpu', '--disable-dev-shm-usage'],
+      proxy: {
+        server: `http://${config.PROXY_HOST}:${proxyPort}`,
+        username: config.PROXY_USER,
+        password: config.PROXY_PASS,
+      },
+    });
+    const page = await browser.newPage();
+    await page.goto('http://httpbin.org/ip', { timeout: 30000 });
+    const body = await page.textContent('body');
+    await browser.close();
+    browser = null;
+
+    const parsed = JSON.parse(body.trim());
+    selfTest.playwrightProxy = { ok: true, ip: parsed.origin, testedAt: new Date().toISOString() };
+    console.log(`[startup] Playwright proxy WORKS! IP: ${parsed.origin}`);
+  } catch (err) {
+    if (browser) try { await browser.close(); } catch (_) {}
+    selfTest.playwrightProxy = { ok: false, error: err.message, testedAt: new Date().toISOString() };
+    console.error(`[startup] Playwright proxy FAILED: ${err.message}`);
+  }
+  saveResults();
+}
+
 // --- Dashboard: auto-refreshing status page with one-tap actions ---
 app.get('/dashboard', (_req, res) => {
   res.send(`<!DOCTYPE html>
@@ -729,6 +763,7 @@ app.get('/api/status', (_req, res) => {
     networkDiag: selfTest.networkDiag || null,
     networkDiagAt: selfTest.networkDiagAt || null,
     workingPort: selfTest.workingPort || null,
+    playwrightProxy: selfTest.playwrightProxy || null,
     lastCarvanaRun: selfTest.lastCarvanaRun,
   });
 });
@@ -788,6 +823,23 @@ app.get('/api/auto-run', async (_req, res) => {
     };
     console.error(`[auto-run] Carvana error:`, err.message);
   }
+});
+
+// --- Fix .env password (the setup form corrupted it — 18 chars instead of 10) ---
+app.get('/api/fix-env', (_req, res) => {
+  try { config.reloadConfig(); } catch (_) {}
+  const envPath = path.join(__dirname, '.env');
+  const envContent = [
+    'PROXY_HOST=gate.decodo.com',
+    'PROXY_PORT=10001',
+    'PROXY_USER=spjax0kgms',
+    'PROXY_PASS=Mnx32sxKmj',
+    'PROJECT_EMAIL=caroffers.tool@gmail.com',
+    'PORT=3100',
+  ].join('\n') + '\n';
+  fs.writeFileSync(envPath, envContent, 'utf8');
+  config.reloadConfig();
+  res.json({ ok: true, message: 'Environment fixed', pass_length: config.PROXY_PASS.length });
 });
 
 // --- Retest proxy endpoint ---
@@ -884,7 +936,31 @@ app.listen(port, '0.0.0.0', () => {
 
   // Run full diagnostics 5 seconds after startup
   setTimeout(async () => {
+    // Auto-fix .env if password is wrong length (18 chars = corrupted)
+    try { config.reloadConfig(); } catch (_) {}
+    if (config.PROXY_PASS && config.PROXY_PASS.length !== 10) {
+      console.log(`[startup] Password is ${config.PROXY_PASS.length} chars (expected 10) — auto-fixing .env`);
+      const envPath = path.join(__dirname, '.env');
+      const envContent = [
+        'PROXY_HOST=gate.decodo.com',
+        'PROXY_PORT=10001',
+        'PROXY_USER=spjax0kgms',
+        'PROXY_PASS=Mnx32sxKmj',
+        'PROJECT_EMAIL=caroffers.tool@gmail.com',
+        'PORT=3100',
+      ].join('\n') + '\n';
+      fs.writeFileSync(envPath, envContent, 'utf8');
+      config.reloadConfig();
+      console.log(`[startup] .env fixed — password now ${config.PROXY_PASS.length} chars`);
+    }
+
     console.log('[startup] Running full curl-based diagnostics...');
     await runFullDiagnostic();
+
+    // If curl proxy works, try Playwright browser through proxy
+    if (selfTest.proxyResult && selfTest.proxyResult.ok) {
+      console.log('[startup] Curl proxy works! Testing Playwright browser through proxy...');
+      await testPlaywrightProxy();
+    }
   }, 5000);
 });

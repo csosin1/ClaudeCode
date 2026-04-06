@@ -70,20 +70,18 @@ async function launchBrowser(options = {}) {
   ];
 
   // Build proxy config
+  // NOTE: Decodo session suffix (-session-xxx) causes auth failure.
+  // Use plain username for now. Sticky sessions may need a different format.
   let proxyConfig = null;
   if (config.PROXY_HOST && config.PROXY_PASS) {
-    const sessionId = Math.random().toString(36).substring(7);
-    const stickyUsername = config.PROXY_USER ? `${config.PROXY_USER}-session-${sessionId}` : '';
     const proxyPort = (config.PROXY_PORT === '7000') ? '10001' : (config.PROXY_PORT || '10001');
 
     proxyConfig = {
       server: `http://${config.PROXY_HOST}:${proxyPort}`,
+      username: config.PROXY_USER,
+      password: config.PROXY_PASS,
     };
-    if (stickyUsername) {
-      proxyConfig.username = stickyUsername;
-      proxyConfig.password = config.PROXY_PASS;
-    }
-    console.log(`[browser] Using proxy: ${config.PROXY_HOST}:${proxyPort}`);
+    console.log(`[browser] Using proxy: ${config.PROXY_HOST}:${proxyPort} user=${config.PROXY_USER}`);
   } else {
     console.log('[browser] No proxy configured — using direct connection');
   }
