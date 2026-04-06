@@ -165,9 +165,23 @@ label{font-size:.85rem;color:var(--text-dim);font-weight:600}
   <div id="admin-status" class="stat-row"></div>
 
   <div class="card">
-    <h3>Data Refresh</h3>
-    <button class="btn btn-primary" id="btn-refresh" onclick="startRefresh()">Run Data Refresh</button>
+    <h3>1. Collect Gym Data</h3>
+    <p style="color:var(--text-dim);font-size:.85rem;margin-bottom:10px">Pulls gym locations from OpenStreetMap. No API key needed. Takes 10-30 min for all 6 countries.</p>
+    <button class="btn btn-primary" id="btn-collect" onclick="startCollect()">Collect Gym Data from OSM</button>
     <div id="refresh-log" class="log-box hidden"></div>
+  </div>
+
+  <div class="card">
+    <h3>2. Classify + Analyze (needs API key)</h3>
+    <p style="color:var(--text-dim);font-size:.85rem;margin-bottom:10px">Classifies chains with Claude and generates competitive analysis.</p>
+    <button class="btn btn-primary" id="btn-refresh" onclick="startRefresh()">Run Full Pipeline</button>
+  </div>
+
+  <div class="card">
+    <h3>API Key</h3>
+    <p id="key-status" style="margin-bottom:8px;font-size:.85rem"></p>
+    <input type="password" id="api-key-input" placeholder="sk-ant-...">
+    <button class="btn btn-primary" onclick="saveKey()">Save API Key</button>
   </div>
 
   <div class="card">
@@ -178,13 +192,6 @@ label{font-size:.85rem;color:var(--text-dim);font-weight:600}
   <div class="card">
     <h3>Export</h3>
     <button class="btn btn-secondary" onclick="location.href=API+'export'">Download CSV Export (ZIP)</button>
-  </div>
-
-  <div class="card">
-    <h3>API Key</h3>
-    <input type="password" id="api-key-input" placeholder="sk-ant-...">
-    <button class="btn btn-primary" onclick="saveKey()">Save API Key</button>
-    <p id="key-status" style="margin-top:8px"></p>
   </div>
 </div>
 
@@ -244,7 +251,11 @@ mktMin.addEventListener('change', loadMarketData);
 document.getElementById('mkt-country').addEventListener('change', loadMarketData);
 
 async function loadMarketData() {
-  if (!snapshotDates.length) return;
+  const cards = document.getElementById('mkt-cards');
+  if (!snapshotDates.length) {
+    cards.innerHTML = '<div class="card" style="text-align:center;padding:30px"><h3 style="margin-bottom:10px">No data yet</h3><p style="color:var(--text-dim)">Go to the <strong>Admin</strong> tab and tap <strong>Collect Gym Data from OSM</strong> to pull gym locations from OpenStreetMap.</p></div>';
+    return;
+  }
   const date = snapshotDates[0];
   const country = document.getElementById('mkt-country').value;
   const min = mktMin.value;
@@ -455,14 +466,25 @@ async function loadAdmin() {
   const status = await api('status');
   document.getElementById('admin-status').innerHTML = `
     <div class="stat-card"><div class="val">${status.last_refresh}</div><div class="lbl">Last Refresh</div></div>
-    <div class="stat-card"><div class="val">${status.total_locations}</div><div class="lbl">Active Locations</div></div>
-    <div class="stat-card"><div class="val">${status.api_key_set ? 'Set' : 'Missing'}</div><div class="lbl">API Key</div></div>
+    <div class="stat-card"><div class="val">${status.total_locations.toLocaleString()}</div><div class="lbl">Active Locations</div></div>
   `;
   document.getElementById('key-status').textContent = status.api_key_set
-    ? 'Key: ' + status.api_key_preview
-    : 'No API key configured.';
+    ? 'Key configured: ' + status.api_key_preview
+    : 'Not set yet (only needed for classification & analysis)';
 
   loadUnknownChains();
+}
+
+async function startCollect() {
+  const btn = document.getElementById('btn-collect');
+  btn.disabled = true;
+  btn.textContent = 'Collecting...';
+  const logEl = document.getElementById('refresh-log');
+  logEl.classList.remove('hidden');
+  logEl.textContent = 'Starting collection...';
+  await fetch(API + 'collect-only', { method: 'POST' });
+  if (refreshPollId) clearInterval(refreshPollId);
+  refreshPollId = setInterval(pollRefresh, 2000);
 }
 
 async function loadUnknownChains() {
@@ -527,11 +549,13 @@ async function startRefresh() {
   const btn = document.getElementById('btn-refresh');
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner"></span> Running...';
+  document.getElementById('btn-collect').disabled = true;
   const logBox = document.getElementById('refresh-log');
   logBox.classList.remove('hidden');
-  logBox.textContent = 'Starting pipeline...\n';
+  logBox.textContent = 'Starting full pipeline...\n';
 
   await fetch(API + 'refresh', { method: 'POST' });
+  if (refreshPollId) clearInterval(refreshPollId);
   refreshPollId = setInterval(pollRefresh, 2000);
 }
 
@@ -542,10 +566,12 @@ async function pollRefresh() {
   logBox.scrollTop = logBox.scrollHeight;
   if (!data.running) {
     clearInterval(refreshPollId);
-    const btn = document.getElementById('btn-refresh');
-    btn.disabled = false;
-    btn.textContent = 'Run Data Refresh';
+    document.getElementById('btn-refresh').disabled = false;
+    document.getElementById('btn-refresh').textContent = 'Run Full Pipeline';
+    document.getElementById('btn-collect').disabled = false;
+    document.getElementById('btn-collect').textContent = 'Collect Gym Data from OSM';
     loadAdmin();
+    initMarket(); // reload market data
   }
 }
 

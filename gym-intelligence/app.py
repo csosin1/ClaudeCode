@@ -335,6 +335,36 @@ def api_status():
     })
 
 
+@bp.route("/api/collect-only", methods=["POST"])
+def api_collect_only():
+    """Run just data collection (no API key needed)."""
+    global _refresh_running, _refresh_log
+    with _refresh_lock:
+        if _refresh_running:
+            return jsonify({"error": "already running"}), 409
+        _refresh_running = True
+        _refresh_log = []
+
+    def progress(msg):
+        _refresh_log.append(msg)
+
+    def run():
+        global _refresh_running
+        try:
+            import collect
+            progress("=== Data Collection (no API key needed) ===")
+            collect.run_collection(progress_cb=progress)
+            progress("Collection complete! Go to Market tab to see results.")
+        except Exception as e:
+            progress(f"Collection FAILED: {e}")
+        finally:
+            with _refresh_lock:
+                _refresh_running = False
+
+    threading.Thread(target=run, daemon=True).start()
+    return jsonify({"ok": True})
+
+
 @bp.route("/api/refresh", methods=["POST"])
 def api_refresh():
     global _refresh_running, _refresh_log
