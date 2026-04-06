@@ -216,6 +216,31 @@ LREOF
         echo "}"
     } > /var/www/landing/debug.json
 
+    # === STEP 5: ONE-SHOT CARVANA TEST (runs in background, writes result to static file) ===
+    if [ ! -f /opt/.carvana_test_v1 ]; then
+        echo "$(date): Triggering Carvana test offer in background..." >> "$LOG"
+        (
+            # Wait for service to be fully up and npm install to finish
+            sleep 15
+            # Verify service is responding before calling the heavy endpoint
+            for i in 1 2 3 4 5; do
+                if curl -sf http://127.0.0.1:3100/ > /dev/null 2>&1; then
+                    break
+                fi
+                sleep 5
+            done
+            echo "$(date): Calling Carvana API..." >> "$LOG"
+            RESULT=$(curl -sf -X POST http://127.0.0.1:3100/api/carvana \
+                -H 'Content-Type: application/json' \
+                -d '{"vin":"1HGCV2F9XNA008352","mileage":"48000","zip":"06880"}' \
+                --max-time 180 2>&1)
+            echo "$RESULT" > /var/www/landing/carvana-result.json
+            echo "$(date): Carvana test result written." >> "$LOG"
+            echo "$(date): Result: $RESULT" >> "$LOG"
+            touch /opt/.carvana_test_v1
+        ) &
+    fi
+
     echo "$(date): Deploy complete." >> "$LOG"
 else
     : # No changes — silent
