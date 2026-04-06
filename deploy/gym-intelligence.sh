@@ -161,22 +161,20 @@ c.close()
 
 echo "$(date): Countries in DB: $COUNTRY_COUNT/6" >> "$LOG"
 if [ "$COUNTRY_COUNT" -lt 6 ]; then
-    echo "$(date): Missing countries — running collection (this may take 10+ minutes)..." >> "$LOG"
-    cd "$PROJECT_DIR"
-    # No timeout — Overpass rate limiting means this can take a while
-    "$PROJECT_DIR/venv/bin/python" test_collect.py >> "$LOG" 2>&1
-    # Report new counts
-    "$PROJECT_DIR/venv/bin/python" -c "
-import sys; sys.path.insert(0, '$PROJECT_DIR')
-from db import get_connection
-c = get_connection()
-for row in c.execute('SELECT country, COUNT(*) as n FROM locations WHERE active=1 GROUP BY country').fetchall():
-    print(f'  {row[\"country\"]}: {row[\"n\"]} locations')
-total = c.execute('SELECT COUNT(*) as n FROM locations WHERE active=1').fetchone()['n']
-print(f'Total: {total}')
-c.close()
-" >> "$LOG" 2>&1
-    echo "$(date): Collection finished." >> "$LOG"
+    # Run collection in background so it doesn't block deploys
+    if [ ! -f /tmp/gym-collection-running ]; then
+        echo "$(date): Missing countries — starting background collection..." >> "$LOG"
+        (
+            touch /tmp/gym-collection-running
+            cd "$PROJECT_DIR"
+            "$PROJECT_DIR/venv/bin/python" test_collect.py >> /var/log/gym-intelligence/collection.log 2>&1
+            rm -f /tmp/gym-collection-running
+            echo "$(date): Background collection finished." >> "$LOG"
+        ) &
+        disown
+    else
+        echo "$(date): Collection already running in background, skipping." >> "$LOG"
+    fi
 else
     echo "$(date): All 6 countries present, skipping collection." >> "$LOG"
 fi
