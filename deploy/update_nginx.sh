@@ -112,15 +112,14 @@ server {
     location ~* \.env$ { deny all; }
 }
 
-# code-server on code.casinv.dev
+# Web terminal (ttyd) on code.casinv.dev
 server {
     listen 80;
     listen [::]:80;
     server_name code.casinv.dev;
 
-    # code-server reverse proxy
     location / {
-        proxy_pass http://127.0.0.1:8443;
+        proxy_pass http://127.0.0.1:7681;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -141,7 +140,7 @@ echo "Nginx updated — multi-project layout active."
 if command -v certbot >/dev/null 2>&1; then
     if [ -d "/etc/letsencrypt/live/casinv.dev" ]; then
         echo "Re-applying SSL certificates..."
-        certbot --nginx --non-interactive --agree-tos --email admin@casinv.dev \
+        certbot --nginx --non-interactive --agree-tos --expand --email admin@casinv.dev \
             -d casinv.dev -d code.casinv.dev --redirect 2>&1 || echo "certbot re-apply failed (non-fatal)"
     fi
 fi
