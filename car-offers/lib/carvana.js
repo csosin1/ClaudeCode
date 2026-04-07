@@ -87,9 +87,10 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
     log(`[carvana] Starting offer flow for VIN=${vin} mileage=${mileage} zip=${zip}`);
     log(`[carvana] Proxy: host=${config.PROXY_HOST} port=${config.PROXY_PORT} user=${config.PROXY_USER} pass=${config.PROXY_PASS ? config.PROXY_PASS.length + 'chars' : 'NONE'}`);
 
-    // --- Launch initial browser (will be replaced during US IP hunt) ---
+    // --- Launch browser ---
     let result;
     let page;
+    let launchMethod = 'unknown';
     try {
       result = await launchBrowser();
     } catch (launchErr) {
@@ -98,6 +99,8 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
     }
     browser = result.browser;
     page = result.page;
+    launchMethod = result.launchMethod || 'unknown';
+    log(`[carvana] Browser: ${launchMethod} | headed: ${!!process.env.DISPLAY}`);
 
     // --- Step 1: Warm up browser session with non-Carvana sites ---
     // Visiting a few benign sites first builds a more realistic browser fingerprint
@@ -233,7 +236,7 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
       const bodySnippet = await page.textContent('body').then(t => (t || '').substring(0, 500)).catch(() => '');
       const pageUrl = page.url();
       log(`[carvana] BLOCKED after all attempts — title: ${pageTitle}, url: ${pageUrl}`);
-      return { error: 'blocked', details: { pageTitle, bodySnippet, screenshot: ssPath, url: pageUrl }, wizardLog };
+      return { error: 'blocked', details: { pageTitle, bodySnippet, screenshot: ssPath, url: pageUrl, launchMethod }, wizardLog };
     }
 
     // --- Set up network interception to capture API responses ---
@@ -806,7 +809,7 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
       } catch (_) {}
       return {
         error: 'Could not extract offer amount. The page may have changed or the flow was interrupted.',
-        details: { vin, mileage, zip, pageState, capturedApiCount: capturedResponses.length },
+        details: { vin, mileage, zip, pageState, capturedApiCount: capturedResponses.length, launchMethod },
         wizardLog,
         screenshot: finalScreenshot,
       };
@@ -821,6 +824,7 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
         source: 'carvana',
         timestamp: new Date().toISOString(),
         capturedApiCount: capturedResponses.length,
+        launchMethod,
       },
       wizardLog,
     };
