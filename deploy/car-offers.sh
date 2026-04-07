@@ -116,12 +116,21 @@ if [ -d "$PROJECT_DIR/node_modules/express" ]; then
         STATUS=$(curl -sf --max-time 5 http://127.0.0.1:3100/api/status 2>&1) || STATUS="curl failed"
         echo "$(date): [post-restart] /api/status: $STATUS" >> "$LOG"
 
-        # Wait for auto-run Carvana to complete (up to 5 min)
-        for i in 1 2 3 4 5 6 7 8 9 10; do
+        # Wait for auto-run Carvana to complete (up to 8 min)
+        for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16; do
             sleep 30
-            RESULTS=$(curl -sf --max-time 5 http://127.0.0.1:3100/api/startup-results 2>&1) || RESULTS="curl failed"
-            if echo "$RESULTS" | grep -q '"lastCarvanaRun"' && ! echo "$RESULTS" | grep -q '"lastCarvanaRun":null'; then
-                echo "$(date): [post-restart] Carvana run completed (attempt $i):" >> "$LOG"
+            RESULTS=$(curl -sf --max-time 5 http://127.0.0.1:3100/api/last-run 2>&1) || RESULTS="curl failed"
+            if echo "$RESULTS" | grep -q '"completed_at"'; then
+                echo "$(date): [post-restart] Carvana run completed (attempt $i, ${i}x30s):" >> "$LOG"
+                # Extract key info
+                OFFER=$(echo "$RESULTS" | grep -o '"offer":"[^"]*"' | head -1)
+                ERROR=$(echo "$RESULTS" | grep -o '"error":"[^"]*"' | head -1)
+                if [ -n "$OFFER" ]; then
+                    echo "$(date): [post-restart] CARVANA OFFER: $OFFER" >> "$LOG"
+                elif [ -n "$ERROR" ]; then
+                    echo "$(date): [post-restart] CARVANA ERROR: $ERROR" >> "$LOG"
+                fi
+                # Also dump full result
                 echo "$RESULTS" >> "$LOG"
                 break
             fi
