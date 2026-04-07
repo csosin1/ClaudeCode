@@ -35,10 +35,14 @@ async function isBlocked(page) {
     'perimeterx',
     'px-captcha',
     'are you a human',
-    'blocked',
     'access denied',
     'challenge-running',
     'cf-browser-verification',
+    'just a moment',
+    'enable javascript and cookies',
+    'checking your browser',
+    'cf-chl-bypass',
+    'ray id',
   ];
   const lower = html.toLowerCase();
   return blockedIndicators.some((indicator) => lower.includes(indicator));
@@ -162,72 +166,64 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
         break;
       }
 
-      // Cloudflare detected — try to handle the challenge
+      // Cloudflare JS challenge detected — in headed mode, these typically
+      // auto-resolve within 5-15s if the browser passes fingerprint checks.
+      // DON'T click randomly — just wait patiently like a real user would.
       log(`[carvana] Cloudflare challenge detected (attempt ${attempt})`);
       await screenshot(page, `blocked-attempt-${attempt}`);
 
-      // Try to find and interact with Cloudflare Turnstile/challenge widget
-      // Cloudflare uses an iframe for its challenge — we need to click inside it
-      try {
-        const cfFrames = page.frames().filter(f =>
-          f.url().includes('challenges.cloudflare.com') ||
-          f.url().includes('turnstile') ||
-          f.url().includes('cf-chl')
-        );
-        log(`[carvana] Found ${cfFrames.length} Cloudflare challenge frames`);
-        for (const frame of cfFrames) {
-          try {
-            // Look for the checkbox/verify button inside the challenge iframe
-            const checkbox = await frame.$('input[type="checkbox"], .cb-i, #challenge-stage, .spacer');
-            if (checkbox) {
-              log('[carvana] Found Cloudflare checkbox — clicking...');
-              await humanDelay(1000, 2000);
-              await checkbox.click();
-              await humanDelay(5000, 10000);
-            }
-            // Some challenges just have a "Verify" button
-            const verifyBtn = await frame.$('button, input[type="submit"]');
-            if (verifyBtn) {
-              log('[carvana] Found Cloudflare verify button — clicking...');
-              await humanDelay(1000, 2000);
-              await verifyBtn.click();
-              await humanDelay(5000, 10000);
-            }
-          } catch (frameErr) {
-            log(`[carvana] Challenge frame interaction failed: ${frameErr.message}`);
-          }
-        }
-      } catch (cfErr) {
-        log(`[carvana] Cloudflare frame detection failed: ${cfErr.message}`);
-      }
+      // Strategy: wait up to 60s for the challenge to auto-resolve.
+      // Check every 5s if the challenge page has changed.
+      const maxWait = [30, 45, 60][attempt] || 60;
+      log(`[carvana] Waiting up to ${maxWait}s for challenge auto-resolution...`);
 
-      // Wait for the challenge to resolve (JS execution + potential redirect)
-      const waitSecs = [20, 30, 45][attempt] || 45;
-      log(`[carvana] Waiting ${waitSecs}s for challenge resolution...`);
+      let resolved = false;
+      for (let waited = 0; waited < maxWait; waited += 5) {
+        await humanDelay(4500, 5500);
 
-      // Try waitForURL — if Cloudflare resolves, the URL will change
-      try {
-        await page.waitForURL('**/sell-my-car**', { timeout: waitSecs * 1000 });
-        log('[carvana] URL changed — challenge may have resolved');
-      } catch {
-        // URL didn't change — continue with human simulation
-        for (let w = 0; w < Math.floor(waitSecs / 10); w++) {
-          await humanDelay(8000, 12000);
+        // Gentle mouse movement (real users move their mouse while waiting)
+        if (waited % 15 === 0) {
           await simulateHumanBehavior(page);
         }
+
+        // Check if Cloudflare Turnstile checkbox appeared — click it
+        try {
+          const cfFrames = page.frames().filter(f =>
+            f.url().includes('challenges.cloudflare.com') ||
+            f.url().includes('turnstile') ||
+            f.url().includes('cf-chl')
+          );
+          for (const frame of cfFrames) {
+            try {
+              const checkbox = await frame.$('input[type="checkbox"], .cb-i, #challenge-stage');
+              if (checkbox) {
+                log('[carvana] Turnstile checkbox found — clicking...');
+                await humanDelay(500, 1500);
+                await checkbox.click();
+                await humanDelay(3000, 5000);
+              }
+            } catch { /* ignore frame errors */ }
+          }
+        } catch { /* ignore */ }
+
+        // Check if challenge resolved
+        if (!(await isBlocked(page))) {
+          resolved = true;
+          log(`[carvana] Cloudflare resolved after ~${waited + 5}s`);
+          break;
+        }
+        log(`[carvana] Still blocked after ${waited + 5}s...`);
       }
 
-      // Check if challenge resolved
-      if (!(await isBlocked(page))) {
+      if (resolved) {
         carvanaLoaded = true;
-        log('[carvana] Cloudflare challenge resolved!');
         break;
       }
 
-      // Try refreshing the page for next attempt
+      // If not resolved, try a fresh navigation on next attempt
       if (attempt < 2) {
-        log('[carvana] Refreshing for next attempt...');
-        await humanDelay(5000, 10000);
+        log('[carvana] Challenge not resolved — will retry with fresh navigation...');
+        await humanDelay(10000, 15000);
       }
     }
 
@@ -239,6 +235,34 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
       log(`[carvana] BLOCKED after all attempts — title: ${pageTitle}, url: ${pageUrl}`);
       return { error: 'blocked', details: { pageTitle, bodySnippet, screenshot: ssPath, url: pageUrl }, wizardLog };
     }
+
+    // --- Set up network interception to capture API responses ---
+    // Carvana's frontend makes API calls that return offer data as JSON.
+    // Capturing these lets us extract offers even if page selectors change.
+    const capturedResponses = [];
+    page.on('response', async (response) => {
+      const url = response.url();
+      // Capture any API responses that might contain offer data
+      if (url.includes('/api/') || url.includes('/offer') || url.includes('/appraisal') ||
+          url.includes('/vehicle') || url.includes('/valuation') || url.includes('graphql')) {
+        try {
+          const status = response.status();
+          if (status >= 200 && status < 300) {
+            const contentType = response.headers()['content-type'] || '';
+            if (contentType.includes('json')) {
+              const body = await response.text().catch(() => null);
+              if (body) {
+                capturedResponses.push({ url, status, body: body.substring(0, 5000) });
+                // Check for offer-like values in the response
+                if (body.includes('offer') || body.includes('price') || body.includes('value') || body.includes('amount')) {
+                  log(`[carvana] Captured API response with offer keywords: ${url.substring(0, 100)}`);
+                }
+              }
+            }
+          }
+        } catch { /* ignore response read errors */ }
+      }
+    });
 
     // --- Step 2: Switch to VIN tab and enter VIN ---
     console.log('[carvana] Step 2: Looking for VIN entry...');
@@ -427,9 +451,18 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
       }
 
       if (await isBlocked(page)) {
-        console.log('[carvana] Blocked during wizard navigation');
-        await screenshot(page, 'blocked-wizard');
-        return { error: 'blocked', details: { vin, mileage, zip }, wizardLog };
+        log('[carvana] Cloudflare challenge detected mid-wizard — waiting for resolution...');
+        await screenshot(page, `blocked-wizard-${step}`);
+        // Wait up to 30s for it to resolve
+        let wizardResolved = false;
+        for (let w = 0; w < 6; w++) {
+          await humanDelay(4500, 5500);
+          if (!(await isBlocked(page))) { wizardResolved = true; break; }
+        }
+        if (!wizardResolved) {
+          return { error: 'blocked', details: { vin, mileage, zip, blockedAtStep: step }, wizardLog };
+        }
+        log('[carvana] Challenge resolved mid-wizard, continuing...');
       }
 
       // Try to detect and fill the current page's form
@@ -729,9 +762,38 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
 
     await screenshot(page, '08-offer-result');
 
+    // If no offer found in the DOM, check captured API responses
+    if (!offerText && capturedResponses.length > 0) {
+      log(`[carvana] Checking ${capturedResponses.length} captured API responses for offer data...`);
+      for (const resp of capturedResponses) {
+        try {
+          const data = JSON.parse(resp.body);
+          // Look for common offer field names in JSON responses
+          const offerValue = data.offer || data.offerAmount || data.price ||
+            data.value || data.appraisalValue || data.estimatedValue ||
+            (data.data && (data.data.offer || data.data.price || data.data.value));
+          if (offerValue && typeof offerValue === 'number' && offerValue > 500) {
+            offerText = `$${offerValue.toLocaleString()}`;
+            log(`[carvana] OFFER FROM API: ${offerText} (source: ${resp.url.substring(0, 80)})`);
+            break;
+          }
+          // Also scan JSON string for dollar amounts
+          const jsonStr = JSON.stringify(data);
+          const dollarMatch = jsonStr.match(/\$[\d,]{3,}/);
+          if (dollarMatch) {
+            const amount = parseInt(dollarMatch[0].replace(/[$,]/g, ''), 10);
+            if (amount > 500) {
+              offerText = dollarMatch[0];
+              log(`[carvana] OFFER FROM API JSON: ${offerText} (source: ${resp.url.substring(0, 80)})`);
+              break;
+            }
+          }
+        } catch { /* not valid JSON or no matching fields */ }
+      }
+    }
+
     if (!offerText) {
       const finalScreenshot = await screenshot(page, '09-no-offer');
-      // Capture diagnostic info about what page we're actually on
       let pageState = {};
       try {
         pageState.url = page.url();
@@ -744,7 +806,7 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
       } catch (_) {}
       return {
         error: 'Could not extract offer amount. The page may have changed or the flow was interrupted.',
-        details: { vin, mileage, zip, pageState },
+        details: { vin, mileage, zip, pageState, capturedApiCount: capturedResponses.length },
         wizardLog,
         screenshot: finalScreenshot,
       };
@@ -758,6 +820,7 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
         zip,
         source: 'carvana',
         timestamp: new Date().toISOString(),
+        capturedApiCount: capturedResponses.length,
       },
       wizardLog,
     };

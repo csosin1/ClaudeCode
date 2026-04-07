@@ -1,7 +1,7 @@
 const config = require('./config');
 
 const USER_AGENT =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
 /**
  * Random delay between min and max milliseconds.
@@ -131,26 +131,37 @@ async function simulateHumanBehavior(page) {
  * at the CDP level). Fall back to regular playwright + manual injection.
  */
 async function launchBrowser(options = {}) {
+  // Use headed mode if DISPLAY is available (Xvfb virtual display)
+  const useHeaded = !!process.env.DISPLAY;
+
+  // Minimal args for headed mode — fewer flags = less detection surface
+  // In headless mode, add more flags for stability on servers
   const args = [
     '--disable-blink-features=AutomationControlled',
     '--no-sandbox',
     '--disable-setuid-sandbox',
-    '--disable-gpu',
     '--disable-dev-shm-usage',
-    '--disable-software-rasterizer',
-    '--disable-extensions',
-    '--disable-background-networking',
-    '--disable-default-apps',
-    '--disable-sync',
-    '--disable-translate',
-    '--no-first-run',
-    '--mute-audio',
-    '--js-flags=--max-old-space-size=256',
-    // Additional anti-detection args
-    '--disable-features=IsolateOrigins,site-per-process',
-    '--flag-switches-begin',
-    '--flag-switches-end',
+    '--window-size=1920,1080',
+    '--window-position=0,0',
   ];
+
+  if (!useHeaded) {
+    // Only add these in headless mode where we need extra stability
+    args.push(
+      '--disable-gpu',
+      '--disable-software-rasterizer',
+      '--disable-extensions',
+      '--disable-background-networking',
+      '--no-first-run',
+      '--mute-audio',
+    );
+  } else {
+    // Headed mode: look like a real user's Chrome
+    args.push(
+      '--start-maximized',
+      '--enable-features=NetworkService,NetworkServiceInProcess',
+    );
+  }
 
   // Build proxy config
   // Decodo geo-targeting: use port 7000 with user- prefix and country/zip params
@@ -171,10 +182,6 @@ async function launchBrowser(options = {}) {
     console.log('[browser] No proxy configured — using direct connection');
   }
 
-  // Use headed mode if DISPLAY is available (Xvfb virtual display)
-  // Headed mode is much harder for Cloudflare to detect than headless
-  // DISPLAY is set by the systemd service environment (Xvfb started by deploy script)
-  const useHeaded = !!process.env.DISPLAY;
   if (useHeaded) {
     console.log(`[browser] Using HEADED mode (DISPLAY=${process.env.DISPLAY})`);
   } else {
@@ -213,7 +220,7 @@ async function launchBrowser(options = {}) {
     extraHTTPHeaders: {
       'Accept-Language': 'en-US,en;q=0.9',
       'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-      'sec-ch-ua': '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+      'sec-ch-ua': '"Chromium";v="131", "Google Chrome";v="131", "Not-A.Brand";v="24"',
       'sec-ch-ua-mobile': '?0',
       'sec-ch-ua-platform': '"Windows"',
     },
