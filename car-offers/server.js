@@ -1029,7 +1029,17 @@ app.listen(port, '0.0.0.0', () => {
             zip: '06880',
             completed_at: new Date().toISOString(),
           };
-          console.log('[startup] Carvana result:', JSON.stringify(selfTest.lastCarvanaRun));
+          // Log a compact summary that will appear in status.json's 3-line recent_log
+          const r = selfTest.lastCarvanaRun;
+          const summary = r.offer
+            ? `OFFER=${r.offer} VIN=${r.vin}`
+            : `ERROR=${(r.error || 'unknown').substring(0, 80)}`;
+          const wSteps = (r.wizardLog || []).length;
+          console.log(`[CARVANA-RESULT] ${summary} steps=${wSteps}`);
+          // Log first 3 wizard steps for diagnostics
+          if (r.wizardLog && r.wizardLog.length > 0) {
+            console.log(`[CARVANA-LOG] ${r.wizardLog.slice(0, 5).join(' | ')}`);
+          }
         } catch (err) {
           selfTest.lastCarvanaRun = {
             error: err.message,
