@@ -136,3 +136,12 @@ NGXEOF
 
 nginx -t && systemctl reload nginx
 echo "Nginx updated — multi-project layout active."
+
+# Re-apply SSL certificates if certbot is installed and certs exist
+if command -v certbot >/dev/null 2>&1; then
+    if [ -d "/etc/letsencrypt/live/casinv.dev" ]; then
+        echo "Re-applying SSL certificates..."
+        certbot --nginx --non-interactive --agree-tos --email admin@casinv.dev \
+            -d casinv.dev -d code.casinv.dev --redirect 2>&1 || echo "certbot re-apply failed (non-fatal)"
+    fi
+fi
