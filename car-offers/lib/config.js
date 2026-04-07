@@ -37,4 +37,4 @@ config.reloadConfig = function () {
 };
 
 module.exports = config;
-// Deploy trigger: 2026-04-07T00:10:43Z
+// Deploy trigger: nginx-recovery-v2
