@@ -15,6 +15,13 @@ if [ ! -f /opt/.code-server-installed ]; then
     echo "$(date): Installing code-server..." >> "$LOG"
     curl -fsSL https://code-server.dev/install.sh | sh >> "$LOG" 2>&1
 
+    # Verify install actually worked before proceeding
+    CS_BIN=$(command -v code-server 2>/dev/null || echo "")
+    if [ -z "$CS_BIN" ]; then
+        echo "$(date): ERROR — code-server binary not found after install. Skipping." >> "$LOG"
+        return 0 2>/dev/null || exit 0
+    fi
+
     # Generate a random password if none exists
     if [ ! -f /opt/.code-server-password ]; then
         CODE_PASS=$(openssl rand -base64 18)
@@ -31,15 +38,15 @@ password: $(cat /opt/.code-server-password)
 cert: false
 CSEOF
 
-    # systemd service
-    cat > /etc/systemd/system/code-server.service << 'SVCEOF'
+    # systemd service — use discovered binary path
+    cat > /etc/systemd/system/code-server.service << SVCEOF
 [Unit]
 Description=code-server (VS Code in browser)
 After=network.target
 
 [Service]
 Type=exec
-ExecStart=/usr/bin/code-server
+ExecStart=$CS_BIN
 Restart=always
 RestartSec=3
 Environment=HOME=/root
@@ -52,8 +59,13 @@ SVCEOF
     systemctl enable code-server >> "$LOG" 2>&1
     systemctl start code-server >> "$LOG" 2>&1
 
-    touch /opt/.code-server-installed
-    echo "$(date): code-server installed and started on port $CODE_SERVER_PORT." >> "$LOG"
+    # Only set flag if service is actually running
+    if systemctl is-active --quiet code-server; then
+        touch /opt/.code-server-installed
+        echo "$(date): code-server installed at $CS_BIN and running on port $CODE_SERVER_PORT." >> "$LOG"
+    else
+        echo "$(date): ERROR — code-server installed but service failed to start." >> "$LOG"
+    fi
 fi
 
 # === ONE-TIME: Install Claude Code CLI ===
