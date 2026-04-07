@@ -127,9 +127,9 @@ if [ -d "$PROJECT_DIR/node_modules/express" ]; then
     echo "$(date): $PROJECT service restarted." >> "$LOG"
 
     # Post-restart: wait for ALL deploy scripts to finish, then check health
-    # 60s delay ensures code-server.sh (which runs certbot) has finished
+    # 120s delay ensures code-server.sh (which may run certbot) has finished
     (
-        sleep 60
+        sleep 120
         echo "$(date): [post-restart] Checking service health..." >> "$LOG"
 
         # Check if nginx is serving — certbot (code-server.sh) may have broken the config
