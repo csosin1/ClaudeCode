@@ -13,6 +13,22 @@ if [ ! -d "$REPO_DIR/$PROJECT" ]; then
     return 0 2>/dev/null || exit 0
 fi
 
+# --- Pre-flight: verify nginx is serving (other scripts may break the config) ---
+# certbot --nginx can modify the config and break it. If the landing page isn't
+# responding, force a clean nginx config rebuild from update_nginx.sh.
+PRE_STATUS=$(curl -sf -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1/ 2>/dev/null || echo "000")
+if [ "$PRE_STATUS" != "200" ]; then
+    echo "$(date): [car-offers] WARNING — nginx returning $PRE_STATUS for /. Forcing config rebuild..." >> "$LOG"
+    if [ -f "$REPO_DIR/deploy/update_nginx.sh" ]; then
+        bash "$REPO_DIR/deploy/update_nginx.sh" >> "$LOG" 2>&1 || true
+        echo "$(date): [car-offers] nginx config rebuilt." >> "$LOG"
+    fi
+    # Verify recovery
+    sleep 1
+    POST_STATUS=$(curl -sf -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1/ 2>/dev/null || echo "000")
+    echo "$(date): [car-offers] Post-rebuild status: $POST_STATUS" >> "$LOG"
+fi
+
 mkdir -p "$PROJECT_DIR/data"
 mkdir -p "$LOG_DIR"
 
@@ -109,10 +125,27 @@ if [ -d "$PROJECT_DIR/node_modules/express" ]; then
     systemctl restart $PROJECT >> "$LOG" 2>&1
     echo "$(date): $PROJECT service restarted." >> "$LOG"
 
-    # Post-restart: wait for service, dump status for diagnostics
+    # Post-restart: wait for ALL deploy scripts to finish, then check health
+    # 60s delay ensures code-server.sh (which runs certbot) has finished
     (
-        sleep 15
+        sleep 60
         echo "$(date): [post-restart] Checking service health..." >> "$LOG"
+
+        # Check if nginx is serving — certbot (code-server.sh) may have broken the config
+        # This runs AFTER all deploy scripts have completed (15s delay)
+        NGX_STATUS=$(curl -sf -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1/ 2>/dev/null || echo "000")
+        if [ "$NGX_STATUS" != "200" ]; then
+            echo "$(date): [post-restart] NGINX BROKEN (status=$NGX_STATUS) — rebuilding config..." >> "$LOG"
+            if [ -f "$REPO_DIR/deploy/update_nginx.sh" ]; then
+                bash "$REPO_DIR/deploy/update_nginx.sh" >> "$LOG" 2>&1 || true
+            fi
+            sleep 1
+            NGX_AFTER=$(curl -sf -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1/ 2>/dev/null || echo "000")
+            echo "$(date): [post-restart] Nginx recovery: $NGX_STATUS -> $NGX_AFTER" >> "$LOG"
+        else
+            echo "$(date): [post-restart] Nginx OK (200)" >> "$LOG"
+        fi
+
         STATUS=$(curl -sf --max-time 5 http://127.0.0.1:3100/api/status 2>&1) || STATUS="curl failed"
         echo "$(date): [post-restart] /api/status: $STATUS" >> "$LOG"
 
