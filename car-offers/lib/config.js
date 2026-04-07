@@ -37,4 +37,4 @@ config.reloadConfig = function () {
 };
 
 module.exports = config;
-// Deploy trigger: nginx-recovery-v2
+// Deploy trigger: check-carvana-result
