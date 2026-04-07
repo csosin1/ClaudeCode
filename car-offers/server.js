@@ -897,13 +897,19 @@ app.get('/api/diag-browser', async (_req, res) => {
   let browser = null;
   const steps = [];
   try {
-    steps.push('Loading playwright...');
+    steps.push('Loading browser library...');
     let pw;
     try {
-      pw = require('playwright');
-    } catch (e) {
-      steps.push(`playwright require failed: ${e.message}`);
-      return res.json({ ok: false, steps, error: e.message });
+      pw = require('patchright');
+      steps.push('Using patchright (CDP leak patched)');
+    } catch (_) {
+      try {
+        pw = require('playwright');
+        steps.push('Using playwright (patchright not available)');
+      } catch (e) {
+        steps.push(`playwright require failed: ${e.message}`);
+        return res.json({ ok: false, steps, error: e.message });
+      }
     }
 
     steps.push('Checking chromium executable...');

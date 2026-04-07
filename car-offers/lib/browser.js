@@ -193,22 +193,37 @@ async function launchBrowser(options = {}) {
     launchOptions.proxy = proxyConfig;
   }
 
-  // Try playwright-extra (stealth plugin) first — it patches at a deeper level
+  // Priority order:
+  // 1. Patchright — patches CDP Runtime.enable leak (Cloudflare's #1 detection)
+  // 2. playwright-extra + stealth plugin — patches many browser fingerprints
+  // 3. Regular playwright — baseline fallback
   let browser;
   let usedStealth = false;
+  let launchMethod = 'unknown';
   try {
-    const { chromium } = require('playwright-extra');
-    const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-    chromium.use(StealthPlugin());
+    const { chromium } = require('patchright');
     browser = await chromium.launch(launchOptions);
+    launchMethod = 'patchright';
     usedStealth = true;
-    console.log('[browser] Launched via playwright-extra (stealth plugin)');
-  } catch (stealthErr) {
-    console.warn(`[browser] Stealth launch failed: ${stealthErr.message}`);
-    console.log('[browser] Falling back to regular playwright + manual anti-detection...');
-    const pw = require('playwright');
-    browser = await pw.chromium.launch(launchOptions);
-    console.log('[browser] Launched via regular playwright');
+    console.log('[browser] Launched via patchright (CDP leak patched — best stealth)');
+  } catch (patchErr) {
+    console.warn(`[browser] Patchright launch failed: ${patchErr.message}`);
+    try {
+      const { chromium } = require('playwright-extra');
+      const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+      chromium.use(StealthPlugin());
+      browser = await chromium.launch(launchOptions);
+      usedStealth = true;
+      launchMethod = 'playwright-extra';
+      console.log('[browser] Launched via playwright-extra (stealth plugin)');
+    } catch (stealthErr) {
+      console.warn(`[browser] Stealth launch failed: ${stealthErr.message}`);
+      console.log('[browser] Falling back to regular playwright + manual anti-detection...');
+      const pw = require('playwright');
+      browser = await pw.chromium.launch(launchOptions);
+      launchMethod = 'playwright';
+      console.log('[browser] Launched via regular playwright');
+    }
   }
 
   const context = await browser.newContext({
@@ -227,13 +242,9 @@ async function launchBrowser(options = {}) {
     ...options,
   });
 
-  // Always inject manual anti-detection (complements stealth plugin)
+  // Always inject manual anti-detection (complements patchright/stealth plugin)
   await injectStealth(context);
-  if (usedStealth) {
-    console.log('[browser] Stealth plugin + manual anti-detection active');
-  } else {
-    console.log('[browser] Manual anti-detection injected (no stealth plugin)');
-  }
+  console.log(`[browser] Launch method: ${launchMethod} | Manual anti-detection: injected`);
 
   const page = await context.newPage();
   return { browser, page };

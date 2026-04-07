@@ -66,9 +66,23 @@ if [ "$REPO_DIR/$PROJECT/package.json" -nt "$PROJECT_DIR/node_modules/.package-l
     fi
 fi
 
-# Playwright (one-time, only if not already installed)
+# Patchright + Playwright (one-time, only if not already installed)
+# Patchright patches CDP Runtime.enable leak — Cloudflare's #1 detection vector
+if [ ! -f "$PROJECT_DIR/.patchright_installed" ]; then
+    echo "$(date): Installing Patchright + Chromium..." >> "$LOG"
+    cd "$PROJECT_DIR" && "$NPX_BIN" patchright install --with-deps chromium >> "$LOG" 2>&1
+    if "$NPX_BIN" patchright --version > /dev/null 2>&1; then
+        touch "$PROJECT_DIR/.patchright_installed"
+        # Clear old results to force a fresh Carvana run with patchright
+        rm -f "$PROJECT_DIR/startup-results.json"
+        echo "$(date): Patchright chromium installed. Cleared old results for fresh run." >> "$LOG"
+    else
+        echo "$(date): WARNING — Patchright install may have failed. Falling back to Playwright..." >> "$LOG"
+    fi
+fi
+# Playwright fallback (one-time)
 if [ ! -f "$PROJECT_DIR/.playwright_installed" ]; then
-    echo "$(date): Installing Playwright + Chromium..." >> "$LOG"
+    echo "$(date): Installing Playwright + Chromium (fallback)..." >> "$LOG"
     cd "$PROJECT_DIR" && "$NPX_BIN" playwright install --with-deps chromium >> "$LOG" 2>&1
     if "$NPX_BIN" playwright --version > /dev/null 2>&1; then
         touch "$PROJECT_DIR/.playwright_installed"
