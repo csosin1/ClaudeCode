@@ -699,10 +699,12 @@ app.get('/dashboard', (_req, res) => {
       if (r.offer) {
         html += '<div class="offer-big">' + esc(r.offer) + '</div>';
         html += row('VIN', r.vin || '');
+        html += row('Browser', (r.details && r.details.launchMethod) || 'unknown');
         html += row('Completed', r.completed_at ? new Date(r.completed_at).toLocaleString() : '');
       } else if (r.error) {
         html += '<div class="error-big">' + esc(r.error) + '</div>';
         html += row('VIN', r.vin || '');
+        html += row('Browser', (r.details && r.details.launchMethod) || 'unknown');
         html += row('Completed', r.completed_at ? new Date(r.completed_at).toLocaleString() : '');
         // Show full diagnostic details when there's an error
         if (r.details) {
@@ -724,6 +726,14 @@ app.get('/dashboard', (_req, res) => {
           }
           if (d.url) html += row('Page URL', esc(d.url));
         }
+      }
+      // Wizard log (shows step-by-step what happened)
+      if (r.wizardLog && r.wizardLog.length > 0) {
+        html += '<div style="margin-top:12px;padding-top:12px;border-top:1px solid #334155;">';
+        html += '<details><summary style="color:#94a3b8;font-size:0.8rem;cursor:pointer;">Wizard Log (' + r.wizardLog.length + ' steps)</summary>';
+        html += '<div style="font-size:0.7rem;color:#64748b;padding:8px;background:#0f172a;border-radius:6px;margin-top:4px;max-height:300px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;">';
+        html += r.wizardLog.map(function(l) { return esc(l); }).join('\\n');
+        html += '</div></details></div>';
       }
       content.innerHTML = html;
     }
@@ -1041,7 +1051,8 @@ app.listen(port, '0.0.0.0', () => {
             ? `OFFER=${r.offer} VIN=${r.vin}`
             : `ERROR=${(r.error || 'unknown').substring(0, 80)}`;
           const wSteps = (r.wizardLog || []).length;
-          console.log(`[CARVANA-RESULT] ${summary} steps=${wSteps}`);
+          const method = (r.details && r.details.launchMethod) || 'unknown';
+          console.log(`[CARVANA-RESULT] ${summary} browser=${method} steps=${wSteps}`);
           // Log first 3 wizard steps for diagnostics
           if (r.wizardLog && r.wizardLog.length > 0) {
             console.log(`[CARVANA-LOG] ${r.wizardLog.slice(0, 5).join(' | ')}`);

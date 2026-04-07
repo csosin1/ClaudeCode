@@ -247,7 +247,7 @@ async function launchBrowser(options = {}) {
   console.log(`[browser] Launch method: ${launchMethod} | Manual anti-detection: injected`);
 
   const page = await context.newPage();
-  return { browser, page };
+  return { browser, page, launchMethod };
 }
 
 /**
