@@ -61,29 +61,28 @@ if [ ! -f "$PROJECT_DIR/.playwright_installed" ]; then
     fi
 fi
 
-# Xvfb (one-time) — virtual display for headed mode (bypasses Cloudflare headless detection)
+# Xvfb for headed browser mode (one-time, non-fatal)
+# Headed mode bypasses Cloudflare's headless browser detection
 if ! command -v Xvfb >/dev/null 2>&1; then
-    echo "$(date): Installing Xvfb for headed browser mode..." >> "$LOG"
-    apt-get install -y xvfb >> "$LOG" 2>&1
-    echo "$(date): Xvfb installed." >> "$LOG"
+    echo "$(date): Installing Xvfb..." >> "$LOG"
+    apt-get install -y xvfb >> "$LOG" 2>&1 || echo "$(date): Xvfb install failed (non-fatal)" >> "$LOG"
 fi
 
-# Start Xvfb if installed but not running
+# Start Xvfb if available (non-fatal)
+if command -v Xvfb >/dev/null 2>&1 && ! pgrep -x Xvfb >/dev/null 2>&1; then
+    nohup Xvfb :99 -screen 0 1920x1080x24 >/dev/null 2>&1 &
+    sleep 1
+    echo "$(date): Xvfb started on :99" >> "$LOG"
+fi
+
+# Build DISPLAY env line for systemd (empty string if no Xvfb)
+DISPLAY_LINE=""
 if command -v Xvfb >/dev/null 2>&1; then
-    if ! pgrep -x Xvfb >/dev/null 2>&1; then
-        Xvfb :99 -screen 0 1920x1080x24 &
-        echo "$(date): Started Xvfb on :99" >> "$LOG"
-        sleep 1
-    fi
+    DISPLAY_LINE="Environment=DISPLAY=:99"
 fi
 
-# systemd service — pass DISPLAY=:99 if Xvfb is available
-XVFB_ENV=""
-if command -v Xvfb >/dev/null 2>&1; then
-    XVFB_ENV="Environment=DISPLAY=:99"
-fi
-
-cat > /etc/systemd/system/$PROJECT.service << SVCEOF
+# systemd service
+cat > /etc/systemd/system/$PROJECT.service <<EOF
 [Unit]
 Description=Car Offer Tool (Express on port 3100)
 After=network.target
@@ -95,18 +94,15 @@ ExecStart=$NODE_BIN server.js
 Restart=always
 RestartSec=5
 Environment=NODE_ENV=production
-$XVFB_ENV
+$DISPLAY_LINE
 StandardOutput=append:$LOG_DIR/error.log
 StandardError=append:$LOG_DIR/error.log
 
 [Install]
 WantedBy=multi-user.target
-SVCEOF
+EOF
 systemctl daemon-reload
 systemctl enable $PROJECT >> "$LOG" 2>&1
-
-# Keep startup-results.json — the server checks age to avoid re-running Carvana
-# on rapid redeploys. Only runs if last result is >10 min old.
 
 # Only start service if deps are ready (prevents 502 on first deploy)
 if [ -d "$PROJECT_DIR/node_modules/express" ]; then
