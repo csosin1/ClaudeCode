@@ -47,11 +47,12 @@ fi
 # Note: code hardcodes port 7000 for geo-targeting (user- prefix params).
 # .env PROXY_PORT is not used for the actual proxy connection.
 
-# Sync code (preserve node_modules, .env, data)
+# Sync code (preserve node_modules, .env, data, cached results)
 rsync -a --delete \
     --exclude='node_modules' \
     --exclude='*.db' \
     --exclude='.env' \
+    --exclude='startup-results.json' \
     "$REPO_DIR/$PROJECT/" "$PROJECT_DIR/"
 
 # npm install (if package.json changed or node_modules missing)
