@@ -1,0 +1,19 @@
+[Unit]
+Description=Timeshare Surveillance Admin (Flask setup page)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=__PROJECT_DIR__
+EnvironmentFile=__PROJECT_DIR__/.env
+Environment=PYTHON_EXE=__VENV__/bin/python
+Environment=HOME=/root
+ExecStart=__VENV__/bin/python admin/app.py
+Restart=always
+RestartSec=10
+User=root
+StandardOutput=append:/var/log/timeshare-surveillance/admin.log
+StandardError=append:/var/log/timeshare-surveillance/admin.log
+
+[Install]
+WantedBy=multi-user.target

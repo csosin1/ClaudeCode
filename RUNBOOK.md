@@ -43,6 +43,19 @@ Last updated: 2026-04-12
 - Env vars: `ANTHROPIC_API_KEY`
 - Deploy script: `deploy/gym-intelligence.sh`
 
+### Timeshare Surveillance
+- URL: https://casinv.dev/timeshare-surveillance/
+- Preview: https://casinv.dev/timeshare-surveillance/preview/
+- Setup page: https://casinv.dev/timeshare-surveillance/preview/admin/ (paste SMTP creds here from phone; live equivalent at /timeshare-surveillance/admin/)
+- Server paths: /opt/timeshare-surveillance-live/ and /opt/timeshare-surveillance-preview/
+- Process: two systemd pairs per instance — `timeshare-surveillance-watcher{,-preview}.service` (EDGAR poller) and `timeshare-surveillance-admin{,-preview}.service` (Flask setup page on ports 8510 live / 8511 preview)
+- Dashboard: static HTML served directly by nginx from `<path>/dashboard/index.html`
+- Dependencies: anthropic, flask, requests, python-dateutil
+- Env vars (in `/opt/timeshare-surveillance-{live,preview}/.env`): `ANTHROPIC_API_KEY`, `SMTP_HOST`, `SMTP_USER`, `SMTP_PASSWORD`, `ALERT_EMAIL`, `ADMIN_TOKEN`
+- Deploy script: `deploy/timeshare-surveillance.sh`
+- Weekly cron: `0 6 * * 0 /opt/timeshare-surveillance-live/watcher/cron_refresh.sh`
+- Health check: `curl -sf https://casinv.dev/timeshare-surveillance/ | grep -q 'Timeshare'`
+
 ### Carvana ABS Loan Dashboard
 - URL: https://casinv.dev/CarvanaLoanDashBoard/
 - Preview: https://casinv.dev/CarvanaLoanDashBoard/preview/

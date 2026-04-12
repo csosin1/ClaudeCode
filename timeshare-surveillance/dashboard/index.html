@@ -1,0 +1,1039 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Timeshare Receivable Surveillance</title>
+<link rel="preconnect" href="https://unpkg.com" />
+<link rel="preconnect" href="https://cdn.tailwindcss.com" />
+<!-- Favicon inline to avoid 404s -->
+<link rel="icon" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' fill='%230A0E1A'/><text x='16' y='22' font-family='monospace' font-size='18' fill='%2300A3FF' text-anchor='middle' font-weight='700'>T</text></svg>" />
+<script src="https://cdn.tailwindcss.com"></script>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/recharts@2.12.0/umd/Recharts.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+  :root {
+    --bg: #0A0E1A;
+    --card: #111827;
+    --border: #1F2937;
+    --hgv: #00A3FF;
+    --vac: #FF6B35;
+    --tnl: #00D48A;
+    --critical: #FF3B3B;
+    --warning: #FFB800;
+    --clean: #00D48A;
+    --muted: #64748B;
+    --text: #E5E7EB;
+  }
+  html, body, #root { background: var(--bg); color: var(--text); }
+  body {
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-feature-settings: "tnum", "cv02", "cv03";
+  }
+  .mono {
+    font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    letter-spacing: -0.01em;
+  }
+  .skel {
+    background: linear-gradient(90deg, #111827 0%, #1F2937 50%, #111827 100%);
+    background-size: 200% 100%;
+    animation: shimmer 1.6s linear infinite;
+    border-radius: 4px;
+  }
+  @keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+  .sortable:hover { color: #fff; cursor: pointer; }
+  .chart-wrap { width: 100%; height: 260px; }
+  @media (max-width: 640px) { .chart-wrap { height: 220px; } }
+  .recharts-tooltip-wrapper .recharts-default-tooltip {
+    background: #0A0E1A !important;
+    border: 1px solid #1F2937 !important;
+    font-family: ui-monospace, monospace;
+  }
+  a { color: var(--hgv); }
+  a:hover { color: #5bd0ff; }
+  .scroll-x { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" data-presets="react">
+const { useEffect, useMemo, useState, useRef } = React;
+const {
+  LineChart, Line, XAxis, YAxis, Tooltip, Legend, ReferenceLine,
+  BarChart, Bar, ResponsiveContainer, CartesianGrid
+} = Recharts;
+
+// -------------------------------------------------------------
+// Constants
+// -------------------------------------------------------------
+const TICKERS = ["HGV", "VAC", "TNL"];
+const COLORS = { HGV: "#00A3FF", VAC: "#FF6B35", TNL: "#00D48A" };
+const SEV = { CRITICAL: "#FF3B3B", WARNING: "#FFB800", CLEAN: "#00D48A" };
+
+const EDGAR_URLS = {
+  HGV: "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0001674168&type=10-Q&dateb=&owner=include&count=40",
+  VAC: "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0001524358&type=10-Q&dateb=&owner=include&count=40",
+  TNL: "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0001361658&type=10-Q&dateb=&owner=include&count=40"
+};
+
+const THRESHOLDS = {
+  CRITICAL: {
+    delinquent_90_plus_days_pct:           ["gt", 0.07],
+    delinquent_total_pct:                  ["gt", 0.15],
+    allowance_coverage_pct:                ["lt", 0.10],
+    allowance_coverage_pct_qoq_delta:      ["gt", 0.02],
+    gain_on_sale_margin_pct:               ["lt", 0.05],
+    new_securitization_advance_rate_qoq:   ["lt", -0.03],
+    management_flagged_credit_concerns:    ["eq", true]
+  },
+  WARNING: {
+    delinquent_90_plus_days_pct:           ["gt", 0.05],
+    delinquent_total_pct:                  ["gt", 0.10],
+    allowance_coverage_pct:                ["lt", 0.12],
+    fico_below_600_pct:                    ["gt", 0.15],
+    weighted_avg_fico_origination:         ["lt", 680],
+    originations_mm_yoy_change_pct:        ["lt", -0.15],
+    contract_rescission_rate_pct:          ["gt", 0.15],
+    provision_yoy_change_pct:              ["gt", 0.25]
+  }
+};
+
+// Plain-English consequences for each metric/severity
+const CONSEQUENCES = {
+  delinquent_90_plus_days_pct: {
+    CRITICAL: "Elevated 90+ DPD accelerates charge-offs; securitization cash flows at risk.",
+    WARNING:  "Late-stage delinquency is trending up; expect higher charge-offs next 1-2 quarters."
+  },
+  delinquent_total_pct: {
+    CRITICAL: "Total DPD above 15% signals a book-wide credit problem, not an isolated cohort.",
+    WARNING:  "Total delinquency creeping above 10%; watch for migration to 90+ bucket."
+  },
+  allowance_coverage_pct: {
+    CRITICAL: "Thin reserves mean future losses flow straight to earnings.",
+    WARNING:  "Reserve cushion is shrinking vs. the delinquency pipeline."
+  },
+  allowance_coverage_pct_qoq_delta: {
+    CRITICAL: "A sharp jump in reserve ratio implies management sees worse losses coming.",
+    WARNING:  "Reserve build is accelerating; credit outlook deteriorating."
+  },
+  gain_on_sale_margin_pct: {
+    CRITICAL: "Securitization economics are compressing; originations may stop being profitable.",
+    WARNING:  "Gain-on-sale margin softening; ABS buyers demanding wider spreads."
+  },
+  new_securitization_advance_rate_qoq: {
+    CRITICAL: "ABS buyers accepting less collateral per dollar raised - a credit-quality signal from the bond market.",
+    WARNING:  "Advance rates slipping; rating agencies getting cautious."
+  },
+  management_flagged_credit_concerns: {
+    CRITICAL: "Management explicitly called out credit deterioration - take them at their word.",
+    WARNING:  "Management commentary hedging on credit; read carefully."
+  },
+  fico_below_600_pct: {
+    CRITICAL: "Subprime mix elevated; loss severity climbs non-linearly below 600.",
+    WARNING:  "Subprime share of originations exceeds 15% - credit mix drifting weaker."
+  },
+  weighted_avg_fico_origination: {
+    CRITICAL: "New originations at sub-680 weighted FICO - credit standards falling.",
+    WARNING:  "Weighted FICO softening below 680 at origination."
+  },
+  originations_mm_yoy_change_pct: {
+    CRITICAL: "Origination volume collapsing; fixed-cost sales infrastructure pressures earnings.",
+    WARNING:  "Originations down >15% YoY - demand or underwriting tightening."
+  },
+  contract_rescission_rate_pct: {
+    CRITICAL: "Buyer's-remorse rescissions above 15% - sales practices or product fit under strain.",
+    WARNING:  "Rescission rate elevated; refund drag on reported originations."
+  },
+  provision_yoy_change_pct: {
+    CRITICAL: "Provision up sharply YoY - loss forecasts materially worse.",
+    WARNING:  "Provision trending up >25% YoY; credit costs rising."
+  }
+};
+
+const METRIC_LABEL = {
+  net_receivables_mm: "Net receivables ($mm)",
+  delinquent_total_pct: "Total DPD %",
+  delinquent_90_plus_days_pct: "90+ DPD %",
+  allowance_coverage_pct: "Allowance coverage %",
+  allowance_coverage_pct_qoq_delta: "Allowance coverage Δ QoQ",
+  provision_mm: "Provision ($mm)",
+  originations_mm: "Originations ($mm)",
+  gain_on_sale_margin_pct: "Gain-on-sale margin %",
+  weighted_avg_fico_origination: "Wtd avg FICO",
+  fico_below_600_pct: "FICO <600 %",
+  fico_700_plus_pct: "FICO 700+ %",
+  originations_mm_yoy_change_pct: "Originations YoY %",
+  contract_rescission_rate_pct: "Rescission rate %",
+  provision_yoy_change_pct: "Provision YoY %",
+  new_securitization_advance_rate_qoq: "ABS advance rate Δ QoQ",
+  management_flagged_credit_concerns: "Mgmt flagged credit"
+};
+
+// For the KPI rows, direction of "good". 1 means higher is better, -1 lower is better.
+const GOOD_DIR = {
+  net_receivables_mm: 0,
+  delinquent_total_pct: -1,
+  delinquent_90_plus_days_pct: -1,
+  allowance_coverage_pct: 1,
+  provision_mm: -1,
+  originations_mm: 1,
+  gain_on_sale_margin_pct: 1,
+  weighted_avg_fico_origination: 1,
+  fico_below_600_pct: -1,
+  fico_700_plus_pct: 1,
+  originations_mm_yoy_change_pct: 1,
+  contract_rescission_rate_pct: -1,
+  provision_yoy_change_pct: -1
+};
+
+// -------------------------------------------------------------
+// Helpers
+// -------------------------------------------------------------
+function cmp(op, val, target) {
+  if (val === null || val === undefined) return false;
+  if (op === "gt") return val > target;
+  if (op === "lt") return val < target;
+  if (op === "eq") return val === target;
+  return false;
+}
+
+function classifyMetric(metric, val) {
+  const c = THRESHOLDS.CRITICAL[metric];
+  if (c && cmp(c[0], val, c[1])) return "CRITICAL";
+  const w = THRESHOLDS.WARNING[metric];
+  if (w && cmp(w[0], val, w[1])) return "WARNING";
+  return "CLEAN";
+}
+
+function computeFlags(records) {
+  // records: array of latest record per ticker
+  const flags = [];
+  for (const rec of records) {
+    if (!rec) continue;
+    const checked = new Set();
+    // CRITICAL first
+    for (const [metric, rule] of Object.entries(THRESHOLDS.CRITICAL)) {
+      const val = rec[metric];
+      if (cmp(rule[0], val, rule[1])) {
+        flags.push({
+          severity: "CRITICAL", ticker: rec.ticker, metric, value: val,
+          threshold: `${rule[0] === "gt" ? ">" : rule[0] === "lt" ? "<" : "="} ${fmtThresh(metric, rule[1])}`,
+          consequence: (CONSEQUENCES[metric] && CONSEQUENCES[metric].CRITICAL) || ""
+        });
+        checked.add(metric);
+      }
+    }
+    for (const [metric, rule] of Object.entries(THRESHOLDS.WARNING)) {
+      if (checked.has(metric)) continue;
+      const val = rec[metric];
+      if (cmp(rule[0], val, rule[1])) {
+        flags.push({
+          severity: "WARNING", ticker: rec.ticker, metric, value: val,
+          threshold: `${rule[0] === "gt" ? ">" : rule[0] === "lt" ? "<" : "="} ${fmtThresh(metric, rule[1])}`,
+          consequence: (CONSEQUENCES[metric] && CONSEQUENCES[metric].WARNING) || ""
+        });
+      }
+    }
+  }
+  // CRITICAL first, then by ticker
+  flags.sort((a, b) => {
+    if (a.severity !== b.severity) return a.severity === "CRITICAL" ? -1 : 1;
+    return a.ticker.localeCompare(b.ticker);
+  });
+  return flags;
+}
+
+function fmtThresh(metric, v) {
+  if (typeof v === "boolean") return String(v);
+  if (metric.endsWith("_pct") || metric.endsWith("_qoq_delta") || metric.endsWith("_qoq")) return fmtPct(v);
+  if (metric === "weighted_avg_fico_origination") return Math.round(v);
+  return v;
+}
+
+function fmtPct(v, digits = 2) {
+  if (v === null || v === undefined || Number.isNaN(v)) return "—";
+  return (v * 100).toFixed(digits) + "%";
+}
+
+function fmtMoney(v) {
+  if (v === null || v === undefined || Number.isNaN(v)) return "—";
+  return "$" + v.toLocaleString(undefined, { maximumFractionDigits: 0 });
+}
+
+function fmtNum(v) {
+  if (v === null || v === undefined || Number.isNaN(v)) return "—";
+  return Number(v).toLocaleString();
+}
+
+function fmtValue(metric, v) {
+  if (v === null || v === undefined) return "—";
+  if (typeof v === "boolean") return v ? "Yes" : "No";
+  if (metric.endsWith("_pct") || metric.endsWith("_qoq_delta") || metric.endsWith("_qoq") || metric.endsWith("_change_pct")) return fmtPct(v);
+  if (metric === "weighted_avg_fico_origination") return Math.round(v);
+  if (metric.endsWith("_mm")) return fmtMoney(v);
+  return String(v);
+}
+
+function fmtQuarter(periodEnd) {
+  if (!periodEnd) return "—";
+  const d = new Date(periodEnd);
+  if (Number.isNaN(d.getTime())) return String(periodEnd);
+  const m = d.getUTCMonth() + 1;
+  const q = m <= 3 ? 1 : m <= 6 ? 2 : m <= 9 ? 3 : 4;
+  return `Q${q} ${d.getUTCFullYear()}`;
+}
+
+function sortByPeriod(arr) {
+  return [...arr].sort((a, b) => {
+    const da = new Date(a.period_end).getTime();
+    const db = new Date(b.period_end).getTime();
+    return da - db;
+  });
+}
+
+function latestPerTicker(all) {
+  const out = {};
+  for (const t of TICKERS) {
+    const rows = all.filter(r => r.ticker === t);
+    const sorted = sortByPeriod(rows);
+    out[t] = sorted.length ? sorted[sorted.length - 1] : null;
+  }
+  return out;
+}
+
+function priorPerTicker(all) {
+  const out = {};
+  for (const t of TICKERS) {
+    const rows = all.filter(r => r.ticker === t);
+    const sorted = sortByPeriod(rows);
+    out[t] = sorted.length >= 2 ? sorted[sorted.length - 2] : null;
+  }
+  return out;
+}
+
+// -------------------------------------------------------------
+// UI bits
+// -------------------------------------------------------------
+function Badge({ severity, children }) {
+  const color = SEV[severity] || SEV.CLEAN;
+  const bg = severity === "CRITICAL" ? "bg-[#FF3B3B]/15"
+           : severity === "WARNING"  ? "bg-[#FFB800]/15"
+           :                            "bg-[#00D48A]/15";
+  return (
+    <span className={`inline-block px-2 py-0.5 rounded text-[11px] mono font-semibold ${bg}`} style={{ color, border: `1px solid ${color}55` }}>
+      {children}
+    </span>
+  );
+}
+
+function Skeleton({ h = 120 }) {
+  return <div className="skel w-full" style={{ height: h }} />;
+}
+
+function SectionTitle({ children, right }) {
+  return (
+    <div className="flex items-baseline justify-between mb-3">
+      <h2 className="mono uppercase tracking-widest text-xs text-slate-400">{children}</h2>
+      {right && <div className="text-[11px] text-slate-500 mono">{right}</div>}
+    </div>
+  );
+}
+
+function Card({ children, className = "", style = {}, ...rest }) {
+  return (
+    <div
+      className={`rounded-lg p-4 ${className}`}
+      style={{ background: "var(--card)", border: "1px solid var(--border)", ...style }}
+      {...rest}
+    >
+      {children}
+    </div>
+  );
+}
+
+// -------------------------------------------------------------
+// Header
+// -------------------------------------------------------------
+function Header({ latest, flagCount }) {
+  const periodEnds = Object.values(latest).filter(Boolean).map(r => r.period_end).filter(Boolean).sort();
+  const latestPeriod = periodEnds.length ? periodEnds[periodEnds.length - 1] : null;
+  const parsedAt = (() => {
+    const ts = Object.values(latest).filter(Boolean).map(r => r.extracted_at).filter(Boolean).sort();
+    return ts.length ? ts[ts.length - 1] : null;
+  })();
+  return (
+    <div data-testid="hdr" className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-6">
+      <div>
+        <h1 className="mono text-xl md:text-2xl font-bold tracking-tight">Timeshare Receivable Surveillance</h1>
+        <div className="text-slate-400 text-xs mono mt-1">
+          <span style={{ color: COLORS.HGV }}>HGV</span>
+          <span className="text-slate-600 mx-1">·</span>
+          <span style={{ color: COLORS.VAC }}>VAC</span>
+          <span className="text-slate-600 mx-1">·</span>
+          <span style={{ color: COLORS.TNL }}>TNL</span>
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="text-[11px] mono text-slate-400">
+          <div>Latest period: <span className="text-slate-200">{latestPeriod ? fmtQuarter(latestPeriod) : "—"}</span></div>
+          <div>Parsed: <span className="text-slate-200">{parsedAt || "never"}</span></div>
+        </div>
+        <span
+          data-testid="active-flags-count"
+          className="mono text-xs font-semibold px-3 py-1 rounded-full"
+          style={{
+            background: flagCount > 0 ? "#FF3B3B22" : "#00D48A22",
+            border: `1px solid ${flagCount > 0 ? "#FF3B3B" : "#00D48A"}55`,
+            color: flagCount > 0 ? "#FF3B3B" : "#00D48A"
+          }}
+        >
+          {flagCount} active flag{flagCount === 1 ? "" : "s"}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// -------------------------------------------------------------
+// Flag panel
+// -------------------------------------------------------------
+function FlagPanel({ flags, loading }) {
+  const panelRef = useRef(null);
+  const hasCritical = flags.some(f => f.severity === "CRITICAL");
+  useEffect(() => {
+    if (hasCritical && panelRef.current) {
+      try { panelRef.current.scrollIntoView({ behavior: "smooth", block: "start" }); } catch (_) {}
+    }
+  }, [hasCritical]);
+
+  return (
+    <div data-testid="flag-panel" ref={panelRef} className="mb-6">
+      <SectionTitle right={flags.length ? `${flags.filter(f=>f.severity==="CRITICAL").length} critical · ${flags.filter(f=>f.severity==="WARNING").length} warning` : null}>
+        Red-flag panel
+      </SectionTitle>
+      <Card style={{ borderColor: hasCritical ? "#FF3B3B" : "var(--border)", boxShadow: hasCritical ? "0 0 0 1px #FF3B3B inset" : "none" }}>
+        {loading ? <Skeleton h={100} /> : flags.length === 0 ? (
+          <div className="text-sm text-slate-400">
+            No thresholds tripped. All three issuers are within tolerance based on the most recent filing.
+          </div>
+        ) : (
+          <div className="scroll-x">
+            <table className="w-full text-xs mono">
+              <thead className="text-slate-500 uppercase text-[10px] tracking-widest">
+                <tr>
+                  <th className="text-left py-2 pr-3">Sev</th>
+                  <th className="text-left py-2 pr-3">Ticker</th>
+                  <th className="text-left py-2 pr-3">Metric</th>
+                  <th className="text-right py-2 pr-3">Value</th>
+                  <th className="text-right py-2 pr-3">Threshold</th>
+                  <th className="text-left py-2">Consequence</th>
+                </tr>
+              </thead>
+              <tbody>
+                {flags.map((f, i) => (
+                  <tr key={i} className="border-t" style={{ borderColor: "var(--border)" }}>
+                    <td className="py-2 pr-3"><Badge severity={f.severity}>{f.severity}</Badge></td>
+                    <td className="py-2 pr-3" style={{ color: COLORS[f.ticker] }}>{f.ticker}</td>
+                    <td className="py-2 pr-3 text-slate-300">{METRIC_LABEL[f.metric] || f.metric}</td>
+                    <td className="py-2 pr-3 text-right text-slate-100">{fmtValue(f.metric, f.value)}</td>
+                    <td className="py-2 pr-3 text-right text-slate-400">{f.threshold}</td>
+                    <td className="py-2 text-slate-300 min-w-[220px]">{f.consequence}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+// -------------------------------------------------------------
+// KPI scorecard
+// -------------------------------------------------------------
+const KPI_ROWS = [
+  "net_receivables_mm",
+  "delinquent_total_pct",
+  "delinquent_90_plus_days_pct",
+  "allowance_coverage_pct",
+  "provision_mm",
+  "originations_mm",
+  "gain_on_sale_margin_pct",
+  "weighted_avg_fico_origination"
+];
+
+function Delta({ metric, cur, prev }) {
+  if (cur === null || cur === undefined || prev === null || prev === undefined) {
+    return <span className="text-slate-600 mono text-[10px]">—</span>;
+  }
+  const d = cur - prev;
+  if (d === 0) return <span className="text-slate-500 mono text-[10px]">0</span>;
+  const up = d > 0;
+  const good = GOOD_DIR[metric] || 0;
+  const isGood = good === 0 ? null : (good === 1 ? up : !up);
+  const color = isGood === null ? "#94A3B8" : isGood ? "#00D48A" : "#FF6B6B";
+  const arrow = up ? "▲" : "▼";
+  const show = metric.endsWith("_pct") || metric.endsWith("_change_pct")
+    ? (Math.abs(d) * 100).toFixed(2) + " pp"
+    : Math.abs(d).toLocaleString(undefined, { maximumFractionDigits: metric === "weighted_avg_fico_origination" ? 0 : 2 });
+  return <span className="mono text-[10px]" style={{ color }}>{arrow} {show}</span>;
+}
+
+function KpiRow({ metric, rec, prev }) {
+  const val = rec ? rec[metric] : null;
+  const sev = rec ? classifyMetric(metric, val) : "CLEAN";
+  const bg = sev === "CRITICAL" ? "#FF3B3B22" : sev === "WARNING" ? "#FFB80022" : "transparent";
+  const border = sev === "CRITICAL" ? "#FF3B3B55" : sev === "WARNING" ? "#FFB80055" : "var(--border)";
+  return (
+    <div className="flex items-center justify-between py-2 border-b" style={{ borderColor: "var(--border)" }}>
+      <div className="text-[11px] text-slate-400">{METRIC_LABEL[metric]}</div>
+      <div className="flex items-center gap-2">
+        <Delta metric={metric} cur={val} prev={prev ? prev[metric] : null} />
+        <span
+          className="mono text-xs font-semibold px-2 py-0.5 rounded"
+          style={{ background: bg, border: `1px solid ${border}`, color: sev === "CLEAN" ? "#E5E7EB" : (sev === "CRITICAL" ? "#FF3B3B" : "#FFB800") }}
+        >
+          {fmtValue(metric, val)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function Scorecard({ latest, prior, loading }) {
+  return (
+    <div className="mb-6">
+      <SectionTitle right="Current vs. prior quarter">KPI scorecard</SectionTitle>
+      <div data-testid="kpi-scorecard" className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {TICKERS.map(t => (
+          <div
+            key={t}
+            data-ticker={t}
+            className="rounded-lg"
+            style={{ background: "var(--card)", border: "1px solid var(--border)", borderTop: `3px solid ${COLORS[t]}` }}
+          >
+            <div className="px-4 pt-3 pb-2 flex items-baseline justify-between">
+              <div className="mono font-bold text-lg" style={{ color: COLORS[t] }}>{t}</div>
+              <div className="mono text-[10px] text-slate-500">
+                {latest[t] ? fmtQuarter(latest[t].period_end) : "no data"}
+              </div>
+            </div>
+            <div className="px-4 pb-3">
+              {loading ? <Skeleton h={220} /> : KPI_ROWS.map(m => (
+                <KpiRow key={m} metric={m} rec={latest[t]} prev={prior[t]} />
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// -------------------------------------------------------------
+// Charts grid
+// -------------------------------------------------------------
+function buildTimeSeries(records, metric) {
+  // one row per period_end; columns per ticker
+  const buckets = {};
+  for (const r of records) {
+    const key = r.period_end;
+    if (!key) continue;
+    if (!buckets[key]) buckets[key] = { period_end: key, label: fmtQuarter(key) };
+    buckets[key][r.ticker] = r[metric];
+  }
+  return Object.values(buckets).sort((a, b) => new Date(a.period_end) - new Date(b.period_end));
+}
+
+function ChartCard({ title, children, testAttr = "1", placeholder }) {
+  return (
+    <div data-chart={testAttr} className="rounded-lg p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+      <div className="mono text-[11px] uppercase tracking-widest text-slate-400 mb-2 px-1">{title}</div>
+      <div className="chart-wrap">
+        {placeholder ? (
+          <div className="h-full w-full flex items-center justify-center text-[11px] text-slate-500 text-center px-4">
+            {placeholder}
+          </div>
+        ) : children}
+      </div>
+    </div>
+  );
+}
+
+const axisProps = {
+  stroke: "#475569",
+  tick: { fill: "#94A3B8", fontSize: 11, fontFamily: "ui-monospace, monospace" },
+  tickLine: { stroke: "#475569" },
+  axisLine: { stroke: "#1F2937" }
+};
+
+function TSChart({ data, refLines = [], yFmt = (v) => v, yDomain }) {
+  if (!data.length) return null;
+  return (
+    <ResponsiveContainer width="100%" height="100%">
+      <LineChart data={data} margin={{ top: 5, right: 12, left: 0, bottom: 0 }}>
+        <CartesianGrid stroke="#1F2937" vertical={false} />
+        <XAxis dataKey="label" {...axisProps} />
+        <YAxis {...axisProps} domain={yDomain} tickFormatter={yFmt} width={56} />
+        <Tooltip
+          contentStyle={{ background: "#0A0E1A", border: "1px solid #1F2937", fontFamily: "ui-monospace, monospace", fontSize: 12 }}
+          labelStyle={{ color: "#94A3B8" }}
+          formatter={(v, name) => [v === null || v === undefined ? "—" : yFmt(v), name]}
+        />
+        <Legend wrapperStyle={{ fontSize: 11, fontFamily: "ui-monospace, monospace", color: "#94A3B8" }} />
+        {refLines.map((r, i) => (
+          <ReferenceLine key={i} y={r.y} stroke={r.color} strokeDasharray="3 3" label={{ value: r.label, fill: r.color, fontSize: 10, position: "insideTopRight" }} />
+        ))}
+        {TICKERS.map(t => (
+          <Line key={t} type="monotone" dataKey={t} name={t} stroke={COLORS[t]} strokeWidth={2} dot={{ r: 2 }} activeDot={{ r: 4 }} connectNulls />
+        ))}
+      </LineChart>
+    </ResponsiveContainer>
+  );
+}
+
+function OriginationsChart({ data }) {
+  if (!data.length) return null;
+  return (
+    <ResponsiveContainer width="100%" height="100%">
+      <BarChart data={data} margin={{ top: 5, right: 12, left: 0, bottom: 0 }}>
+        <CartesianGrid stroke="#1F2937" vertical={false} />
+        <XAxis dataKey="label" {...axisProps} />
+        <YAxis {...axisProps} width={56} tickFormatter={(v) => `$${v}`} />
+        <Tooltip
+          contentStyle={{ background: "#0A0E1A", border: "1px solid #1F2937", fontFamily: "ui-monospace, monospace", fontSize: 12 }}
+          formatter={(v, name) => [fmtMoney(v), name]}
+        />
+        <Legend wrapperStyle={{ fontSize: 11, fontFamily: "ui-monospace, monospace", color: "#94A3B8" }} />
+        {TICKERS.map(t => (
+          <Bar key={t} dataKey={t} fill={COLORS[t]} />
+        ))}
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+function FicoMixChart({ latest }) {
+  // stacked bar per ticker: below_600 / 600-700 (inferred) / 700+
+  const data = TICKERS.map(t => {
+    const r = latest[t];
+    if (!r) return { ticker: t, below_600: null, mid: null, plus_700: null };
+    const lo = r.fico_below_600_pct;
+    const hi = r.fico_700_plus_pct;
+    const mid = (lo !== null && lo !== undefined && hi !== null && hi !== undefined) ? Math.max(0, 1 - lo - hi) : null;
+    return {
+      ticker: t,
+      below_600: (lo !== null && lo !== undefined) ? lo * 100 : null,
+      mid: (mid !== null) ? mid * 100 : null,
+      plus_700: (hi !== null && hi !== undefined) ? hi * 100 : null
+    };
+  });
+  const anyData = data.some(d => d.below_600 !== null || d.mid !== null || d.plus_700 !== null);
+  if (!anyData) return null;
+  return (
+    <ResponsiveContainer width="100%" height="100%">
+      <BarChart data={data} layout="vertical" margin={{ top: 5, right: 12, left: 0, bottom: 0 }}>
+        <CartesianGrid stroke="#1F2937" horizontal={false} />
+        <XAxis type="number" {...axisProps} tickFormatter={(v) => `${v}%`} domain={[0, 100]} />
+        <YAxis type="category" dataKey="ticker" {...axisProps} width={46} />
+        <Tooltip
+          contentStyle={{ background: "#0A0E1A", border: "1px solid #1F2937", fontFamily: "ui-monospace, monospace", fontSize: 12 }}
+          formatter={(v, name) => [v === null ? "—" : `${v.toFixed(1)}%`, name]}
+        />
+        <Legend wrapperStyle={{ fontSize: 11, fontFamily: "ui-monospace, monospace", color: "#94A3B8" }} />
+        <Bar dataKey="below_600" stackId="a" name="<600" fill="#FF3B3B" />
+        <Bar dataKey="mid"        stackId="a" name="600-700" fill="#FFB800" />
+        <Bar dataKey="plus_700"   stackId="a" name="700+" fill="#00D48A" />
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+function ChartsGrid({ all, latest, loading }) {
+  const hasData = all.length > 0;
+  const tsDPD = useMemo(() => buildTimeSeries(all, "delinquent_total_pct"), [all]);
+  const ts90  = useMemo(() => buildTimeSeries(all, "delinquent_90_plus_days_pct"), [all]);
+  const tsCov = useMemo(() => buildTimeSeries(all, "allowance_coverage_pct"), [all]);
+  const tsOri = useMemo(() => buildTimeSeries(all, "originations_mm"), [all]);
+  const tsGoS = useMemo(() => buildTimeSeries(all, "gain_on_sale_margin_pct"), [all]);
+
+  const pctFmt = (v) => `${(v * 100).toFixed(1)}%`;
+  const placeholder = !hasData ? "Awaiting first filing." : null;
+
+  return (
+    <div className="mb-6">
+      <SectionTitle>Charts</SectionTitle>
+      <div data-testid="charts-grid" className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <ChartCard title="Total Delinquency %" testAttr="dpd-total" placeholder={loading ? null : placeholder}>
+          {loading ? <Skeleton h={220} /> : (
+            <TSChart data={tsDPD} yFmt={pctFmt}
+              refLines={[{ y: 0.10, color: SEV.WARNING, label: "10% warn" }, { y: 0.15, color: SEV.CRITICAL, label: "15% crit" }]}
+            />
+          )}
+        </ChartCard>
+        <ChartCard title="90+ DPD %" testAttr="dpd-90" placeholder={loading ? null : placeholder}>
+          {loading ? <Skeleton h={220} /> : (
+            <TSChart data={ts90} yFmt={pctFmt}
+              refLines={[{ y: 0.05, color: SEV.WARNING, label: "5% warn" }, { y: 0.07, color: SEV.CRITICAL, label: "7% crit" }]}
+            />
+          )}
+        </ChartCard>
+        <ChartCard title="Allowance Coverage %" testAttr="cov" placeholder={loading ? null : placeholder}>
+          {loading ? <Skeleton h={220} /> : (
+            <TSChart data={tsCov} yFmt={pctFmt}
+              refLines={[{ y: 0.12, color: SEV.WARNING, label: "12% warn" }, { y: 0.10, color: SEV.CRITICAL, label: "10% crit" }]}
+            />
+          )}
+        </ChartCard>
+        <ChartCard title="Origination Volume ($mm)" testAttr="ori" placeholder={loading ? null : placeholder}>
+          {loading ? <Skeleton h={220} /> : <OriginationsChart data={tsOri} />}
+        </ChartCard>
+        <ChartCard title="Gain-on-Sale Margin %" testAttr="gos" placeholder={loading ? null : placeholder}>
+          {loading ? <Skeleton h={220} /> : (
+            <TSChart data={tsGoS} yFmt={pctFmt}
+              refLines={[{ y: 0.05, color: SEV.CRITICAL, label: "5% crit" }]}
+            />
+          )}
+        </ChartCard>
+        <ChartCard title="FICO Mix (most recent)" testAttr="fico" placeholder={loading ? null : placeholder}>
+          {loading ? <Skeleton h={220} /> : <FicoMixChart latest={latest} />}
+        </ChartCard>
+      </div>
+    </div>
+  );
+}
+
+// -------------------------------------------------------------
+// Vintage loss curves
+// -------------------------------------------------------------
+function inferQuarterDate(asOf) {
+  // fallback if as_of_period missing: treat as Q4
+  const d = new Date(asOf);
+  if (Number.isNaN(d.getTime())) return null;
+  return d;
+}
+
+function monthsBetween(dateA, yearB) {
+  // months from Q4 yearB (assumed Dec 31) to dateA
+  if (!dateA) return null;
+  const q4 = new Date(Date.UTC(yearB, 11, 31));
+  const months = (dateA.getUTCFullYear() - q4.getUTCFullYear()) * 12 + (dateA.getUTCMonth() - q4.getUTCMonth());
+  return months;
+}
+
+function VintagePanel({ all, loading }) {
+  const hasVintages = all.some(r => r.vintage_pools && Array.isArray(r.vintage_pools) && r.vintage_pools.length);
+  // Build: for each vintage year, list of { monthsSinceOrig, cumDefaultPct } across records
+  const { series, warnYear } = useMemo(() => {
+    if (!hasVintages) return { series: [], warnYear: null };
+    const byYear = {};
+    for (const rec of all) {
+      const asOf = inferQuarterDate(rec.period_end || rec.as_of_period);
+      if (!asOf) continue;
+      if (!rec.vintage_pools) continue;
+      for (const v of rec.vintage_pools) {
+        if (v.vintage_year === null || v.vintage_year === undefined) continue;
+        const months = monthsBetween(asOf, v.vintage_year);
+        if (months === null || months < 0) continue;
+        const val = v.cumulative_default_rate_pct;
+        if (val === null || val === undefined) continue;
+        if (!byYear[v.vintage_year]) byYear[v.vintage_year] = [];
+        byYear[v.vintage_year].push({ months, value: val * 100 });
+      }
+    }
+    const years = Object.keys(byYear).map(y => Number(y)).sort((a, b) => a - b);
+    // merge into shared x-axis points
+    const allMonths = Array.from(new Set(Object.values(byYear).flat().map(p => p.months))).sort((a, b) => a - b);
+    const rows = allMonths.map(m => {
+      const row = { months: m, label: `${m}m` };
+      for (const y of years) {
+        const match = byYear[y].find(p => p.months === m);
+        row[y] = match ? match.value : null;
+      }
+      return row;
+    });
+    // Warn if latest vintage tracks above older vintages at equal age
+    let warnYear = null;
+    if (years.length >= 2) {
+      const newest = years[years.length - 1];
+      const newestPts = byYear[newest];
+      for (const pt of newestPts) {
+        for (const oldY of years.slice(0, -1)) {
+          const oldMatch = byYear[oldY].find(p => p.months === pt.months);
+          if (oldMatch && pt.value > oldMatch.value) { warnYear = newest; break; }
+        }
+        if (warnYear) break;
+      }
+    }
+    return { series: rows, warnYear };
+  }, [all, hasVintages]);
+
+  return (
+    <div data-testid="vintages" className="mb-6">
+      <SectionTitle>Vintage loss curves</SectionTitle>
+      <Card>
+        {loading ? <Skeleton h={240} /> : !hasVintages ? (
+          <div className="text-sm text-slate-400">
+            Vintage data not disclosed. Lack of static pool transparency is itself a monitoring concern.
+          </div>
+        ) : (
+          <>
+            {warnYear && (
+              <div className="text-[#FF3B3B] text-xs mono mb-2">⚠ {warnYear} vintage tracking above prior curves</div>
+            )}
+            <div className="chart-wrap" style={{ height: 300 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={series} margin={{ top: 5, right: 12, left: 0, bottom: 0 }}>
+                  <CartesianGrid stroke="#1F2937" vertical={false} />
+                  <XAxis dataKey="label" {...axisProps} />
+                  <YAxis {...axisProps} tickFormatter={(v) => `${v.toFixed(1)}%`} width={56} />
+                  <Tooltip
+                    contentStyle={{ background: "#0A0E1A", border: "1px solid #1F2937", fontSize: 12, fontFamily: "ui-monospace, monospace" }}
+                    formatter={(v) => v === null ? "—" : `${Number(v).toFixed(2)}%`}
+                  />
+                  <Legend wrapperStyle={{ fontSize: 11, fontFamily: "ui-monospace, monospace", color: "#94A3B8" }} />
+                  {Object.keys(series[0] || {}).filter(k => k !== "months" && k !== "label").map((year, i) => {
+                    const palette = ["#00A3FF", "#FF6B35", "#00D48A", "#FFB800", "#B27DFF", "#FF3B3B"];
+                    return <Line key={year} type="monotone" dataKey={year} name={`${year} vintage`} stroke={palette[i % palette.length]} strokeWidth={2} connectNulls dot={{ r: 2 }} />;
+                  })}
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+// -------------------------------------------------------------
+// Peer comparison table
+// -------------------------------------------------------------
+const PEER_COLS = [
+  { key: "ticker", label: "Ticker", fmt: (r) => r.ticker, align: "left" },
+  { key: "period_end", label: "Period", fmt: (r) => fmtQuarter(r.period_end), align: "left" },
+  { key: "net_receivables_mm", label: "Net recv ($mm)", fmt: (r) => fmtMoney(r.net_receivables_mm), align: "right" },
+  { key: "delinquent_total_pct", label: "Total DPD", fmt: (r) => fmtPct(r.delinquent_total_pct), align: "right", classify: true },
+  { key: "delinquent_90_plus_days_pct", label: "90+ DPD", fmt: (r) => fmtPct(r.delinquent_90_plus_days_pct), align: "right", classify: true },
+  { key: "allowance_coverage_pct", label: "Coverage", fmt: (r) => fmtPct(r.allowance_coverage_pct), align: "right", classify: true },
+  { key: "gain_on_sale_margin_pct", label: "GoS margin", fmt: (r) => fmtPct(r.gain_on_sale_margin_pct), align: "right", classify: true },
+  { key: "weighted_avg_fico_origination", label: "Wtd FICO", fmt: (r) => fmtNum(Math.round(r.weighted_avg_fico_origination)), align: "right", classify: true }
+];
+
+function PeerTable({ latest, loading }) {
+  const [sortKey, setSortKey] = useState("ticker");
+  const [sortDir, setSortDir] = useState("asc");
+  const baseTicker = "HGV";
+
+  const rows = useMemo(() => {
+    const list = TICKERS.map(t => latest[t]).filter(Boolean);
+    return [...list].sort((a, b) => {
+      const av = a[sortKey]; const bv = b[sortKey];
+      if (av === undefined && bv === undefined) return 0;
+      if (av === undefined || av === null) return 1;
+      if (bv === undefined || bv === null) return -1;
+      if (av < bv) return sortDir === "asc" ? -1 : 1;
+      if (av > bv) return sortDir === "asc" ? 1 : -1;
+      return 0;
+    });
+  }, [latest, sortKey, sortDir]);
+
+  function toggle(k) {
+    if (sortKey === k) setSortDir(d => d === "asc" ? "desc" : "asc");
+    else { setSortKey(k); setSortDir("asc"); }
+  }
+
+  const base = latest[baseTicker];
+
+  return (
+    <div className="mb-6">
+      <SectionTitle right={base ? `Δ columns vs. ${baseTicker}` : null}>Peer comparison</SectionTitle>
+      <Card>
+        {loading ? <Skeleton h={180} /> : (
+          <div className="scroll-x" data-testid="peer-table">
+            <table className="w-full text-xs mono">
+              <thead className="text-slate-500 uppercase text-[10px] tracking-widest">
+                <tr>
+                  {PEER_COLS.map(c => (
+                    <th
+                      key={c.key}
+                      className={`sortable py-2 pr-3 text-${c.align === "right" ? "right" : "left"}`}
+                      onClick={() => toggle(c.key)}
+                    >
+                      {c.label}{sortKey === c.key ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
+                    </th>
+                  ))}
+                  <th className="py-2 pr-3 text-right">Δ vs HGV</th>
+                  <th className="py-2 text-right">Δ vs HGV (90+)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.length === 0 ? (
+                  <tr><td colSpan={PEER_COLS.length + 2} className="py-6 text-center text-slate-500">No records yet.</td></tr>
+                ) : rows.map(r => (
+                  <tr key={r.ticker} className="border-t" style={{ borderColor: "var(--border)" }}>
+                    {PEER_COLS.map(c => {
+                      let color = "#E5E7EB";
+                      if (c.classify && r[c.key] !== null && r[c.key] !== undefined) {
+                        const sev = classifyMetric(c.key, r[c.key]);
+                        color = sev === "CRITICAL" ? "#FF3B3B" : sev === "WARNING" ? "#FFB800" : "#E5E7EB";
+                      }
+                      if (c.key === "ticker") color = COLORS[r.ticker] || "#E5E7EB";
+                      return (
+                        <td key={c.key} className={`py-2 pr-3 text-${c.align === "right" ? "right" : "left"}`} style={{ color }}>
+                          {c.fmt(r)}
+                        </td>
+                      );
+                    })}
+                    <td className="py-2 pr-3 text-right text-slate-300">
+                      {base && r.delinquent_total_pct !== null && base.delinquent_total_pct !== null
+                        ? ((r.delinquent_total_pct - base.delinquent_total_pct) * 100).toFixed(2) + " pp"
+                        : "—"}
+                    </td>
+                    <td className="py-2 text-right text-slate-300">
+                      {base && r.delinquent_90_plus_days_pct !== null && base.delinquent_90_plus_days_pct !== null
+                        ? ((r.delinquent_90_plus_days_pct - base.delinquent_90_plus_days_pct) * 100).toFixed(2) + " pp"
+                        : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+// -------------------------------------------------------------
+// Management commentary
+// -------------------------------------------------------------
+function Commentary({ latest, loading }) {
+  return (
+    <div className="mb-6">
+      <SectionTitle>Management commentary</SectionTitle>
+      <div data-testid="commentary" className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {loading ? TICKERS.map(t => <Skeleton key={t} h={140} />) : TICKERS.map(t => {
+          const r = latest[t];
+          const text = r && r.management_credit_commentary;
+          const flagged = !!(r && r.management_flagged_credit_concerns);
+          const style = flagged
+            ? { background: "#FF3B3B1A", border: "1px solid #FF3B3B55", borderLeft: "3px solid #FF3B3B" }
+            : { background: "var(--card)", border: "1px solid var(--border)", borderLeft: `3px solid ${COLORS[t]}` };
+          return (
+            <div key={t} className="rounded-lg p-4" style={style}>
+              <div className="flex items-center justify-between mb-2">
+                <div className="mono font-bold" style={{ color: COLORS[t] }}>{t}</div>
+                {flagged && <Badge severity="CRITICAL">Mgmt flagged</Badge>}
+              </div>
+              {text ? (
+                <div className="text-[12px] text-slate-300 leading-relaxed">{text}</div>
+              ) : (
+                <div className="text-[12px] text-slate-500 italic">No commentary extracted yet.</div>
+              )}
+              {r && r.period_end && (
+                <div className="mt-3 mono text-[10px] text-slate-500">{fmtQuarter(r.period_end)}</div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// -------------------------------------------------------------
+// Footer
+// -------------------------------------------------------------
+function Footer() {
+  return (
+    <div data-testid="footer" className="mt-10 pb-10 text-[11px] mono text-slate-500 leading-relaxed">
+      <div className="mb-2">Data: SEC EDGAR. Parsed by Claude AI. Not investment advice.</div>
+      <div className="flex flex-wrap gap-x-4 gap-y-1 mb-2">
+        {TICKERS.map(t => (
+          <a key={t} href={EDGAR_URLS[t]} target="_blank" rel="noopener noreferrer" style={{ color: COLORS[t] }}>
+            {t} filings on EDGAR ↗
+          </a>
+        ))}
+      </div>
+      <div>Dashboard:</div>
+      <div>https://casinv.dev/timeshare-surveillance/</div>
+      <div className="mt-2">Admin: <a href="./admin/">/timeshare-surveillance/admin/</a></div>
+    </div>
+  );
+}
+
+// -------------------------------------------------------------
+// App
+// -------------------------------------------------------------
+function App() {
+  const [records, setRecords] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch("./data/combined.json", { cache: "no-store" });
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const j = await r.json();
+        if (!cancelled) {
+          setRecords(Array.isArray(j) ? j : []);
+          setLoading(false);
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setErr(e && e.message ? e.message : String(e));
+          setRecords([]);
+          setLoading(false);
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const latest = useMemo(() => latestPerTicker(records), [records]);
+  const prior  = useMemo(() => priorPerTicker(records), [records]);
+  const flags  = useMemo(() => computeFlags(Object.values(latest).filter(Boolean)), [latest]);
+
+  const isEmpty = !loading && records.length === 0;
+
+  return (
+    <div className="max-w-[1400px] mx-auto px-4 py-5">
+      <Header latest={latest} flagCount={flags.length} />
+
+      {isEmpty && (
+        <Card className="mb-6" style={{ borderColor: "#FFB80055" }}>
+          <div className="text-sm text-slate-300">
+            Data pipeline has not run yet. Paste credentials at{" "}
+            <a href="./admin/" className="underline">/timeshare-surveillance/admin/</a>{" "}
+            and wait for the next filing.
+            {err && <span className="block mt-2 text-[11px] text-slate-500">fetch status: {err}</span>}
+          </div>
+        </Card>
+      )}
+
+      <FlagPanel flags={flags} loading={loading} />
+      <Scorecard latest={latest} prior={prior} loading={loading} />
+      <ChartsGrid all={records} latest={latest} loading={loading} />
+      <VintagePanel all={records} loading={loading} />
+      <PeerTable latest={latest} loading={loading} />
+      <Commentary latest={latest} loading={loading} />
+      <Footer />
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
