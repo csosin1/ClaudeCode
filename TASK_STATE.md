@@ -38,9 +38,14 @@ Manual verification on origin:
 Cloudflare currently caches the old dashboard HTML and the old empty PDF response on the canonical URL. No CF API creds on box, so cache will clear via TTL within ~4 hours. Cache-busted URLs return the new content immediately.
 
 ## Follow-ups (out of scope here)
-- auto-deploy.timer for this branch is stopped; pushes don't auto-deploy. Promotes were done directly on the droplet in this session.
-- generate_pdfs.py no longer serves any purpose. Remove it + the docs/ directories in a cleanup task.
-- Consider adding a Cloudflare API token + purge step to deploy so future cache-poison fixes don't need a 4h wait.
+- auto-deploy.timer for this branch is stopped; pushes don't auto-deploy. Promotes were done directly on the droplet in this session. Daily cron now handles `git pull` + regenerate + promote, so the site stays current without the timer, but CI-driven previews won't work until the timer is restarted or replaced.
+- generate_pdfs.py no longer serves any purpose. Remove it + the stale docs/ directories in a cleanup task.
+- Consider adding a Cloudflare API token + purge step to deploy so future cache-poison fixes don't need the 4h TTL wait.
+
+## 2026-04-12 Update: data freshness
+- User reported docs "seem to be from January" — cause was the live build being ~1 week stale (no daily ingest cron was scheduled, and the project-specific auto-deploy timer had been turned off on 2026-04-12 21:36 UTC).
+- Verified DB freshness: servicer-cert filings present through 2026-03-13 (Mar 10 distribution date); monthly_summary loan-level data through 2026-02-28. EDGAR has no April filings yet — those typically drop 10–15th of the month, so this is as current as possible.
+- Regenerated + promoted live. Installed `/opt/abs-dashboard/deploy/cron_ingest.sh` as a daily cron at 14:17 UTC covering ingest → rebuild → regenerate → promote.
 
 ## Blockers
 [none]
