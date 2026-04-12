@@ -88,6 +88,12 @@ Reusable patterns live in `SKILLS/*.md`. Check there before implementing anythin
 ## Autonomy
 Do the work. Don't ask the user to run commands, read logs, or verify URLs. Escalate only after genuinely different approaches have failed. Never say "it should work" — verify, then share the link.
 
+## Keep-the-User-Informed Conventions
+- **Scope upfront.** Before starting any non-trivial task, state estimated duration (e.g., "~15 min", "~1 hr", "~3 hr with multiple iterations"). User may walk away between prompt and completion; they need to know when to check back.
+- **Task status file.** Call `/usr/local/bin/task-status.sh set "<name>" "<stage>" "<detail>"` when starting a task; `task-status.sh done "<name>" "<summary>" <preview_url>` when finished; `task-status.sh clear` when fully handed off. This updates `https://casinv.dev/tasks.json` which the user can tap anytime to see current state.
+- **Notifications.** Push notifications fire automatically on every preview deploy via the webhook. For discrete milestones (task ready to review, QA failed after N cycles, blocker surfaced), call `/usr/local/bin/notify.sh "message" "title" priority "click-url"` directly. Priorities: `urgent` for hard blockers needing input; `high` for task done; `default` for routine updates.
+- **Token-cost guardrail.** If a single task looks like it will exceed ~200k tokens or has burned through that much without reaching QA-green, stop and surface the scope blowout via `notify.sh` with `urgent` priority. Do not spiral.
+
 ## Git
 - Commit and push before stopping; commit messages explain *why*.
 - Tag before every deploy. No force-push to published commits. Main branch only.

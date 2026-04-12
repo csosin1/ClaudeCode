@@ -157,6 +157,16 @@ if [ "$LOCAL" != "$REMOTE" ]; then
     } > /var/www/landing/status.json
 
     echo "$(date): Deploy complete." >> "$LOG"
+
+    # --- Notify iPhone that preview has updated ---
+    if [ -x /usr/local/bin/notify.sh ]; then
+        SHORT_SHA=$(git -C "$REPO_DIR" rev-parse --short HEAD 2>/dev/null || echo "")
+        /usr/local/bin/notify.sh \
+            "Preview updated ($SHORT_SHA). Tap to review; reply 'ship it' to promote to live." \
+            "Preview ready" \
+            default \
+            "https://casinv.dev/preview/" >> "$LOG" 2>&1 || true
+    fi
 else
     : # No changes — silent
 fi
