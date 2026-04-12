@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Generate static HTML dashboard using raw Plotly.js (no Python Plotly serialization)."""
 
-import os, sys, sqlite3, json, logging
+import os, re, sys, sqlite3, json, logging
 from datetime import datetime
+from urllib.parse import urlparse
 import pandas as pd
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -88,22 +89,78 @@ def table_html(df, cls=""):
     return f'<div class="tbl"><table{cls_attr}><thead>{header}</thead><tbody>{body}</tbody></table></div>'
 
 
+_CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "filing_cache")
+_CERT_CACHE = {}
+
+
+def _cert_totals(deal):
+    """Parse authoritative cumulative totals from the deal's latest cached 10-D
+    servicer certificate. Line-number references shift by vintage, so the regex
+    keys off the label text, not the (NN) marker.
+
+    Returns dict (may have None values) with:
+      orig_pool_balance, cum_gross_losses, cum_liquidation_proceeds,
+      cum_net_losses, ending_pool_balance.
+    """
+    if deal in _CERT_CACHE:
+        return _CERT_CACHE[deal]
+    result = {}
+    row = q("SELECT servicer_cert_url FROM filings WHERE deal=? "
+            "AND servicer_cert_url IS NOT NULL ORDER BY filing_date DESC LIMIT 1", (deal,))
+    if row.empty:
+        _CERT_CACHE[deal] = result
+        return result
+    url = row.iloc[0]["servicer_cert_url"]
+    p = urlparse(url)
+    path = os.path.join(_CACHE_DIR, p.path.strip("/").replace("/", "_"))
+    if not os.path.exists(path):
+        _CERT_CACHE[deal] = result
+        return result
+    try:
+        with open(path, "r", errors="replace") as f:
+            txt = f.read()
+    except OSError:
+        _CERT_CACHE[deal] = result
+        return result
+    body = re.sub(r"<[^>]+>", " ", re.sub(r"&nbsp;", " ", txt))
+    body = re.sub(r"\s+", " ", body)
+
+    def grab(label):
+        pat = rf"{re.escape(label)}\s*\(?\s*\d+\s*\)?[^0-9]{{0,30}}([\d,]+(?:\.\d+)?)"
+        m = re.search(pat, body)
+        return float(m.group(1).replace(",", "")) if m else None
+
+    result["orig_pool_balance"] = grab("Original Pool Balance as of Cutoff Date")
+    result["cum_gross_losses"] = grab(
+        "Aggregate Gross Charged-Off Receivables losses as of the last day of the current Collection Period")
+    result["cum_liquidation_proceeds"] = grab(
+        "Liquidation Proceeds as of the last day of the current Collection Period")
+    result["cum_net_losses"] = (
+        grab("aggregate amount of Net Charged-Off Receivables losses as of the last day of the current Collection Period")
+        or grab("Aggregate amount of Net Charged-Off Receivables losses as of the last day of the current Collection Period"))
+    m = re.search(r"Ending Pool Balance\s*\(?\s*\d+\s*\)?\s*[\d,]+\s+([\d,]+(?:\.\d+)?)", body)
+    result["ending_pool_balance"] = float(m.group(1).replace(",", "")) if m else None
+    _CERT_CACHE[deal] = result
+    return result
+
+
 def get_orig_bal(deal):
     """Return the deal's original cutoff pool balance.
 
     Priority:
-      1. KNOWN override — deals whose first servicer cert predates our cache.
-      2. MAX(beginning_pool_balance) from pool_performance. Pool balance is
-         monotonically decreasing, so the max across all periods equals the
-         earliest "Beginning Pool Balance" line item — which is the cutoff
-         balance for any deal whose first 10-D we ingested.
-      3. SUM(original_loan_amount) from the loan tape — last resort; overstates
-         by a few % because it's the sum of each loan's origination amount
-         (pre-pooling amortization included), not the cutoff pool balance.
+      1. Servicer cert line item "Original Pool Balance as of Cutoff Date"
+         — the authoritative source. Works for every deal whose cert we've
+         cached, regardless of when we started ingesting 10-Ds for it.
+      2. MAX(beginning_pool_balance) from pool_performance — for deals where
+         cert parse fails. This equals cutoff only if our earliest 10-D was
+         the first 10-D for the deal; understates for any deal where we
+         started ingesting mid-life (e.g. 2021-P1: $399M vs true $415M).
+      3. SUM(original_loan_amount) from the loan tape — last resort; over-
+         states by a few % since it sums each loan's origination amount.
     """
-    KNOWN = {"2020-P1": 405_000_000}
-    if deal in KNOWN:
-        return KNOWN[deal]
+    totals = _cert_totals(deal)
+    if totals.get("orig_pool_balance"):
+        return float(totals["orig_pool_balance"])
     fp = q("SELECT MAX(beginning_pool_balance) AS m FROM pool_performance "
            "WHERE deal=? AND beginning_pool_balance > 0", (deal,))
     if not fp.empty and fp.iloc[0]["m"] and fp.iloc[0]["m"] > 0:
@@ -112,6 +169,100 @@ def get_orig_bal(deal):
     if not t.empty and t.iloc[0]["s"] and t.iloc[0]["s"] > 0:
         return float(t.iloc[0]["s"])
     return 405_000_000
+
+
+def _cum_net_loss_series(deal):
+    """Return a list of (distribution_date, cum_net_loss_dollars) from every
+    cached servicer cert for this deal, sorted chronologically. Used for the
+    Cumulative Net Loss by Deal Age chart so the series reflects cert-
+    authoritative totals rather than monthly_summary flow sums (which
+    undercount deals with gaps in ABS-EE ingestion).
+    """
+    filings = q("SELECT servicer_cert_url, filing_date, accession_number FROM filings "
+                "WHERE deal=? AND servicer_cert_url IS NOT NULL", (deal,))
+    if filings.empty:
+        return []
+    from datetime import datetime as _dt
+    def _parse(s):
+        for fmt in ("%m/%d/%Y", "%Y-%m-%d", "%m-%d-%Y"):
+            try: return _dt.strptime(str(s).strip()[:10], fmt)
+            except (ValueError, TypeError): pass
+        return None
+    points = []
+    for _, row in filings.iterrows():
+        url = row["servicer_cert_url"]
+        p = urlparse(url)
+        path = os.path.join(_CACHE_DIR, p.path.strip("/").replace("/", "_"))
+        if not os.path.exists(path):
+            continue
+        try:
+            with open(path, "r", errors="replace") as f:
+                txt = f.read()
+        except OSError:
+            continue
+        body = re.sub(r"<[^>]+>", " ", re.sub(r"&nbsp;", " ", txt))
+        body = re.sub(r"\s+", " ", body)
+
+        def _grab(label):
+            pat = rf"{re.escape(label)}\s*\(?\s*\d+\s*\)?[^0-9]{{0,30}}([\d,]+(?:\.\d+)?)"
+            m = re.search(pat, body)
+            return float(m.group(1).replace(",", "")) if m else None
+
+        cn = (_grab("aggregate amount of Net Charged-Off Receivables losses as of the last day of the current Collection Period")
+              or _grab("Aggregate amount of Net Charged-Off Receivables losses as of the last day of the current Collection Period"))
+        if cn is None:
+            g = _grab("Aggregate Gross Charged-Off Receivables losses as of the last day of the current Collection Period")
+            l = _grab("Liquidation Proceeds as of the last day of the current Collection Period")
+            if g is not None and l is not None:
+                cn = g - l
+        if cn is None:
+            continue
+        # Extract the distribution date from the cert to anchor chronology
+        m = re.search(r"Distribution Date[:\s]+(\d{1,2}/\d{1,2}/\d{4})", body)
+        if not m:
+            # Fall back to filing_date
+            dt = _parse(row["filing_date"])
+        else:
+            dt = _parse(m.group(1))
+        if dt is None:
+            continue
+        points.append((dt, cn))
+    # Chronological, dedupe on date (keep max if multiple)
+    by_date = {}
+    for dt, cn in points:
+        by_date[dt] = max(by_date.get(dt, cn), cn)
+    return sorted(by_date.items())
+
+
+def get_cum_net_loss_rate(deal, orig_bal):
+    """Return the deal's cumulative net-loss rate as of the latest servicer cert.
+
+    Prefer the cert's "(98) aggregate amount of Net Charged-Off Receivables
+    losses as of the last day of the current Collection Period" — or, if that
+    specific line is missing from the cert, gross − liquidation proceeds from
+    the same cert. Fall back to summing monthly_summary flow data only when
+    no cert values can be parsed; that fallback is known to undercount any
+    deal with gaps in our ABS-EE ingestion (2020-P1, 2021-P1, 2021-P2 and a
+    handful of others are missing 1–4 early months).
+    """
+    if not orig_bal or orig_bal <= 0:
+        return None
+    t = _cert_totals(deal)
+    cn = t.get("cum_net_losses")
+    if cn is None:
+        cg = t.get("cum_gross_losses")
+        cl = t.get("cum_liquidation_proceeds")
+        if cg is not None and cl is not None:
+            cn = cg - cl
+    if cn is not None:
+        return cn / orig_bal
+    # Last-resort fallback: monthly_summary sums
+    loss = q("SELECT SUM(period_chargeoffs) as co, SUM(period_recoveries) as rec "
+             "FROM monthly_summary WHERE deal=?", (deal,))
+    if loss.empty:
+        return None
+    net = (loss.iloc[0]["co"] or 0) - (loss.iloc[0]["rec"] or 0)
+    return net / orig_bal
 
 
 def generate_deal_content(deal):
@@ -654,13 +805,18 @@ def generate_deal_content(deal):
         h = "<p>No documents available for this deal.</p>"
     sections["Documents"] = h
 
-    # Build metrics + tabs HTML for this deal
+    # Build metrics + tabs HTML for this deal.
+    # Prefer the latest servicer cert for cum net loss rate (authoritative).
+    # Fall back to the monthly_summary flow sum only if cert parse fails.
+    cert_cum_loss = get_cum_net_loss_rate(deal, ORIG_BAL)
+    cum_loss_display = (f"{cert_cum_loss:.2%}" if cert_cum_loss is not None
+                        else f"{last['loss_rate']:.2%}")
     metrics_html = f"""<div class="metrics">
 <div class="metric"><div class="mv">{fm(ORIG_BAL)}</div><div class="ml">Original Balance</div></div>
 <div class="metric"><div class="mv">{fm(last['total_balance'])}</div><div class="ml">Current Balance</div></div>
 <div class="metric"><div class="mv">{last['total_balance']/ORIG_BAL:.1%}</div><div class="ml">Pool Factor</div></div>
 <div class="metric"><div class="mv">{int(last['active_loans']):,}</div><div class="ml">Active Loans</div></div>
-<div class="metric"><div class="mv">{last['loss_rate']:.2%}</div><div class="ml">Cum Loss Rate</div></div>
+<div class="metric"><div class="mv">{cum_loss_display}</div><div class="ml">Cum Loss Rate</div></div>
 <div class="metric"><div class="mv">{last['dq_rate']:.2%}</div><div class="ml">30+ DQ Rate</div></div>
 </div>"""
 
@@ -801,21 +957,27 @@ def generate_comparison_content(deals, title):
                 if curr_cod is None:
                     curr_cod = rough
 
-        # Pool factor from monthly_summary (more reliable than pool_performance)
-        latest_ms = q("SELECT total_balance FROM monthly_summary WHERE deal=? ORDER BY reporting_period_end DESC LIMIT 1", (deal,))
-        latest_bal = latest_ms.iloc[0]["total_balance"] if not latest_ms.empty and latest_ms.iloc[0]["total_balance"] else None
+        # Latest pool balance — pull from the servicer cert's "Ending Pool Balance"
+        # (authoritative) with a fall-back to the latest monthly_summary row.
+        cert_totals = _cert_totals(deal)
+        latest_bal = cert_totals.get("ending_pool_balance")
+        if latest_bal is None:
+            # date-sorted pick (reporting_period_end is "MM-DD-YYYY" which sorts
+            # wrong as a string; sort in Python via the normalized date)
+            ms_rows = q("SELECT reporting_period_end, total_balance FROM monthly_summary "
+                        "WHERE deal=? AND total_balance IS NOT NULL", (deal,))
+            if not ms_rows.empty:
+                ms_rows["period"] = ms_rows["reporting_period_end"].apply(nd)
+                ms_rows = ms_rows.sort_values("period")
+                latest_bal = float(ms_rows.iloc[-1]["total_balance"])
         pool_factor = latest_bal / init_bal if (latest_bal and init_bal and init_bal > 0) else None
 
         equity = q("SELECT SUM(residual_cash) as total_residual FROM pool_performance WHERE deal=? AND residual_cash IS NOT NULL", (deal,))
         total_residual = equity.iloc[0]["total_residual"] if not equity.empty and equity.iloc[0]["total_residual"] else 0
         equity_pct = total_residual / init_bal if (init_bal and init_bal > 0) else None
 
-        # Cumulative loss rate
-        loss = q("SELECT SUM(period_chargeoffs) as co, SUM(period_recoveries) as rec FROM monthly_summary WHERE deal=?", (deal,))
-        cum_loss_rate = None
-        if not loss.empty and loss.iloc[0]["co"] is not None and init_bal and init_bal > 0:
-            net = (loss.iloc[0]["co"] or 0) - (loss.iloc[0]["rec"] or 0)
-            cum_loss_rate = net / init_bal
+        # Cumulative loss rate — authoritative from latest cert
+        cum_loss_rate = get_cum_net_loss_rate(deal, init_bal)
 
         rows.append({
             "Deal": deal,
@@ -843,22 +1005,22 @@ def generate_comparison_content(deals, title):
         h += f"<h3>{title} — Summary</h3>" + table_html(summary_df, cls="compare")
 
     # ── Cumulative Loss Curve (by deal age in months) ──
+    # Uses cert-authoritative cum-net-loss values (parsed from every cached
+    # servicer cert) rather than cumsum'ing monthly_summary period flows,
+    # which undercount any deal with gaps in ABS-EE ingestion.
     traces = []
     for i, deal in enumerate(deals):
-        ms = q("SELECT reporting_period_end, period_chargeoffs, period_recoveries FROM monthly_summary WHERE deal=? ORDER BY reporting_period_end", (deal,))
-        if ms.empty:
-            continue
-        ms["period"] = ms["reporting_period_end"].apply(nd)
-        ms = ms.sort_values("period").reset_index(drop=True)
         orig_bal = get_orig_bal(deal)
         if not orig_bal or orig_bal <= 0:
             continue
-        ms["cum_net"] = (ms["period_chargeoffs"].fillna(0) - ms["period_recoveries"].fillna(0)).cumsum()
-        ms["loss_rate"] = ms["cum_net"] / orig_bal
-        months = list(range(1, len(ms) + 1))
+        series = _cum_net_loss_series(deal)
+        if not series:
+            continue
+        months = list(range(1, len(series) + 1))
+        rates = [round(cn / orig_bal, 6) for _, cn in series]
         traces.append({
             "x": months,
-            "y": [round(v, 6) for v in ms["loss_rate"].tolist()],
+            "y": rates,
             "type": "scatter",
             "mode": "lines",
             "name": deal,
@@ -899,20 +1061,43 @@ def generate_comparison_content(deals, title):
             ms["period"] = ms["reporting_period_end"].apply(nd)
             ms = ms.sort_values("period").reset_index(drop=True)
             ms["pool_factor"] = ms["total_balance"].astype(float) / orig_bal
-            ms["cum_loss_rate"] = (ms["period_chargeoffs"].fillna(0) - ms["period_recoveries"].fillna(0)).cumsum() / orig_bal
             pf_traces.append({
                 "x": list(range(1, len(ms) + 1)),
                 "y": [round(v, 6) for v in ms["pool_factor"].tolist()],
                 "type": "scatter", "mode": "lines", "name": deal,
                 "line": {"color": color},
             })
-            pf_loss_traces.append({
-                "x": [round(v, 6) for v in ms["pool_factor"].tolist()],
-                "y": [round(v, 6) for v in ms["cum_loss_rate"].tolist()],
-                "type": "scatter", "mode": "lines+markers", "name": deal,
-                "line": {"color": color},
-                "marker": {"size": 4},
-            })
+
+            # Loss vs Pool Factor: pair cert-authoritative cum loss with the
+            # pool-performance ending balance for the same distribution date.
+            # (monthly_summary cumsum undercounts for deals with ABS-EE gaps.)
+            loss_series = _cum_net_loss_series(deal)
+            if loss_series:
+                pool_bal = q("SELECT distribution_date, ending_pool_balance FROM pool_performance "
+                             "WHERE deal=?", (deal,))
+                bal_by_dt = {}
+                for _, r in pool_bal.iterrows():
+                    if r["ending_pool_balance"]:
+                        for fmt in ("%m/%d/%Y", "%Y-%m-%d"):
+                            try:
+                                bal_by_dt[datetime.strptime(str(r["distribution_date"]).strip()[:10], fmt)] = float(r["ending_pool_balance"])
+                                break
+                            except (ValueError, TypeError):
+                                pass
+                pf_x, pf_y = [], []
+                for dt, cn in loss_series:
+                    bal = bal_by_dt.get(dt)
+                    if bal is None:
+                        continue
+                    pf_x.append(round(bal / orig_bal, 6))
+                    pf_y.append(round(cn / orig_bal, 6))
+                if pf_x:
+                    pf_loss_traces.append({
+                        "x": pf_x, "y": pf_y,
+                        "type": "scatter", "mode": "lines+markers", "name": deal,
+                        "line": {"color": color},
+                        "marker": {"size": 4},
+                    })
 
             # 30+ DQ rate: all delinquency buckets / current balance
             bal = ms["total_balance"].astype(float)
