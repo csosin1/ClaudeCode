@@ -1,120 +1,89 @@
-# Runbook
-Last updated: 2026-04-06
+# Runbook — site-deploy
+Last updated: 2026-04-12
 
 ## Droplet
-IP: 159.223.127.125
-SSH: key-based only
-Backups: DigitalOcean automated backups
+- IP: 159.223.127.125
+- OS: Ubuntu 22.04 LTS
+- Backups: DigitalOcean automated backups
+- SSH: key-based, root disabled
 
 ## Projects
 
 ### Landing Page
 - URL: http://159.223.127.125/
-- Directory: /var/www/landing/
+- Server path: /var/www/landing/
 - Process: static (nginx)
-- Dependencies: none
-- Env vars required: none
-- Deploy method: auto-deploy (syncs deploy/landing.html → /var/www/landing/index.html)
-- Last deployed: 2026-04-06
-- Health check: http://159.223.127.125/
-
-### Carvana ABS Loan Dashboard
-- URL: http://159.223.127.125/CarvanaLoanDashBoard/
-- Directory: /opt/abs-dashboard/carvana_abs/static_site/live/
-- Process: static (nginx)
-- Dependencies: unknown — has its own separate auto-deploy
-- Env vars required: unknown
-- Deploy method: separate auto-deploy (not general-deploy)
-- Last deployed: unknown
-- Health check: http://159.223.127.125/CarvanaLoanDashBoard/
-
-### Carvana Dashboard — Preview
-- URL: http://159.223.127.125/CarvanaLoanDashBoard/preview/
-- Directory: /opt/abs-dashboard/carvana_abs/static_site/preview/
-- Process: static (nginx)
-- Dependencies: same as live
-- Deploy method: separate auto-deploy
-- Health check: http://159.223.127.125/CarvanaLoanDashBoard/preview/
-
-### Carvana Hub
-- URL: http://159.223.127.125/carvana/
-- Directory: /var/www/carvana/
-- Process: static (nginx)
-- Dependencies: none
-- Deploy method: auto-deploy (syncs carvana/ → /var/www/carvana/)
-- Last deployed: 2026-04-06
-- Health check: http://159.223.127.125/carvana/
-
-### Car Offer Comparison Tool
-- URL: http://159.223.127.125/car-offers/
-- Directory: /opt/car-offers/
-- Process: systemd (car-offers.service → node server.js on port 3100)
-- Dependencies: playwright-extra, puppeteer-extra-plugin-stealth, dotenv, express
-- Env vars required: PROXY_HOST, PROXY_PORT, PROXY_USER, PROXY_PASS, PROJECT_EMAIL, PORT
-- Deploy method: auto-deploy (deploy/car-offers.sh — project-owned)
-- Last deployed: 2026-04-06
-- Health check: http://159.223.127.125/car-offers/
-
-### Gym Intelligence
-- URL: http://159.223.127.125/gym-intelligence/
-- Directory: /opt/gym-intelligence/
-- Process: systemd (gym-intelligence.service → Flask app.py on port 8502)
-- Dependencies: flask, anthropic, httpx, thefuzz
-- Env vars required: ANTHROPIC_API_KEY
-- Deploy method: auto-deploy (deploy/gym-intelligence.sh — project-owned)
-- Last deployed: 2026-04-06
-- Health check: http://159.223.127.125/gym-intelligence/
+- Deploy: auto-deploy syncs `deploy/landing.html` → `/var/www/landing/index.html`
 
 ### Games (Static)
 - URL: http://159.223.127.125/games/
-- Directory: /var/www/games/
+- Server path: /var/www/games/
 - Process: static (nginx)
-- Games: banana-blaster, button-test, dice-roller, dino-dash, sky-barons, snake, spidy-climb
-- Dependencies: none (single-file HTML games)
-- Env vars required: none
-- Deploy method: auto-deploy (syncs games/ → /var/www/games/)
-- Last deployed: 2026-04-06
-- Health check: http://159.223.127.125/games/
+- Deploy: auto-deploy syncs `games/` → `/var/www/games/`
 
-## How to Rebuild From Scratch
-1. Provision Ubuntu 22.04 LTS droplet on DigitalOcean
-2. Install nginx, node 22, python3
-3. Clone repo to /opt/site-deploy/
-4. Copy deploy/auto_deploy_general.sh to /opt/auto_deploy_general.sh
-5. Set up systemd timer or cron to run /opt/auto_deploy_general.sh every 5 min
-6. Set up webhook listener (webhook_deploy.py) on port 9000
-7. Run deploy/update_nginx.sh to configure nginx routes
-8. Push to main to trigger first deploy (installs deps, creates services)
-9. Push again after deps install to start services (two-deploy rule)
-10. Verify all URLs return 200
+### Carvana Hub
+- URL: http://159.223.127.125/carvana/
+- Server path: /var/www/carvana/
+- Process: static (nginx)
+- Deploy: auto-deploy syncs `carvana/` → `/var/www/carvana/`
 
-## nginx
-Config location: /etc/nginx/sites-available/abs-dashboard
-Reload: sudo systemctl reload nginx
-NGINX_VERSION file: deploy/NGINX_VERSION (currently v5)
+### Car Offer Comparison Tool
+- URL: http://159.223.127.125/car-offers/
+- Server path: /opt/car-offers/
+- Process: systemd `car-offers.service` → `node server.js` on port 3100
+- Dependencies: playwright-extra, puppeteer-extra-plugin-stealth, dotenv, express
+- Env vars: `PROXY_HOST`, `PROXY_PORT`, `PROXY_USER`, `PROXY_PASS`, `PROJECT_EMAIL`, `PORT`
+- Deploy script: `deploy/car-offers.sh`
+
+### Gym Intelligence
+- URL: http://159.223.127.125/gym-intelligence/
+- Server path: /opt/gym-intelligence/
+- Process: systemd `gym-intelligence.service` → Flask `app.py` on port 8502
+- Dependencies: flask, anthropic, httpx, thefuzz
+- Env vars: `ANTHROPIC_API_KEY`
+- Deploy script: `deploy/gym-intelligence.sh`
+
+### Carvana ABS Loan Dashboard
+- URL: https://casinv.dev/CarvanaLoanDashBoard/
+- Preview: https://casinv.dev/CarvanaLoanDashBoard/preview/
+- Checkout: /opt/abs-dashboard/ (same repo as site-deploy, now tracking `main`)
+- Served from: /opt/abs-dashboard/carvana_abs/static_site/{live,preview}/ (static HTML generated by the pipeline; not in git)
+- Process: static (nginx)
+- Generation pipeline: `/opt/auto_deploy.sh` runs every 30s via `auto-deploy.timer`, pulls `origin/main`, runs ingestion/model/PDF/preview generation via `/opt/abs-venv/` Python env
+- Deps: weasyprint system libs; python deps in `/opt/abs-venv/` from `carvana_abs/requirements.txt`
 
 ## Auto-Deploy
-- **Primary:** GitHub webhook → nginx → Python listener on 127.0.0.1:9000 → instant deploy (2-3s)
-- **Fallback:** timer runs every 5 min
-- Main script: /opt/auto_deploy_general.sh (copied from deploy/auto_deploy_general.sh)
-- Project scripts: deploy/car-offers.sh, deploy/gym-intelligence.sh (sourced by main script)
-- Webhook listener: /opt/webhook_deploy.py (systemd: webhook-deploy.service)
-- Webhook secret: /opt/.webhook_secret (chmod 600)
-- Repo clone: /opt/site-deploy/
-- Deploy log: /var/log/general-deploy.log
-- Webhook log: /var/log/webhook-deploy.log
-- Watches: main branch only
+- Push to `main` → GitHub webhook → nginx → Python listener on `127.0.0.1:9000` → deploy in 2–3s
+- Fallback: 5-minute timer
+- Main script: `/opt/auto_deploy_general.sh` (copied from `deploy/auto_deploy_general.sh`)
+- Project scripts: `deploy/<project>.sh` (sourced by main script)
+- Webhook listener: `/opt/webhook_deploy.py` (`webhook-deploy.service`)
+- Webhook secret: `/opt/.webhook_secret` (chmod 600)
+- Deploy log: `/var/log/general-deploy.log`
+- Webhook log: `/var/log/webhook-deploy.log`
 
-## Server Check
-- Post `/check` on GitHub issue #4 to run diagnostics without pushing
-- Or trigger "Server Check" workflow from GitHub Actions UI
-- Results posted as issue comment within ~30s
-- status.json available at http://159.223.127.125/status.json (updated on every deploy)
+## nginx
+- Config: `/etc/nginx/sites-available/abs-dashboard`
+- Version file: `deploy/NGINX_VERSION`
+- Reload: `sudo systemctl reload nginx`
 
-## Automated QA
-- Trigger: every push to main (GitHub Actions)
-- Workflow: .github/workflows/qa.yml
-- Tests: tests/qa-smoke.spec.ts (Playwright)
-- Viewports: 390px mobile, 1280px desktop
-- Results: GitHub Actions tab, screenshots as artifacts
-- Covers: page loads, link integrity, JS errors, security, performance, service health
+## QA
+- Trigger: every push to `main`
+- Workflow: `.github/workflows/qa.yml`
+- Tests: Playwright at 390px mobile and 1280px desktop
+- Results: GitHub Actions tab; screenshots uploaded as artifacts
+
+## Known Cleanup
+- **abs-dashboard checkout** at `/opt/abs-dashboard/` is the same GitHub repo as site-deploy, just cloned to a second path with its own 30s timer that runs the dashboard generation pipeline. Both checkouts now track `main`. Full normalization (moving the generation pipeline into `deploy/carvana-abs.sh` under the general deploy, retiring the second checkout, and deleting `/opt/abs-venv/`) is still pending — deferred because it touches the ingestion/model/PDF pipeline with live-traffic risk.
+- Rollback tag for the unify-on-main step: `rollback-pre-unify-20260412-190105` in `/opt/abs-dashboard`.
+
+## Rebuild From Scratch
+1. Provision Ubuntu 22.04 LTS droplet on DigitalOcean
+2. Install nginx, node 22, python3
+3. Clone repo to `/opt/site-deploy/`
+4. Copy `deploy/auto_deploy_general.sh` → `/opt/auto_deploy_general.sh`
+5. Install `webhook-deploy.service` on port 9000 with `/opt/.webhook_secret`
+6. Install a 5-minute timer/cron that runs `/opt/auto_deploy_general.sh` as fallback
+7. Run `deploy/update_nginx.sh` to configure nginx routes
+8. Push to `main` to trigger deploys (installs deps, creates services)
+9. Verify all URLs return 200

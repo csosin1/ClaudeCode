@@ -1,11 +1,20 @@
 #!/bin/bash
-# Update nginx for multi-project layout.
-# Each project is served from its own isolated directory.
+# Update nginx for multi-project layout with preview/live separation.
+# Each project has two URLs: /project/ (live) and /project/preview/ (preview).
 
-# Ensure landing page directory exists
-mkdir -p /var/www/landing
+set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-cp "$SCRIPT_DIR/landing.html" /var/www/landing/index.html 2>/dev/null || true
+
+# Ensure landing page directory structure exists (live + preview + diagnostic root)
+mkdir -p /var/www/landing/live /var/www/landing/preview
+# Bootstrap: ensure live has an index; if missing, seed from repo
+[ -s /var/www/landing/live/index.html ] || cp "$SCRIPT_DIR/landing.html" /var/www/landing/live/index.html 2>/dev/null || true
+# Preview always gets the latest from the repo
+cp "$SCRIPT_DIR/landing.html" /var/www/landing/preview/index.html 2>/dev/null || true
+
+# Ensure games + carvana preview/live dirs exist
+mkdir -p /var/www/games/live /var/www/games/preview
+mkdir -p /var/www/carvana/live /var/www/carvana/preview
 
 cat > /etc/nginx/sites-available/abs-dashboard << 'NGXEOF'
 server {
@@ -13,42 +22,44 @@ server {
     listen [::]:80 default_server;
     server_name casinv.dev 159.223.127.125;
 
-    # Landing page — project index
-    location / {
-        alias /var/www/landing/;
+    # Landing page — live at /, preview at /preview/, diagnostic JSON files at root
+    location = /preview { return 301 /preview/; }
+    location /preview/ {
+        alias /var/www/landing/preview/;
         index index.html;
     }
-
-    # Trailing-slash redirects
-    location = /CarvanaLoanDashBoard {
-        return 301 /CarvanaLoanDashBoard/;
-    }
-    location = /CarvanaLoanDashBoard/preview {
-        return 301 /CarvanaLoanDashBoard/preview/;
+    location / {
+        root /var/www/landing;
+        try_files /live$uri /live$uri/index.html $uri =404;
     }
 
     # Carvana ABS Dashboard — preview (must come before live for longest-prefix match)
+    location = /CarvanaLoanDashBoard { return 301 /CarvanaLoanDashBoard/; }
+    location = /CarvanaLoanDashBoard/preview { return 301 /CarvanaLoanDashBoard/preview/; }
     location /CarvanaLoanDashBoard/preview/ {
         alias /opt/abs-dashboard/carvana_abs/static_site/preview/;
         index index.html;
         try_files $uri $uri/ /CarvanaLoanDashBoard/preview/index.html;
     }
-
-    # Carvana ABS Dashboard — live
     location /CarvanaLoanDashBoard/ {
         alias /opt/abs-dashboard/carvana_abs/static_site/live/;
         index index.html;
         try_files $uri $uri/ /CarvanaLoanDashBoard/index.html;
     }
 
-    # Carvana hub — static page with cards for ABS Dashboard + Car Offers
+    # Carvana hub — preview + live
     location = /carvana { return 301 /carvana/; }
+    location = /carvana/preview { return 301 /carvana/preview/; }
+    location /carvana/preview/ {
+        alias /var/www/carvana/preview/;
+        index index.html;
+    }
     location /carvana/ {
-        alias /var/www/carvana/;
+        alias /var/www/carvana/live/;
         index index.html;
     }
 
-    # Car Offers — reverse proxy to Express on port 3100
+    # Car Offers — TODO: preview retrofit (currently live-only on port 3100)
     location = /car-offers { return 301 /car-offers/; }
     location /car-offers/ {
         proxy_pass http://127.0.0.1:3100/;
@@ -59,7 +70,7 @@ server {
         proxy_read_timeout 180s;
     }
 
-    # Gym Intelligence — reverse proxy to Streamlit on port 8502
+    # Gym Intelligence — TODO: preview retrofit (currently live-only on port 8502)
     location = /gym-intelligence { return 301 /gym-intelligence/; }
     location /gym-intelligence/ {
         proxy_pass http://127.0.0.1:8502/gym-intelligence/;
@@ -70,13 +81,9 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_read_timeout 86400;
         proxy_send_timeout 86400;
-
-        # WebSocket support (required by Streamlit)
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
     }
-
-    # Streamlit internal paths (health check, static assets, API)
     location /gym-intelligence/_stcore/ {
         proxy_pass http://127.0.0.1:8502/gym-intelligence/_stcore/;
         proxy_http_version 1.1;
@@ -85,13 +92,18 @@ server {
         proxy_set_header Connection "upgrade";
     }
 
-    # Games — isolated to /var/www/games/
+    # Games — preview + live
+    location = /games/preview { return 301 /games/preview/; }
+    location /games/preview/ {
+        alias /var/www/games/preview/;
+        index index.html;
+    }
     location /games/ {
-        alias /var/www/games/;
+        alias /var/www/games/live/;
         index index.html;
     }
 
-    # Webhook deploy endpoint (proxied to localhost Python listener)
+    # Webhook deploy endpoint
     location = /webhook/deploy {
         proxy_pass http://127.0.0.1:9000;
         proxy_set_header X-Real-IP $remote_addr;
@@ -100,8 +112,6 @@ server {
         proxy_read_timeout 120s;
         limit_except POST { deny all; }
     }
-
-    # Webhook health check
     location = /webhook/health {
         proxy_pass http://127.0.0.1:9000/health;
     }
@@ -134,7 +144,7 @@ server {
 NGXEOF
 
 nginx -t && systemctl reload nginx
-echo "Nginx updated — multi-project layout active."
+echo "Nginx updated — multi-project layout with preview/live."
 
 # Re-apply SSL certificates if certbot is installed and certs exist
 if command -v certbot >/dev/null 2>&1; then

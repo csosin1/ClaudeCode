@@ -54,29 +54,34 @@ if [ "$LOCAL" != "$REMOTE" ]; then
         HAVE=$(cat /opt/.nginx_version 2>/dev/null || echo "none")
         if [ "$NEED" != "$HAVE" ]; then
             echo "$(date): Updating nginx config (v$NEED)..." >> "$LOG"
-            mkdir -p /var/www/landing
-            cp "$REPO_DIR/deploy/landing.html" /var/www/landing/index.html 2>/dev/null || true
+            mkdir -p /var/www/landing/live /var/www/landing/preview
             bash "$REPO_DIR/deploy/update_nginx.sh" >> "$LOG" 2>&1 || true
             echo "$NEED" > /opt/.nginx_version
         fi
     fi
 
-    # === STEP 2: FAST STATIC SYNC (must complete in seconds) ===
+    # === STEP 2: FAST STATIC SYNC — writes to preview/ only ===
+    # Live is only updated via deploy/promote.sh after user acceptance.
 
-    mkdir -p /var/www/landing
-    cp "$REPO_DIR/deploy/landing.html" /var/www/landing/index.html 2>/dev/null || true
+    mkdir -p /var/www/landing/live /var/www/landing/preview
+    cp "$REPO_DIR/deploy/landing.html" /var/www/landing/preview/index.html 2>/dev/null || true
+    # Bootstrap: seed live if this is a fresh install
+    [ -s /var/www/landing/live/index.html ] || cp "$REPO_DIR/deploy/landing.html" /var/www/landing/live/index.html 2>/dev/null || true
 
     if [ -d "$REPO_DIR/games" ]; then
-        mkdir -p /var/www/games
-        rsync -a --delete "$REPO_DIR/games/" /var/www/games/
+        mkdir -p /var/www/games/live /var/www/games/preview
+        rsync -a --delete "$REPO_DIR/games/" /var/www/games/preview/
+        # Bootstrap live if empty
+        [ -z "$(ls -A /var/www/games/live 2>/dev/null)" ] && rsync -a "$REPO_DIR/games/" /var/www/games/live/ || true
     fi
 
     if [ -d "$REPO_DIR/carvana" ]; then
-        mkdir -p /var/www/carvana
-        rsync -a --delete "$REPO_DIR/carvana/" /var/www/carvana/
+        mkdir -p /var/www/carvana/live /var/www/carvana/preview
+        rsync -a --delete "$REPO_DIR/carvana/" /var/www/carvana/preview/
+        [ -z "$(ls -A /var/www/carvana/live 2>/dev/null)" ] && rsync -a "$REPO_DIR/carvana/" /var/www/carvana/live/ || true
     fi
 
-    echo "$(date): Static files deployed." >> "$LOG"
+    echo "$(date): Static files deployed to preview (live unchanged; promote via deploy/promote.sh)." >> "$LOG"
 
     # === STEP 3: SERVER-SIDE PROJECTS (each project sources its own deploy script) ===
     for deploy_script in "$REPO_DIR"/deploy/*.sh; do
