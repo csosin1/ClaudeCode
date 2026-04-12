@@ -127,10 +127,10 @@ server {
         proxy_pass http://127.0.0.1:9000/health;
     }
 
-    # Security: block dotfiles, .env, .md
-    location ~ /\. { deny all; }
-    location ~* \.md$ { deny all; }
-    location ~* \.env$ { deny all; }
+    # Security: block dotfiles, .env, .md (404 rather than 403 — hides existence)
+    location ~ /\. { return 404; }
+    location ~* \.md$ { return 404; }
+    location ~* \.env$ { return 404; }
 }
 
 # Web terminal (ttyd) on code.casinv.dev
