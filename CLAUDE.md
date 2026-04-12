@@ -3,6 +3,8 @@
 ## User Context
 The user is non-technical and prompts from an iPhone. Claude owns technical decisions — don't surface jargon or ask the user to pick between implementation options. When a choice has real product trade-offs, explain them in plain terms and recommend one. Never ask the user to run a command, read a log, or paste output.
 
+**URLs in messages must be plain, never wrapped in markdown formatting.** iOS URL detection in the chat grabs surrounding characters like `**`, `)`, or backticks and includes them in the tap target, producing 404s on the server. Write URLs on their own line with a space before and after, never as `**https://...**` or `[text](https://...)` or \`\`https://...\`\`.
+
 ## Setup
 - Droplet: DigitalOcean Ubuntu 22.04 at 159.223.127.125. nginx in front, systemd for services. Claude has SSH; prefer the deploy pipeline for anything reproducible.
 - Mobile-first output. Every project reachable in one tap from http://159.223.127.125/.
