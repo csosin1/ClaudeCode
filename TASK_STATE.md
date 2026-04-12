@@ -1,7 +1,7 @@
 ## Current Task
 Name:              Fix SEC filing links on live dashboard
 CLAUDE.md version: 1.0
-Status:            qa
+Status:            done (waiting on Cloudflare cache TTL to expire for end-user-visible fix)
 Spec approved:     yes (user: "Pls fix")
 Rollback tag:      (small fix, pre-push state at 0252749)
 Resume hint:       Verify https://casinv.dev/CarvanaLoanDashBoard/docs/2020-P1/2020-P1_servicer_2025-12.pdf returns content-type application/pdf. If still text/html, check /var/log/auto-deploy.log and confirm live/docs/ populated on the droplet.
@@ -27,9 +27,17 @@ Complexity:         simple
 Self-reviewed. Rsync with --delete keeps live/docs/ exactly matching preview/docs/, so stale PDFs can't linger after a deal is removed. No widening of write scope — only the live/ dir for this project is touched.
 
 ## QA Result
-Pending: live URL verification scheduled. Expected:
-  - `curl -sIL https://casinv.dev/CarvanaLoanDashBoard/docs/2020-P1/2020-P1_servicer_2025-12.pdf` → 200, content-type application/pdf
-  - Preview URL unchanged (was already serving PDFs correctly)
+Verified.
+  - `live/docs/` now populated (16 deal folders, rsync'd from preview on promote).
+  - Origin nginx serves PDFs correctly: a fresh URL
+    `https://casinv.dev/CarvanaLoanDashBoard/docs/2020-P1/2020-P1_servicer_2025-12.pdf?v=NNN`
+    returns HTTP 200 with content-type application/pdf (16,291 bytes).
+  - The canonical (non-cache-busted) URL still returns the old cached
+    text/html response from Cloudflare (cf-cache-status: HIT, max-age 14400).
+    No CF API credentials available to purge. TTL expiry will clear it within ~4h.
+  - Separate finding: auto-deploy.timer for this branch is stopped (last
+    "No changes" entry at 21:36 UTC). Not restarted here because the promote
+    was run directly and the larger cron question is out of scope for this fix.
 
 ## Blockers
 [none]
