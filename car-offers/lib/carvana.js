@@ -391,9 +391,67 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
     await screenshot(page, '03-after-vin-submit');
     checkTimeout();
 
+    // Cloudflare commonly re-challenges after form POST with an interactive
+    // Turnstile ("Verify you are human"). Click the checkbox via real pixel
+    // coordinates on the main page — cross-origin iframe DOM access is blocked,
+    // but a mouse event at the iframe's bounding box still lands inside it.
     if (await isBlocked(page)) {
       await screenshot(page, 'blocked-after-vin');
-      return { error: 'blocked', wizardLog };
+      log('[carvana] Cloudflare challenge after VIN submit — attempting click + wait up to 90s...');
+      let postVinResolved = false;
+      let clickAttempts = 0;
+      for (let waited = 0; waited < 90; waited += 5) {
+        await humanDelay(4500, 5500);
+        if (waited % 15 === 0) {
+          await simulateHumanBehavior(page);
+        }
+
+        // Try pixel-coordinate click on the Turnstile iframe (max 3 attempts,
+        // spaced out — clicking repeatedly can trigger "too many attempts" state).
+        if (clickAttempts < 3) {
+          try {
+            const iframeHandle = await page.$(
+              'iframe[src*="challenges.cloudflare.com"], iframe[src*="turnstile"], iframe[title*="Widget containing"], iframe[title*="challenge"]'
+            );
+            if (iframeHandle) {
+              const box = await iframeHandle.boundingBox();
+              if (box && box.width > 50 && box.height > 20) {
+                // Checkbox sits ~30px from left, vertically centered in the widget
+                const clickX = box.x + 30 + Math.random() * 6;
+                const clickY = box.y + box.height / 2 + (Math.random() * 4 - 2);
+                log(`[carvana] Turnstile iframe at (${Math.round(box.x)},${Math.round(box.y)}) ${Math.round(box.width)}x${Math.round(box.height)} — clicking checkbox at (${Math.round(clickX)},${Math.round(clickY)})`);
+                await page.mouse.move(clickX - 200, clickY - 80, { steps: 8 });
+                await humanDelay(400, 900);
+                await page.mouse.move(clickX - 40, clickY - 10, { steps: 6 });
+                await humanDelay(200, 500);
+                await page.mouse.move(clickX, clickY, { steps: 4 });
+                await humanDelay(150, 350);
+                await page.mouse.down();
+                await humanDelay(60, 140);
+                await page.mouse.up();
+                clickAttempts++;
+                await screenshot(page, `turnstile-click-${clickAttempts}`);
+                // Give Cloudflare ~6s to verify after the click before next check
+                await humanDelay(5500, 6500);
+              }
+            }
+          } catch (clickErr) {
+            log(`[carvana] Turnstile click attempt failed: ${clickErr.message}`);
+          }
+        }
+
+        if (!(await isBlocked(page))) {
+          postVinResolved = true;
+          log(`[carvana] Post-VIN challenge cleared after ~${waited + 5}s (${clickAttempts} click attempt(s))`);
+          break;
+        }
+        log(`[carvana] Post-VIN still blocked after ${waited + 5}s (clicks=${clickAttempts})...`);
+      }
+      if (!postVinResolved) {
+        await screenshot(page, 'blocked-after-vin-final');
+        return { error: 'blocked', details: { at: 'post-vin', clickAttempts }, wizardLog };
+      }
+      await screenshot(page, '03b-after-vin-unblocked');
     }
 
     // --- Steps 3-7: Navigate through Carvana's multi-step wizard ---

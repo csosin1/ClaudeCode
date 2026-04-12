@@ -67,13 +67,28 @@ if [ ! -f "$PREVIEW_DIR/.playwright_installed" ]; then
     "$NPX_BIN" playwright --version > /dev/null 2>&1 && touch "$PREVIEW_DIR/.playwright_installed"
 fi
 
-# --- Xvfb (shared between live and preview) ---
+# --- Xvfb (shared between live and preview) — managed by systemd so it
+# survives reboots and isn't reaped when the deploy shell exits. ---
 if ! command -v Xvfb >/dev/null 2>&1; then
     apt-get install -y xvfb >> "$LOG" 2>&1 || true
 fi
-if command -v Xvfb >/dev/null 2>&1 && ! pgrep -x Xvfb >/dev/null 2>&1; then
-    nohup Xvfb :99 -screen 0 1920x1080x24 >/dev/null 2>&1 &
-    sleep 1
+if command -v Xvfb >/dev/null 2>&1; then
+    cat > /etc/systemd/system/xvfb.service <<'XVFBEOF'
+[Unit]
+Description=Xvfb virtual framebuffer on :99
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+XVFBEOF
+    systemctl daemon-reload
+    systemctl enable --now xvfb.service >> "$LOG" 2>&1 || true
 fi
 DISPLAY_LINE=""
 command -v Xvfb >/dev/null 2>&1 && DISPLAY_LINE="Environment=DISPLAY=:99"
@@ -90,7 +105,8 @@ write_unit() {
     cat > /etc/systemd/system/$name.service <<EOF
 [Unit]
 Description=$desc
-After=network.target
+After=network.target xvfb.service
+Wants=xvfb.service
 
 [Service]
 Type=simple
