@@ -994,6 +994,14 @@ def generate_comparison_content(deals, title):
                 cod_by_col[col_ym] = cod_val
 
         keys = sorted(set(wac_by_col) & set(cod_by_col))
+        # Drop the first period. The first servicer cert reports note interest
+        # for a partial accrual period (closing date → first payment date,
+        # typically 20-30 days), but our CoD annualizes by ×12. That understates
+        # CoD on the first observation and creates a ~1-2% upward spike in
+        # excess spread at month 1 on every deal — a chart artifact, not a
+        # real jump in profitability.
+        if len(keys) > 1:
+            keys = keys[1:]
         if keys:
             spread_traces.append({
                 "x": list(range(1, len(keys) + 1)),
