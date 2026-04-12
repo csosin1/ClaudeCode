@@ -874,11 +874,13 @@ def generate_comparison_content(deals, title):
             "legend": {"orientation": "h", "y": -0.3},
         }, height=450)
 
-    # ── Pool Factor vs Month, Cum Loss vs Pool Factor, Excess Spread ──
-    # Collect per-deal time series once, then feed three charts.
+    # ── Pool Factor vs Month, Cum Loss vs Pool Factor, Excess Spread,
+    #    30+ DQ Rate, Annualized Net Charge-Off Rate ──
     pf_traces = []       # x=calendar period, y=pool_factor
     pf_loss_traces = []  # x=pool_factor, y=cum net loss rate (chronological line)
     spread_traces = []   # x=calendar period, y=WAC - CoD
+    dq_traces = []       # x=deal age, y=30+ DQ balance / total balance
+    co_traces = []       # x=deal age, y=annualized net charge-off rate
     note_bal_cols = {"A1": "note_balance_a1", "A2": "note_balance_a2", "A3": "note_balance_a3",
                      "A4": "note_balance_a4", "B": "note_balance_b", "C": "note_balance_c",
                      "D": "note_balance_d", "N": "note_balance_n"}
@@ -889,8 +891,9 @@ def generate_comparison_content(deals, title):
         if not orig_bal or orig_bal <= 0:
             continue
 
-        # Pool factor + cum loss from monthly_summary (consistent month-ends across deals)
-        ms = q("SELECT reporting_period_end, total_balance, period_chargeoffs, period_recoveries "
+        # Pool factor + cum loss + roll rates from monthly_summary
+        ms = q("SELECT reporting_period_end, total_balance, period_chargeoffs, period_recoveries, "
+               "dq_30_balance, dq_60_balance, dq_90_balance, dq_120_plus_balance "
                "FROM monthly_summary WHERE deal=? ORDER BY reporting_period_end", (deal,))
         if not ms.empty:
             ms["period"] = ms["reporting_period_end"].apply(nd)
@@ -910,6 +913,37 @@ def generate_comparison_content(deals, title):
                 "line": {"color": color},
                 "marker": {"size": 4},
             })
+
+            # 30+ DQ rate: all delinquency buckets / current balance
+            bal = ms["total_balance"].astype(float)
+            total_dq = (ms["dq_30_balance"].fillna(0) + ms["dq_60_balance"].fillna(0)
+                        + ms["dq_90_balance"].fillna(0) + ms["dq_120_plus_balance"].fillna(0)).astype(float)
+            dq_rate = (total_dq / bal.where(bal > 0)).fillna(0)
+            dq_traces.append({
+                "x": list(range(1, len(ms) + 1)),
+                "y": [round(float(v), 6) for v in dq_rate.tolist()],
+                "type": "scatter", "mode": "lines", "name": deal,
+                "line": {"color": color},
+            })
+
+            # Annualized net charge-off rate: (CO - recoveries) * 12 / avg pool balance.
+            # Uses prior-month balance as the denominator (standard industry form).
+            # Skip month 1 where there's no prior-month balance.
+            prev_bal = bal.shift(1)
+            net_co = (ms["period_chargeoffs"].fillna(0) - ms["period_recoveries"].fillna(0)).astype(float)
+            co_rate = (net_co * 12.0) / prev_bal.where(prev_bal > 0)
+            co_x = []; co_y = []
+            for idx, v in enumerate(co_rate.tolist()):
+                if idx == 0 or v is None or pd.isna(v):
+                    continue
+                co_x.append(idx + 1)   # deal age = 1-based index
+                co_y.append(round(float(v), 6))
+            if co_x:
+                co_traces.append({
+                    "x": co_x, "y": co_y,
+                    "type": "scatter", "mode": "lines", "name": deal,
+                    "line": {"color": color},
+                })
 
         # Excess spread: WAC − CoD aligned on collection-period (year, month).
         # WAC source (pool_performance.weighted_avg_apr for Prime; monthly_summary
@@ -1026,6 +1060,24 @@ def generate_comparison_content(deals, title):
                       "tickformat": ".0%", "autorange": "reversed"},
             "yaxis": {"tickformat": ".2%", "title": "Cum Net Loss (% of Orig Bal)"},
             "hovermode": "closest",
+            "legend": {"orientation": "h", "y": -0.3},
+        }, height=450)
+
+    if dq_traces:
+        h += chart(dq_traces, {
+            "title": f"{title} — 30+ Day Delinquency Rate by Deal Age",
+            "xaxis": {"title": "Deal Age (Months)"},
+            "yaxis": {"tickformat": ".2%", "title": "30+ DQ Balance / Pool Balance"},
+            "hovermode": "x unified",
+            "legend": {"orientation": "h", "y": -0.3},
+        }, height=450)
+
+    if co_traces:
+        h += chart(co_traces, {
+            "title": f"{title} — Annualized Net Charge-Off Rate by Deal Age",
+            "xaxis": {"title": "Deal Age (Months)"},
+            "yaxis": {"tickformat": ".2%", "title": "Net Charge-Offs × 12 / Prior Month Balance"},
+            "hovermode": "x unified",
             "legend": {"orientation": "h", "y": -0.3},
         }, height=450)
 
