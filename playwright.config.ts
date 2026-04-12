@@ -7,7 +7,8 @@ export default defineConfig({
   reporter: [['html', { open: 'never' }], ['list']],
 
   use: {
-    baseURL: process.env.BASE_URL || 'http://159.223.127.125',
+    baseURL: process.env.BASE_URL || 'https://casinv.dev',
+    ignoreHTTPSErrors: true,
     screenshot: 'on',
     trace: 'on-first-retry',
   },
