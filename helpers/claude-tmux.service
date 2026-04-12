@@ -1,0 +1,17 @@
+[Unit]
+Description=Claude Code in persistent tmux session (remote-control mode)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/root
+Environment=HOME=/root
+Environment=TERM=xterm-256color
+ExecStart=/root/start-claude.sh
+ExecStop=/usr/bin/tmux kill-session -t claude
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

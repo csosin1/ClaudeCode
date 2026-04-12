@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Projects · casinv.dev</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+    background: #0f172a; color: #e2e8f0; min-height: 100vh;
+    padding: 1rem; line-height: 1.4;
+  }
+  h1 { font-size: 1.4rem; margin-bottom: 0.25rem; }
+  .updated { color: #64748b; font-size: 0.75rem; margin-bottom: 1rem; }
+  .card {
+    background: #1e293b; border: 1px solid #334155; border-radius: 12px;
+    padding: 1rem; margin-bottom: 0.75rem;
+  }
+  .card h2 { font-size: 1rem; margin-bottom: 0.5rem; color: #f8fafc; }
+  .links { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.5rem; }
+  .links a {
+    display: inline-block; padding: 0.4rem 0.8rem;
+    border-radius: 6px; text-decoration: none; font-size: 0.85rem;
+    background: #334155; color: #e2e8f0;
+  }
+  .links a.live { background: #059669; }
+  .links a.preview { background: #2563eb; }
+  .links a.remote { background: #7c3aed; }
+  .links a:active { opacity: 0.7; }
+  .task { font-size: 0.85rem; color: #94a3b8; margin-top: 0.25rem; }
+  .task .stage { font-weight: 600; color: #cbd5e1; }
+  .task .stage.blocked { color: #f87171; }
+  .task .stage.done { color: #4ade80; }
+  .muted { color: #64748b; font-style: italic; }
+  code { background: #0f172a; padding: 0.1rem 0.3rem; border-radius: 3px; font-size: 0.8rem; }
+</style>
+</head>
+<body>
+<h1>Projects</h1>
+<div class="updated" id="updated">loading…</div>
+<div id="cards"></div>
+
+<script>
+const PROJECTS = [
+  { key: 'landing',          name: 'Landing',              live: '/',                       preview: '/preview/' },
+  { key: 'games',            name: 'Games',                live: '/games/',                 preview: '/games/preview/' },
+  { key: 'carvana-hub',      name: 'Carvana Hub',          live: '/carvana/',               preview: '/carvana/preview/' },
+  { key: 'carvana-abs',      name: 'Carvana ABS Dashboard',live: '/CarvanaLoanDashBoard/',  preview: '/CarvanaLoanDashBoard/preview/' },
+  { key: 'car-offers',       name: 'Car Offers',           live: '/car-offers/',            preview: '/car-offers/preview/' },
+  { key: 'gym-intelligence', name: 'Gym Intelligence',     live: '/gym-intelligence/',      preview: '/gym-intelligence/preview/' },
+  { key: 'infra',            name: 'Infrastructure',       live: null,                      preview: null },
+];
+
+async function checkRemote(key) {
+  try {
+    const r = await fetch('/remote/' + key + '.html', { method: 'HEAD', cache: 'no-cache' });
+    return r.ok ? '/remote/' + key + '.html' : null;
+  } catch { return null; }
+}
+
+async function render() {
+  let tasks = { projects: {}, last_updated: '' };
+  try {
+    const r = await fetch('/tasks.json?v=' + Date.now(), { cache: 'no-cache' });
+    if (r.ok) tasks = await r.json();
+  } catch {}
+
+  document.getElementById('updated').textContent =
+    'last updated ' + (tasks.last_updated || 'never');
+
+  const remoteChecks = await Promise.all(PROJECTS.map(p => checkRemote(p.key)));
+
+  const cards = PROJECTS.map((p, i) => {
+    const remote = remoteChecks[i];
+    const t = tasks.projects?.[p.key];
+    const cur = t?.current_task;
+    const last = t?.last_done;
+
+    const links = [];
+    if (p.live)    links.push(`<a class="live" href="${p.live}">Live</a>`);
+    if (p.preview) links.push(`<a class="preview" href="${p.preview}">Preview</a>`);
+    if (remote)    links.push(`<a class="remote" href="${remote}">Remote Control</a>`);
+
+    let task = '';
+    if (cur) {
+      const cls = cur.stage === 'blocked' ? 'blocked' : (cur.stage === 'done' ? 'done' : '');
+      task = `<div class="task"><span class="stage ${cls}">${cur.stage}</span> · ${cur.name}` +
+             (cur.detail ? ` — ${cur.detail}` : '') + `</div>`;
+    } else if (last) {
+      task = `<div class="task"><span class="stage done">done</span> · ${last.name}` +
+             (last.summary ? ` — ${last.summary}` : '') + `</div>`;
+    } else {
+      task = `<div class="task muted">idle</div>`;
+    }
+
+    return `<div class="card">
+      <h2>${p.name}</h2>
+      <div class="links">${links.join('')}</div>
+      ${task}
+    </div>`;
+  }).join('');
+
+  document.getElementById('cards').innerHTML = cards;
+}
+
+render();
+setInterval(render, 5000);
+</script>
+</body>
+</html>

@@ -81,6 +81,28 @@ if [ "$LOCAL" != "$REMOTE" ]; then
         [ -z "$(ls -A /var/www/carvana/live 2>/dev/null)" ] && rsync -a "$REPO_DIR/carvana/" /var/www/carvana/live/ || true
     fi
 
+    # Dashboard page (live + preview)
+    if [ -f "$REPO_DIR/deploy/projects.html" ]; then
+        cp "$REPO_DIR/deploy/projects.html" /var/www/landing/preview/projects.html
+        [ -s /var/www/landing/live/projects.html ] || cp "$REPO_DIR/deploy/projects.html" /var/www/landing/live/projects.html
+    fi
+
+    # Per-droplet helper scripts (keep /usr/local/bin copy in sync with repo)
+    if [ -d "$REPO_DIR/helpers" ]; then
+        for s in claude-project.sh end-project.sh task-status.sh notify.sh start-claude.sh; do
+            if [ -f "$REPO_DIR/helpers/$s" ]; then
+                install -m 755 "$REPO_DIR/helpers/$s" /usr/local/bin/$s 2>/dev/null || true
+            fi
+        done
+        # start-claude.sh goes to /root as well
+        [ -f "$REPO_DIR/helpers/start-claude.sh" ] && install -m 755 "$REPO_DIR/helpers/start-claude.sh" /root/start-claude.sh
+        # systemd unit for claude-tmux
+        if [ -f "$REPO_DIR/helpers/claude-tmux.service" ] && ! cmp -s "$REPO_DIR/helpers/claude-tmux.service" /etc/systemd/system/claude-tmux.service 2>/dev/null; then
+            cp "$REPO_DIR/helpers/claude-tmux.service" /etc/systemd/system/claude-tmux.service
+            systemctl daemon-reload
+        fi
+    fi
+
     echo "$(date): Static files deployed to preview (live unchanged; promote via deploy/promote.sh)." >> "$LOG"
 
     # === STEP 3: SERVER-SIDE PROJECTS (each project sources its own deploy script) ===
