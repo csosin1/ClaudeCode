@@ -33,11 +33,22 @@ def promote_to_live():
     """Copy the current preview to live (approve the change)."""
     src = os.path.join(PREVIEW_DIR, "index.html")
     dst = os.path.join(LIVE_DIR, "index.html")
-    if os.path.exists(src):
-        shutil.copy2(src, dst)
-        print("Promoted preview to live!")
-    else:
+    if not os.path.exists(src):
         print("ERROR: No preview to promote")
+        return
+    shutil.copy2(src, dst)
+
+    # Also sync the docs/ tree so SEC filing links on live resolve to PDFs
+    # (preview served docs, live did not — tapping a filing on live 404'd
+    # and fell through to the dashboard index).
+    src_docs = os.path.join(PREVIEW_DIR, "docs")
+    dst_docs = os.path.join(LIVE_DIR, "docs")
+    if os.path.isdir(src_docs):
+        subprocess.run(
+            ["rsync", "-a", "--delete", src_docs + "/", dst_docs + "/"],
+            check=True,
+        )
+    print("Promoted preview to live!")
 
 
 if __name__ == "__main__":
