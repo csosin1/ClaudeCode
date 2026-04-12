@@ -93,6 +93,8 @@ Do the work. Don't ask the user to run commands, read logs, or verify URLs. Esca
 - **Task status file.** Call `/usr/local/bin/task-status.sh set "<name>" "<stage>" "<detail>"` when starting a task; `task-status.sh done "<name>" "<summary>" <preview_url>` when finished; `task-status.sh clear` when fully handed off. This updates `https://casinv.dev/tasks.json` which the user can tap anytime to see current state.
 - **Notifications.** Push notifications fire automatically on every preview deploy via the webhook. For discrete milestones (task ready to review, QA failed after N cycles, blocker surfaced), call `/usr/local/bin/notify.sh "message" "title" priority "click-url"` directly. Priorities: `urgent` for hard blockers needing input; `high` for task done; `default` for routine updates.
 - **Token-cost guardrail.** If a single task looks like it will exceed ~200k tokens or has burned through that much without reaching QA-green, stop and surface the scope blowout via `notify.sh` with `urgent` priority. Do not spiral.
+- **Stuck detector.** If the same fix is attempted twice without making progress (e.g., same test failure after two edits to the same file), stop. Update `/tasks.json` via `task-status.sh set "<name>" blocked "<what's blocking>"` and notify the user. Don't attempt a third identical fix.
+- **GitHub Actions QA.** Read QA run results with `gh run list --branch main --limit 5` / `gh run view <id>` — `GH_TOKEN` is pre-configured in the environment.
 
 ## Git
 - Commit and push before stopping; commit messages explain *why*.
