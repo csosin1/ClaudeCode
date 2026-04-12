@@ -89,17 +89,28 @@ def table_html(df, cls=""):
 
 
 def get_orig_bal(deal):
-    """Auto-detect original pool balance from first pool_performance record or loan sum."""
-    # Known balances
+    """Return the deal's original cutoff pool balance.
+
+    Priority:
+      1. KNOWN override — deals whose first servicer cert predates our cache.
+      2. MAX(beginning_pool_balance) from pool_performance. Pool balance is
+         monotonically decreasing, so the max across all periods equals the
+         earliest "Beginning Pool Balance" line item — which is the cutoff
+         balance for any deal whose first 10-D we ingested.
+      3. SUM(original_loan_amount) from the loan tape — last resort; overstates
+         by a few % because it's the sum of each loan's origination amount
+         (pre-pooling amortization included), not the cutoff pool balance.
+    """
     KNOWN = {"2020-P1": 405_000_000}
     if deal in KNOWN:
         return KNOWN[deal]
-    fp = q("SELECT beginning_pool_balance FROM pool_performance WHERE deal=? ORDER BY distribution_date LIMIT 1", (deal,))
-    if not fp.empty and fp.iloc[0]["beginning_pool_balance"] and fp.iloc[0]["beginning_pool_balance"] > 0:
-        return fp.iloc[0]["beginning_pool_balance"]
+    fp = q("SELECT MAX(beginning_pool_balance) AS m FROM pool_performance "
+           "WHERE deal=? AND beginning_pool_balance > 0", (deal,))
+    if not fp.empty and fp.iloc[0]["m"] and fp.iloc[0]["m"] > 0:
+        return float(fp.iloc[0]["m"])
     t = q("SELECT SUM(original_loan_amount) as s FROM loans WHERE deal=?", (deal,))
     if not t.empty and t.iloc[0]["s"] and t.iloc[0]["s"] > 0:
-        return t.iloc[0]["s"]
+        return float(t.iloc[0]["s"])
     return 405_000_000
 
 
