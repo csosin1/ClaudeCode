@@ -487,7 +487,7 @@ def api_countries():
 # ---------------------------------------------------------------------------
 # Mount blueprint and run
 # ---------------------------------------------------------------------------
-app.register_blueprint(bp, url_prefix="/gym-intelligence")
+app.register_blueprint(bp, url_prefix=os.environ.get("URL_PREFIX", "/gym-intelligence"))
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8502, debug=False)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "8502")), debug=False)

@@ -1,198 +1,135 @@
 #!/bin/bash
-# Deploy script for car-offers (Express on port 3100)
-# OWNED BY: car-offers chat. This file can be modified by the project chat directly.
-# The main deploy script (auto_deploy_general.sh) sources this file.
+# Deploy script for car-offers — preview-first.
+# Every push updates PREVIEW_DIR (port 3101). Live (port 3100) only changes via promote.sh.
 #
 # Available variables from parent: $REPO_DIR, $LOG, $NODE_BIN, $NPM_BIN, $NPX_BIN
 
 PROJECT="car-offers"
-PROJECT_DIR="/opt/$PROJECT"
+LIVE_DIR="/opt/$PROJECT"
+PREVIEW_DIR="/opt/$PROJECT-preview"
 LOG_DIR="/var/log/$PROJECT"
+LIVE_PORT=3100
+PREVIEW_PORT=3101
 
 if [ ! -d "$REPO_DIR/$PROJECT" ]; then
     return 0 2>/dev/null || exit 0
 fi
 
-# --- Pre-flight: verify nginx is serving (other scripts may break the config) ---
-# certbot --nginx can modify the config and break it. If the landing page isn't
-# responding, force a clean nginx config rebuild from update_nginx.sh.
+# --- Pre-flight: verify nginx is serving ---
 PRE_STATUS=$(curl -sf -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1/ 2>/dev/null || echo "000")
-if [ "$PRE_STATUS" != "200" ]; then
-    echo "$(date): [car-offers] WARNING — nginx returning $PRE_STATUS for /. Forcing config rebuild..." >> "$LOG"
-    if [ -f "$REPO_DIR/deploy/update_nginx.sh" ]; then
-        bash "$REPO_DIR/deploy/update_nginx.sh" >> "$LOG" 2>&1 || true
-        echo "$(date): [car-offers] nginx config rebuilt." >> "$LOG"
-    fi
-    # Verify recovery
-    sleep 1
-    POST_STATUS=$(curl -sf -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1/ 2>/dev/null || echo "000")
-    echo "$(date): [car-offers] Post-rebuild status: $POST_STATUS" >> "$LOG"
+if [ "$PRE_STATUS" != "200" ] && [ -f "$REPO_DIR/deploy/update_nginx.sh" ]; then
+    echo "$(date): [car-offers] nginx returning $PRE_STATUS — rebuilding config..." >> "$LOG"
+    bash "$REPO_DIR/deploy/update_nginx.sh" >> "$LOG" 2>&1 || true
 fi
 
-mkdir -p "$PROJECT_DIR/data"
-mkdir -p "$LOG_DIR"
+mkdir -p "$LIVE_DIR/data" "$PREVIEW_DIR/data" "$LOG_DIR"
 
-# .env (one-time — user fills in password via /car-offers/setup)
-if [ ! -f "$PROJECT_DIR/.env" ]; then
-    cat > "$PROJECT_DIR/.env" << 'ENVEOF'
+# .env bootstraps (different PORT for each instance)
+write_env() {
+    local target="$1" port="$2"
+    cat > "$target/.env" <<ENVEOF
 PROXY_HOST=gate.decodo.com
 PROXY_PORT=10001
 PROXY_USER=spjax0kgms
 PROXY_PASS=
 PROJECT_EMAIL=
-PORT=3100
+PORT=$port
 ENVEOF
-fi
+}
+[ -f "$LIVE_DIR/.env" ]    || write_env "$LIVE_DIR"    "$LIVE_PORT"
+[ -f "$PREVIEW_DIR/.env" ] || write_env "$PREVIEW_DIR" "$PREVIEW_PORT"
 
-# Note: code hardcodes port 7000 for geo-targeting (user- prefix params).
-# .env PROXY_PORT is not used for the actual proxy connection.
-
-# Sync code (preserve node_modules, .env, data, cached results)
+# --- Sync code to PREVIEW only (live is promoted separately) ---
 rsync -a --delete \
     --exclude='node_modules' \
     --exclude='*.db' \
     --exclude='.env' \
     --exclude='startup-results.json' \
-    "$REPO_DIR/$PROJECT/" "$PROJECT_DIR/"
+    --exclude='.patchright_installed' \
+    --exclude='.playwright_installed' \
+    "$REPO_DIR/$PROJECT/" "$PREVIEW_DIR/"
 
-# npm install (if package.json changed or node_modules missing)
-if [ "$REPO_DIR/$PROJECT/package.json" -nt "$PROJECT_DIR/node_modules/.package-lock.json" ] || [ ! -d "$PROJECT_DIR/node_modules/express" ]; then
-    echo "$(date): npm install for $PROJECT..." >> "$LOG"
-    cd "$PROJECT_DIR" && "$NPM_BIN" install --production >> "$LOG" 2>&1
-    if [ -d "$PROJECT_DIR/node_modules/express" ]; then
-        echo "$(date): npm install done." >> "$LOG"
-    else
-        echo "$(date): ERROR — npm install failed (express missing)." >> "$LOG"
-    fi
+# --- npm install in preview (if package.json changed or deps missing) ---
+if [ "$REPO_DIR/$PROJECT/package.json" -nt "$PREVIEW_DIR/node_modules/.package-lock.json" ] || [ ! -d "$PREVIEW_DIR/node_modules/express" ]; then
+    echo "$(date): npm install for preview..." >> "$LOG"
+    cd "$PREVIEW_DIR" && "$NPM_BIN" install --production >> "$LOG" 2>&1
 fi
 
-# Patchright + Playwright (one-time, only if not already installed)
-# Patchright patches CDP Runtime.enable leak — Cloudflare's #1 detection vector
-if [ ! -f "$PROJECT_DIR/.patchright_installed" ]; then
-    echo "$(date): Installing Patchright + Chromium..." >> "$LOG"
-    cd "$PROJECT_DIR" && "$NPX_BIN" patchright install --with-deps chromium >> "$LOG" 2>&1
-    if "$NPX_BIN" patchright --version > /dev/null 2>&1; then
-        touch "$PROJECT_DIR/.patchright_installed"
-        # Clear old results to force a fresh Carvana run with patchright
-        rm -f "$PROJECT_DIR/startup-results.json"
-        echo "$(date): Patchright chromium installed. Cleared old results for fresh run." >> "$LOG"
-    else
-        echo "$(date): WARNING — Patchright install may have failed. Falling back to Playwright..." >> "$LOG"
-    fi
+# --- Patchright + Playwright in preview (one-time each) ---
+if [ ! -f "$PREVIEW_DIR/.patchright_installed" ]; then
+    echo "$(date): Installing Patchright + Chromium (preview)..." >> "$LOG"
+    cd "$PREVIEW_DIR" && "$NPX_BIN" patchright install --with-deps chromium >> "$LOG" 2>&1
+    "$NPX_BIN" patchright --version > /dev/null 2>&1 && touch "$PREVIEW_DIR/.patchright_installed"
 fi
-# Playwright fallback (one-time)
-if [ ! -f "$PROJECT_DIR/.playwright_installed" ]; then
-    echo "$(date): Installing Playwright + Chromium (fallback)..." >> "$LOG"
-    cd "$PROJECT_DIR" && "$NPX_BIN" playwright install --with-deps chromium >> "$LOG" 2>&1
-    if "$NPX_BIN" playwright --version > /dev/null 2>&1; then
-        touch "$PROJECT_DIR/.playwright_installed"
-        echo "$(date): Playwright installed." >> "$LOG"
-    else
-        echo "$(date): WARNING — Playwright install may have failed." >> "$LOG"
-    fi
+if [ ! -f "$PREVIEW_DIR/.playwright_installed" ]; then
+    echo "$(date): Installing Playwright + Chromium (preview fallback)..." >> "$LOG"
+    cd "$PREVIEW_DIR" && "$NPX_BIN" playwright install --with-deps chromium >> "$LOG" 2>&1
+    "$NPX_BIN" playwright --version > /dev/null 2>&1 && touch "$PREVIEW_DIR/.playwright_installed"
 fi
 
-# Xvfb for headed browser mode (one-time, non-fatal)
-# Headed mode bypasses Cloudflare's headless browser detection
+# --- Xvfb (shared between live and preview) ---
 if ! command -v Xvfb >/dev/null 2>&1; then
-    echo "$(date): Installing Xvfb..." >> "$LOG"
-    apt-get install -y xvfb >> "$LOG" 2>&1 || echo "$(date): Xvfb install failed (non-fatal)" >> "$LOG"
+    apt-get install -y xvfb >> "$LOG" 2>&1 || true
 fi
-
-# Start Xvfb if available (non-fatal)
 if command -v Xvfb >/dev/null 2>&1 && ! pgrep -x Xvfb >/dev/null 2>&1; then
     nohup Xvfb :99 -screen 0 1920x1080x24 >/dev/null 2>&1 &
     sleep 1
-    echo "$(date): Xvfb started on :99" >> "$LOG"
 fi
-
-# Build DISPLAY env line for systemd (empty string if no Xvfb)
 DISPLAY_LINE=""
-if command -v Xvfb >/dev/null 2>&1; then
-    DISPLAY_LINE="Environment=DISPLAY=:99"
+command -v Xvfb >/dev/null 2>&1 && DISPLAY_LINE="Environment=DISPLAY=:99"
+
+# --- Bootstrap LIVE_DIR from preview if empty (first install only) ---
+if [ ! -d "$LIVE_DIR/node_modules" ]; then
+    echo "$(date): Bootstrapping live from preview (first install)..." >> "$LOG"
+    rsync -a --exclude='.env' "$PREVIEW_DIR/" "$LIVE_DIR/"
 fi
 
-# systemd service
-cat > /etc/systemd/system/$PROJECT.service <<EOF
+# --- systemd units (always rewrite to pick up changes) ---
+write_unit() {
+    local name="$1" dir="$2" port="$3" desc="$4"
+    cat > /etc/systemd/system/$name.service <<EOF
 [Unit]
-Description=Car Offer Tool (Express on port 3100)
+Description=$desc
 After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=$PROJECT_DIR
+WorkingDirectory=$dir
 ExecStart=$NODE_BIN server.js
 Restart=always
 RestartSec=5
 Environment=NODE_ENV=production
 $DISPLAY_LINE
-StandardOutput=append:$LOG_DIR/error.log
-StandardError=append:$LOG_DIR/error.log
+StandardOutput=append:$LOG_DIR/$name.log
+StandardError=append:$LOG_DIR/$name.log
 
 [Install]
 WantedBy=multi-user.target
 EOF
+}
+write_unit "$PROJECT"         "$LIVE_DIR"    "$LIVE_PORT"    "Car Offer Tool — LIVE (port $LIVE_PORT)"
+write_unit "$PROJECT-preview" "$PREVIEW_DIR" "$PREVIEW_PORT" "Car Offer Tool — PREVIEW (port $PREVIEW_PORT)"
 systemctl daemon-reload
-systemctl enable $PROJECT >> "$LOG" 2>&1
+systemctl enable $PROJECT $PROJECT-preview >> "$LOG" 2>&1
 
-# Only start service if deps are ready (prevents 502 on first deploy)
-if [ -d "$PROJECT_DIR/node_modules/express" ]; then
-    systemctl restart $PROJECT >> "$LOG" 2>&1
-    echo "$(date): $PROJECT service restarted." >> "$LOG"
-
-    # Post-restart: wait for ALL deploy scripts to finish, then check health
-    # 120s delay ensures code-server.sh (which may run certbot) has finished
-    (
-        sleep 120
-        echo "$(date): [post-restart] Checking service health..." >> "$LOG"
-
-        # Check if nginx is serving — certbot (code-server.sh) may have broken the config
-        # This runs AFTER all deploy scripts have completed (15s delay)
-        NGX_STATUS=$(curl -sf -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1/ 2>/dev/null || echo "000")
-        if [ "$NGX_STATUS" != "200" ]; then
-            echo "$(date): [post-restart] NGINX BROKEN (status=$NGX_STATUS) — rebuilding config..." >> "$LOG"
-            if [ -f "$REPO_DIR/deploy/update_nginx.sh" ]; then
-                bash "$REPO_DIR/deploy/update_nginx.sh" >> "$LOG" 2>&1 || true
-            fi
-            sleep 1
-            NGX_AFTER=$(curl -sf -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1/ 2>/dev/null || echo "000")
-            echo "$(date): [post-restart] Nginx recovery: $NGX_STATUS -> $NGX_AFTER" >> "$LOG"
-        else
-            echo "$(date): [post-restart] Nginx OK (200)" >> "$LOG"
-        fi
-
-        STATUS=$(curl -sf --max-time 5 http://127.0.0.1:3100/api/status 2>&1) || STATUS="curl failed"
-        echo "$(date): [post-restart] /api/status: $STATUS" >> "$LOG"
-
-        # Wait for auto-run Carvana to complete (up to 8 min)
-        for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16; do
-            sleep 30
-            RESULTS=$(curl -sf --max-time 5 http://127.0.0.1:3100/api/last-run 2>&1) || RESULTS="curl failed"
-            if echo "$RESULTS" | grep -q '"completed_at"'; then
-                echo "$(date): [post-restart] Carvana run completed (attempt $i, ${i}x30s):" >> "$LOG"
-                # Extract key info
-                OFFER=$(echo "$RESULTS" | grep -o '"offer":"[^"]*"' | head -1)
-                ERROR=$(echo "$RESULTS" | grep -o '"error":"[^"]*"' | head -1)
-                if [ -n "$OFFER" ]; then
-                    echo "$(date): [post-restart] CARVANA OFFER: $OFFER" >> "$LOG"
-                elif [ -n "$ERROR" ]; then
-                    echo "$(date): [post-restart] CARVANA ERROR: $ERROR" >> "$LOG"
-                fi
-                # Also dump full result
-                echo "$RESULTS" >> "$LOG"
-                break
-            fi
-            echo "$(date): [post-restart] Waiting for Carvana auto-run... ($((i*30))s)" >> "$LOG"
-        done
-    ) &
-else
-    echo "$(date): $PROJECT deps not ready — skipping service start." >> "$LOG"
+# --- Start live if deps ready AND not already running (don't restart live on deploy) ---
+if [ -d "$LIVE_DIR/node_modules/express" ] && ! systemctl is-active $PROJECT >/dev/null 2>&1; then
+    systemctl start $PROJECT >> "$LOG" 2>&1
+    echo "$(date): $PROJECT live service started (bootstrap)." >> "$LOG"
 fi
 
-# Observability (one-time)
+# --- Restart preview on every deploy (this is where new code lives) ---
+if [ -d "$PREVIEW_DIR/node_modules/express" ]; then
+    systemctl restart $PROJECT-preview >> "$LOG" 2>&1
+    echo "$(date): $PROJECT preview restarted." >> "$LOG"
+else
+    echo "$(date): $PROJECT preview deps not ready — skipping service start." >> "$LOG"
+fi
+
+# --- Observability (one-time) ---
 if [ ! -f /opt/.car_offers_logs_initialized ]; then
-    touch "$LOG_DIR/error.log" "$LOG_DIR/uptime.log"
-    cat > /etc/logrotate.d/$PROJECT << 'LREOF'
+    touch "$LOG_DIR/error.log" "$LOG_DIR/preview.log" "$LOG_DIR/uptime.log"
+    cat > /etc/logrotate.d/$PROJECT <<'LREOF'
 /var/log/car-offers/*.log {
     weekly
     rotate 4
@@ -202,8 +139,8 @@ if [ ! -f /opt/.car_offers_logs_initialized ]; then
     create 0644 root root
 }
 LREOF
-    (crontab -l 2>/dev/null; echo '*/5 * * * * curl -sf http://127.0.0.1:3100/ > /dev/null || echo "$(date) DOWN" >> /var/log/car-offers/uptime.log') | crontab -
+    (crontab -l 2>/dev/null; echo "*/5 * * * * curl -sf http://127.0.0.1:$LIVE_PORT/ > /dev/null || echo \"\$(date) DOWN\" >> $LOG_DIR/uptime.log") | crontab -
     touch /opt/.car_offers_logs_initialized
 fi
 
-echo "$(date): $PROJECT deploy block done." >> "$LOG"
+echo "$(date): $PROJECT deploy block done (preview updated; live unchanged)." >> "$LOG"
