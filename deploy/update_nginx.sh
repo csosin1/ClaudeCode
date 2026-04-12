@@ -114,6 +114,44 @@ server {
         index index.html;
     }
 
+    # Timeshare Surveillance — static dashboard + admin (Flask on 8510 live / 8511 preview)
+    location = /timeshare-surveillance { return 301 /timeshare-surveillance/; }
+    location = /timeshare-surveillance/preview { return 301 /timeshare-surveillance/preview/; }
+
+    # Preview admin (setup page for SMTP creds)
+    location /timeshare-surveillance/preview/admin/ {
+        proxy_pass http://127.0.0.1:8511/admin/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 60s;
+    }
+    # Preview dashboard (static)
+    location /timeshare-surveillance/preview/ {
+        alias /opt/timeshare-surveillance-preview/dashboard/;
+        try_files $uri $uri/ /timeshare-surveillance/preview/index.html;
+        index index.html;
+    }
+
+    # Live admin
+    location /timeshare-surveillance/admin/ {
+        proxy_pass http://127.0.0.1:8510/admin/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 60s;
+    }
+    # Live dashboard (static)
+    location /timeshare-surveillance/ {
+        alias /opt/timeshare-surveillance-live/dashboard/;
+        try_files $uri $uri/ /timeshare-surveillance/index.html;
+        index index.html;
+    }
+
     # Webhook deploy endpoint
     location = /webhook/deploy {
         proxy_pass http://127.0.0.1:9000;
