@@ -1,6 +1,16 @@
 # Change Log
 # Webhook test 1775397948
 
+## 2026-04-12 SEC servicer-cert links now go to EDGAR, not broken local PDFs
+- What was built: Change the Documents tab so every "Servicer Certificate" row links straight to the SEC EDGAR filing URL instead of a locally-generated PDF.
+- Files modified:
+  - `carvana_abs/generate_dashboard.py` — removed the pdf/html fallback chain; always use `servicer_cert_url`.
+- Root cause: The cached EDGAR HTML is an image-based filing (one JPG per page plus a hidden 1pt white OCR text layer). weasyprint couldn't resolve the JPG relative paths — our PDFs contained only the OCR text and the `<DOCUMENT>` header, so they looked like a bare exhibit reference with no data.
+- Assumptions: SEC's canonical Archives URL will keep rendering the JPGs in place (stable since filing).
+- Things the reviewer should check:
+  - All 1,225 "SEC Filing" links under Documents open a working EDGAR page with the JPG pages visible.
+  - No remaining `href="docs/<deal>/..."` servicer-cert links in the generated HTML.
+
 ## 2026-04-12 Fix SEC filing links on live Carvana ABS dashboard
 - What was built: Fix for promote_to_live() so that the live dashboard's SEC filing links actually serve the PDFs.
 - Files modified:
