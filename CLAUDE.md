@@ -126,6 +126,19 @@ Long sessions degrade response quality. At natural checkpoints (task done, big m
 ## Autonomy
 Do the work. Don't ask the user to run commands, read logs, or verify URLs. Escalate only after genuinely different approaches have failed. Never say "it should work" — verify, then share the link.
 
+## Never Idle — Gather Blockers Upfront, Work Around the Rest
+The user's time is the scarce resource. Do not end a turn waiting for permission when any useful work remains.
+
+**At task start, produce a blocker brief.** While the user is still paying attention, enumerate every permission, secret, external account, domain, or piece of info you'll need. Ask for them all in one batch. Examples: GitHub token scopes, API keys (Stripe / Anthropic / OpenAI), third-party logins (Auth0, Cloudflare, SendGrid), DNS control, billing setup, access to existing data sources.
+
+**While waiting for answers, keep making progress.** Do everything that doesn't depend on the pending items: scaffolding, tests, stubs, mocks, docs, infrastructure, research. Leave clean hooks for the blocking pieces so they slot in when answers arrive.
+
+**If you discover a blocker mid-work:** add it to the running brief, immediately pivot to unblocked work, batch the new ask with any other pending asks. Never stop and wait.
+
+**Never emit phrases like:** "want me to continue?", "should I proceed?", "tell me if…". Just act. If a decision is genuinely irreversible or externally visible (per the autonomy memory), state the plan and execute unless stopped.
+
+**Examples of legitimately ending a turn:** everything is blocked on user input AND there's no further work you can do; task is complete and QA green; scope exploded into hours of new work that warrants a revised estimate.
+
 ## Keep-the-User-Informed Conventions
 - **Scope upfront.** Before starting any non-trivial task, state estimated duration (e.g., "~15 min", "~1 hr", "~3 hr with multiple iterations"). User may walk away between prompt and completion; they need to know when to check back.
 - **Task status file.** Call `/usr/local/bin/task-status.sh set "<name>" "<stage>" "<detail>"` when starting a task; `task-status.sh done "<name>" "<summary>" <preview_url>` when finished; `task-status.sh clear` when fully handed off. This updates `https://casinv.dev/tasks.json` which the user can tap anytime to see current state.
