@@ -887,7 +887,7 @@ def generate_comparison_content(deals, title):
             ms["pool_factor"] = ms["total_balance"].astype(float) / orig_bal
             ms["cum_loss_rate"] = (ms["period_chargeoffs"].fillna(0) - ms["period_recoveries"].fillna(0)).cumsum() / orig_bal
             pf_traces.append({
-                "x": ms["period"].tolist(),
+                "x": list(range(1, len(ms) + 1)),
                 "y": [round(v, 6) for v in ms["pool_factor"].tolist()],
                 "type": "scatter", "mode": "lines", "name": deal,
                 "line": {"color": color},
@@ -985,7 +985,7 @@ def generate_comparison_content(deals, title):
         keys = sorted(set(wac_by_col) & set(cod_by_col))
         if keys:
             spread_traces.append({
-                "x": [f"{y}-{m:02d}" for y, m in keys],
+                "x": list(range(1, len(keys) + 1)),
                 "y": [round(wac_by_col[k] - cod_by_col[k], 6) for k in keys],
                 "type": "scatter", "mode": "lines", "name": deal,
                 "line": {"color": color},
@@ -993,8 +993,8 @@ def generate_comparison_content(deals, title):
 
     if pf_traces:
         h += chart(pf_traces, {
-            "title": f"{title} — Pool Factor by Month",
-            "xaxis": {"title": "Month"},
+            "title": f"{title} — Pool Factor by Deal Age",
+            "xaxis": {"title": "Deal Age (Months)"},
             "yaxis": {"tickformat": ".0%", "title": "Pool Factor (Remaining / Original)"},
             "hovermode": "x unified",
             "legend": {"orientation": "h", "y": -0.3},
@@ -1012,8 +1012,8 @@ def generate_comparison_content(deals, title):
 
     if spread_traces:
         h += chart(spread_traces, {
-            "title": f"{title} — Excess Spread (Consumer Rate − Trust Cost of Debt)",
-            "xaxis": {"title": "Month"},
+            "title": f"{title} — Excess Spread by Deal Age (Consumer Rate − Trust Cost of Debt)",
+            "xaxis": {"title": "Deal Age (Months)"},
             "yaxis": {"tickformat": ".2%", "title": "Excess Spread"},
             "hovermode": "x unified",
             "legend": {"orientation": "h", "y": -0.3},
