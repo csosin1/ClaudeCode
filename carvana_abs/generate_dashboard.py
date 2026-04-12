@@ -863,6 +863,162 @@ def generate_comparison_content(deals, title):
             "legend": {"orientation": "h", "y": -0.3},
         }, height=450)
 
+    # ── Pool Factor vs Month, Cum Loss vs Pool Factor, Excess Spread ──
+    # Collect per-deal time series once, then feed three charts.
+    pf_traces = []       # x=calendar period, y=pool_factor
+    pf_loss_traces = []  # x=pool_factor, y=cum net loss rate (chronological line)
+    spread_traces = []   # x=calendar period, y=WAC - CoD
+    note_bal_cols = {"A1": "note_balance_a1", "A2": "note_balance_a2", "A3": "note_balance_a3",
+                     "A4": "note_balance_a4", "B": "note_balance_b", "C": "note_balance_c",
+                     "D": "note_balance_d", "N": "note_balance_n"}
+
+    for i, deal in enumerate(deals):
+        color = COLORS[i % len(COLORS)]
+        orig_bal = get_orig_bal(deal)
+        if not orig_bal or orig_bal <= 0:
+            continue
+
+        # Pool factor + cum loss from monthly_summary (consistent month-ends across deals)
+        ms = q("SELECT reporting_period_end, total_balance, period_chargeoffs, period_recoveries "
+               "FROM monthly_summary WHERE deal=? ORDER BY reporting_period_end", (deal,))
+        if not ms.empty:
+            ms["period"] = ms["reporting_period_end"].apply(nd)
+            ms = ms.sort_values("period").reset_index(drop=True)
+            ms["pool_factor"] = ms["total_balance"].astype(float) / orig_bal
+            ms["cum_loss_rate"] = (ms["period_chargeoffs"].fillna(0) - ms["period_recoveries"].fillna(0)).cumsum() / orig_bal
+            pf_traces.append({
+                "x": ms["period"].tolist(),
+                "y": [round(v, 6) for v in ms["pool_factor"].tolist()],
+                "type": "scatter", "mode": "lines", "name": deal,
+                "line": {"color": color},
+            })
+            pf_loss_traces.append({
+                "x": [round(v, 6) for v in ms["pool_factor"].tolist()],
+                "y": [round(v, 6) for v in ms["cum_loss_rate"].tolist()],
+                "type": "scatter", "mode": "lines+markers", "name": deal,
+                "line": {"color": color},
+                "marker": {"size": 4},
+            })
+
+        # Excess spread: WAC − CoD aligned on collection-period (year, month).
+        # WAC source (pool_performance.weighted_avg_apr for Prime; monthly_summary
+        # .weighted_avg_coupon for Non-Prime, which doesn't populate WAC in the
+        # servicer report) is keyed by the month-end of the collection period.
+        # CoD comes from pool_performance — but those rows use the distribution
+        # date, which is ~10 days after the collection period it reports on.
+        # Shifting the distribution month back by one gives the collection month.
+        pool = q("SELECT * FROM pool_performance WHERE deal=? ORDER BY distribution_date", (deal,))
+        if pool.empty:
+            continue
+        pool["period"] = pool["distribution_date"].apply(nd)
+        pool = pool.sort_values("period").reset_index(drop=True)
+
+        def _ym(s):
+            s = str(s).strip()
+            if len(s) >= 7 and s[4] in "-/":
+                try:
+                    return (int(s[:4]), int(s[5:7]))
+                except ValueError:
+                    return None
+            return None
+
+        # WAC by collection month
+        wac_by_col = {}
+        if "weighted_avg_apr" in pool.columns and pool["weighted_avg_apr"].notna().any():
+            for _, row in pool.iterrows():
+                ym = _ym(row["period"])
+                w = row["weighted_avg_apr"]
+                if ym and pd.notna(w):
+                    col_ym = (ym[0], ym[1] - 1) if ym[1] > 1 else (ym[0] - 1, 12)
+                    wac_by_col[col_ym] = float(w)
+        else:
+            wac_ms = q("SELECT reporting_period_end, weighted_avg_coupon FROM monthly_summary "
+                       "WHERE deal=? AND weighted_avg_coupon IS NOT NULL ORDER BY reporting_period_end", (deal,))
+            for _, row in wac_ms.iterrows():
+                ym = _ym(nd(row["reporting_period_end"]))
+                if ym:
+                    wac_by_col[ym] = float(row["weighted_avg_coupon"])
+
+        # CoD by collection month
+        try:
+            notes_df = q("SELECT class, coupon_rate FROM notes WHERE deal=? AND coupon_rate IS NOT NULL", (deal,))
+        except Exception:
+            notes_df = pd.DataFrame()
+        norm_rate_lookup = {}
+        if not notes_df.empty:
+            for cls, rate in zip(notes_df["class"], notes_df["coupon_rate"]):
+                norm = cls.upper().replace("-", "").replace(" ", "").replace("CLASS", "")
+                norm_rate_lookup[norm] = rate
+        for col in note_bal_cols.values():
+            if col in pool.columns:
+                pool[col] = pool[col].ffill()
+
+        cod_by_col = {}
+        has_ni = "total_note_interest" in pool.columns
+        has_nb = "aggregate_note_balance" in pool.columns
+        for _, row in pool.iterrows():
+            ym = _ym(row["period"])
+            if not ym:
+                continue
+            col_ym = (ym[0], ym[1] - 1) if ym[1] > 1 else (ym[0] - 1, 12)
+            cod_val = None
+            if has_ni and has_nb:
+                ni = row.get("total_note_interest")
+                nb = row.get("aggregate_note_balance")
+                if pd.notna(ni) and pd.notna(nb) and float(nb) > 0 and float(ni) > 0:
+                    v = float(ni) / float(nb) * 12
+                    if 0 < v < 0.25:
+                        cod_val = v
+            if cod_val is None and norm_rate_lookup:
+                w_sum, t_bal = 0.0, 0.0
+                for cls, col in note_bal_cols.items():
+                    if col in pool.columns and cls in norm_rate_lookup:
+                        bal = row.get(col)
+                        if pd.notna(bal) and float(bal) > 0:
+                            w_sum += norm_rate_lookup[cls] * float(bal)
+                            t_bal += float(bal)
+                if t_bal > 0:
+                    cod_val = w_sum / t_bal
+            if cod_val is not None:
+                cod_by_col[col_ym] = cod_val
+
+        keys = sorted(set(wac_by_col) & set(cod_by_col))
+        if keys:
+            spread_traces.append({
+                "x": [f"{y}-{m:02d}" for y, m in keys],
+                "y": [round(wac_by_col[k] - cod_by_col[k], 6) for k in keys],
+                "type": "scatter", "mode": "lines", "name": deal,
+                "line": {"color": color},
+            })
+
+    if pf_traces:
+        h += chart(pf_traces, {
+            "title": f"{title} — Pool Factor by Month",
+            "xaxis": {"title": "Month"},
+            "yaxis": {"tickformat": ".0%", "title": "Pool Factor (Remaining / Original)"},
+            "hovermode": "x unified",
+            "legend": {"orientation": "h", "y": -0.3},
+        }, height=450)
+
+    if pf_loss_traces:
+        h += chart(pf_loss_traces, {
+            "title": f"{title} — Cumulative Net Loss vs Pool Factor",
+            "xaxis": {"title": "Pool Factor (Remaining / Original)",
+                      "tickformat": ".0%", "autorange": "reversed"},
+            "yaxis": {"tickformat": ".2%", "title": "Cum Net Loss (% of Orig Bal)"},
+            "hovermode": "closest",
+            "legend": {"orientation": "h", "y": -0.3},
+        }, height=450)
+
+    if spread_traces:
+        h += chart(spread_traces, {
+            "title": f"{title} — Excess Spread (Consumer Rate − Trust Cost of Debt)",
+            "xaxis": {"title": "Month"},
+            "yaxis": {"tickformat": ".2%", "title": "Excess Spread"},
+            "hovermode": "x unified",
+            "legend": {"orientation": "h", "y": -0.3},
+        }, height=450)
+
     return h
 
 
