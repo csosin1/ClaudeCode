@@ -98,17 +98,27 @@ Each active project gets its own Claude conversation in a separate tmux window. 
 
 When starting work on a named project, spawn its window first. Multi-hour tasks should use their own window so the orchestrator chat stays clear.
 
-## Feature-Branch Workflow (optional, for bigger tasks)
-For non-trivial work, create a feature branch so main stays clean:
+## Feature-Branch Workflow (recommended for multi-project parallelism)
+For anything more than a small fix, use feature branches so parallel projects don't collide on main:
 
-```
-git checkout -b claude/<project>-<short-desc> main
-# ... do work, push to branch, no auto-deploy triggers
-git checkout main && git merge claude/<project>-<short-desc>
-git push origin main  # now preview deploys
-```
+- **Start a task:** `start-task.sh <project> "<description>"` — creates branch `claude/<project>-<slug>` from origin/main, sets task status.
+- **Do the work:** commit as normal on the branch. Pushing the branch does NOT deploy — only main deploys.
+- **Ship to preview:** `finish-task.sh <project>` — merges the branch into main, pushes, updates task status. Auto-deploy handles the rest.
+- **User says "ship it":** `bash /opt/site-deploy/deploy/promote.sh <project>` — promotes preview → live.
 
-Small fixes can continue to push directly to main.
+Small fixes can still push directly to main.
+
+## Remote-Control Fallback
+`/remote-control` session URLs depend on Anthropic's relay. If the Claude app stays on "Remote Control connecting…" forever, fall back to the web terminal:
+
+- Open https://code.casinv.dev on any device (it's the droplet's ttyd web terminal)
+- Type `tmux attach -t claude` to join the main session, or use `tmux attach -t claude \; select-window -t <project>` for a project window
+- Detach with Ctrl-B then D
+
+iPhone keyboards on a terminal aren't ideal, but this path doesn't depend on relays working.
+
+## Cost Visibility
+Claude includes an approximate token-usage summary in every `task-status.sh done` call, so the user can see how expensive each task was. Format: `task-status.sh done <project> "<name>" "completed; ~42k tokens"`. The dashboard surfaces this.
 
 ## Context Compaction
 Long sessions degrade response quality. At natural checkpoints (task done, big milestone, end of a QA iteration cycle), run `/compact` to trim conversation history. Always before continuing to a new task in the same window.
