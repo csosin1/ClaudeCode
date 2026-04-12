@@ -13,6 +13,11 @@ logger = setup_logging("classify")
 
 MODEL = "claude-sonnet-4-20250514"
 
+# Chains with fewer locations are overwhelmingly independent gyms or OSM
+# tagging noise — classifying them wastes API spend and adds no competitive
+# signal. Raise/lower to widen or narrow the classified chain universe.
+MIN_LOCATIONS_FOR_CLASSIFICATION = 4
+
 
 def get_chains_to_classify(conn) -> list[dict]:
     """Get chains that need classification or reclassification."""
@@ -22,11 +27,13 @@ def get_chains_to_classify(conn) -> list[dict]:
         SELECT c.id, c.canonical_name, c.competitive_classification,
                c.location_count, c.manually_reviewed, c.last_classified_date
         FROM chains c
-        WHERE (c.manually_reviewed = 0 AND c.competitive_classification = 'unknown')
-           OR (c.location_count >= 3 AND c.manually_reviewed = 0
-               AND (c.last_classified_date IS NULL OR c.last_classified_date < ?))
+        WHERE c.manually_reviewed = 0
+          AND c.location_count >= ?
+          AND (c.competitive_classification = 'unknown'
+               OR c.last_classified_date IS NULL
+               OR c.last_classified_date < ?)
         ORDER BY c.location_count DESC
-    """, (cutoff,)).fetchall()
+    """, (MIN_LOCATIONS_FOR_CLASSIFICATION, cutoff)).fetchall()
 
     return [dict(r) for r in rows]
 
