@@ -157,13 +157,7 @@ NGXEOF
 nginx -t && systemctl reload nginx
 echo "Nginx updated — multi-project layout with preview/live."
 
-# Make HTTP (port 80) always redirect to HTTPS for any host, not 404 for non-casinv.dev.
-# Needed so requests to http://159.223.127.125/ (QA, Playwright, bare-IP access) work.
-# This is idempotent — safe to run every time.
-sed -i 's|return 404; # managed by Certbot|return 301 https://casinv.dev$request_uri;|g' /etc/nginx/sites-available/abs-dashboard
-nginx -t && systemctl reload nginx
-
-# Re-apply SSL certificates if certbot is installed and certs exist
+# Re-apply SSL certificates FIRST (certbot modifies config), THEN post-process
 if command -v certbot >/dev/null 2>&1; then
     if [ -d "/etc/letsencrypt/live/casinv.dev" ]; then
         echo "Re-applying SSL certificates..."
@@ -171,3 +165,8 @@ if command -v certbot >/dev/null 2>&1; then
             -d casinv.dev -d code.casinv.dev --redirect 2>&1 || echo "certbot re-apply failed (non-fatal)"
     fi
 fi
+
+# Post-certbot: make HTTP port 80 redirect to HTTPS for ALL hosts (not 404 for bare IP).
+# Must run AFTER certbot since certbot rewrites this block. Idempotent.
+sed -i 's|return 404; # managed by Certbot|return 301 https://casinv.dev$request_uri;|g' /etc/nginx/sites-available/abs-dashboard
+nginx -t && systemctl reload nginx
