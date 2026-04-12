@@ -87,6 +87,32 @@ Reusable patterns live in `SKILLS/*.md`. Check there before implementing anythin
 - `CHANGES.md` — Builder's per-task log for the Reviewer.
 - `RUNBOOK.md` — per-project facts: URL, path, deps, env var names, health check.
 
+## Multi-Project Windows
+Each active project gets its own Claude conversation in a separate tmux window. Avoids context bloat and keeps projects isolated.
+
+- **Spawn a project window:** `claude-project.sh <project> [cwd]` — creates tmux window, starts Claude, activates /remote-control, writes bookmark to `/remote/<project>.html`.
+- **End a project window:** `end-project.sh <project>`.
+- **Bookmarks:** `https://casinv.dev/remote/<project>.html` (stable per project; redirects to current session URL).
+- **Main window:** `https://casinv.dev/remote.html` is the general-purpose orchestrator chat (not tied to a project).
+- **Dashboard:** `https://casinv.dev/projects.html` shows every project's live/preview/remote links and current task.
+
+When starting work on a named project, spawn its window first. Multi-hour tasks should use their own window so the orchestrator chat stays clear.
+
+## Feature-Branch Workflow (optional, for bigger tasks)
+For non-trivial work, create a feature branch so main stays clean:
+
+```
+git checkout -b claude/<project>-<short-desc> main
+# ... do work, push to branch, no auto-deploy triggers
+git checkout main && git merge claude/<project>-<short-desc>
+git push origin main  # now preview deploys
+```
+
+Small fixes can continue to push directly to main.
+
+## Context Compaction
+Long sessions degrade response quality. At natural checkpoints (task done, big milestone, end of a QA iteration cycle), run `/compact` to trim conversation history. Always before continuing to a new task in the same window.
+
 ## Autonomy
 Do the work. Don't ask the user to run commands, read logs, or verify URLs. Escalate only after genuinely different approaches have failed. Never say "it should work" — verify, then share the link.
 
