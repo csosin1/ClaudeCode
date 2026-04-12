@@ -597,16 +597,15 @@ def generate_deal_content(deal):
                 except (ValueError, TypeError):
                     date_display = str(fd)[:10] if fd else "Unknown"
                     date_slug = str(fd)[:7] if fd else "unknown"
-                pdf_filename = f"{deal}_servicer_{date_slug}.pdf"
-                html_filename = f"{deal}_servicer_{date_slug}.html"
-                pdf_path = os.path.join(OUT_DIR, "docs", deal, pdf_filename)
-                html_path = os.path.join(OUT_DIR, "docs", deal, html_filename)
-                if os.path.exists(pdf_path):
-                    link = f'<a href="docs/{deal}/{pdf_filename}" target="_blank">PDF</a>'
-                elif os.path.exists(html_path):
-                    link = f'<a href="docs/{deal}/{html_filename}" target="_blank">HTML</a>'
-                else:
-                    link = f'<a href="{cert_url}" target="_blank" rel="noopener">SEC&nbsp;Filing</a>'
+                # Link directly to SEC EDGAR. We used to try serving locally
+                # generated PDFs (docs/<deal>/<file>.pdf), but EDGAR servicer
+                # certificates are image-based — the body is a set of JPG page
+                # scans referenced by relative URL with a hidden OCR text layer.
+                # Rendering that HTML with weasyprint produced a PDF containing
+                # only the hidden text + document header (looked like a bare
+                # exhibit reference with no real content). SEC serves the JPGs
+                # in place, so the canonical EDGAR URL renders correctly.
+                link = f'<a href="{cert_url}" target="_blank" rel="noopener">SEC&nbsp;Filing</a>'
                 cert_rows.append({"Date": date_display, "Download": link})
             cert_df = pd.DataFrame(cert_rows)
             h += table_html(cert_df, cls="compare")
