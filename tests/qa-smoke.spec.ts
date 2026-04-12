@@ -5,7 +5,7 @@ test.describe('Landing Page', () => {
     const response = await page.goto('/');
     expect(response?.status()).toBe(200);
     await expect(page.locator('h1')).toContainText('Projects');
-    await expect(page.locator('a.card')).toHaveCount(3);
+    await expect(page.locator('a.card')).toHaveCount(4);
   });
 
   test('all project links return 200', async ({ page, request }) => {
