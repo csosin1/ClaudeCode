@@ -1,9 +1,8 @@
 const fs = require('fs');
 const path = require('path');
 const config = require('./config');
-
-const USER_AGENT =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+const { pickProfile } = require('./fingerprint');
+const { buildStealthInitScript } = require('./stealth-init');
 
 // Persistent Chrome profile — makes the browser "look aged" (cookies,
 // localStorage, history). This is patchright's single biggest recommendation
@@ -15,6 +14,10 @@ const USER_DATA_DIR = path.join(__dirname, '..', '.chrome-profile');
 // refresh before Decodo's 24h max-session expires.
 const SESSION_FILE = path.join(__dirname, '..', '.proxy-session');
 const SESSION_TTL_MS = 23 * 60 * 60 * 1000;
+
+// Marker file — records when the persistent profile was last warmed via the
+// shopper warmup flow. Read by carvana.js to decide whether a warmup is due.
+const PROFILE_WARMUP_FILE = path.join(__dirname, '..', '.profile-warmup');
 
 function getOrCreateProxySession() {
   try {
@@ -32,49 +35,102 @@ function getOrCreateProxySession() {
 }
 
 /**
- * Random delay between min and max milliseconds.
+ * Log-normal-ish human delay. Skewed right so rare long pauses look natural.
+ * Mean tuned to ~((min+max)/2) with a long tail approaching max*1.6.
  */
 function humanDelay(min = 2000, max = 5000) {
-  const ms = Math.floor(Math.random() * (max - min + 1)) + min;
+  const u = Math.max(0.001, Math.min(0.999, Math.random()));
+  const base = -Math.log(1 - u) * ((min + max) / 4);
+  const ms = Math.max(min, Math.min(max * 1.6, Math.round(base + min)));
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/**
- * Type text character-by-character with random delays to mimic human typing.
- */
-async function humanType(page, selector, text) {
-  const el = await page.waitForSelector(selector, { timeout: 15000 });
-  await el.click();
-  for (const char of text) {
-    await el.type(char, { delay: 0 });
-    const pause = Math.floor(Math.random() * 100) + 50;
-    await new Promise((r) => setTimeout(r, pause));
-  }
+/** Short delay helper (per-character, between clicks, etc). */
+function microDelay(min = 50, max = 200) {
+  const ms = Math.floor(Math.random() * (max - min + 1)) + min;
+  return new Promise((r) => setTimeout(r, ms));
 }
 
 /**
- * Move mouse to a random point near an element before interacting.
+ * Human-style typing with a WPM distribution.
+ * Most chars: 150-350ms. Every ~8 chars, a longer 500-950ms "reading" pause.
+ * Prevents constant-rhythm robot typing that CAPTCHA systems key on.
  */
+async function humanType(page, selector, text) {
+  const el = typeof selector === 'string'
+    ? await page.waitForSelector(selector, { timeout: 15000 })
+    : selector;
+  try { await el.click(); } catch { /* already focused */ }
+  await microDelay(100, 300);
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    await el.type(char, { delay: 0 });
+    const isPause = Math.random() < 0.12;
+    const d = isPause
+      ? 500 + Math.random() * 450
+      : 120 + Math.random() * 230;
+    await new Promise((r) => setTimeout(r, d));
+  }
+}
+
+/** Cubic-bezier point at t between p0..p3 (control points). */
+function bezierPoint(t, p0, p1, p2, p3) {
+  const u = 1 - t;
+  const tt = t * t, uu = u * u, uuu = uu * u, ttt = tt * t;
+  return {
+    x: uuu * p0.x + 3 * uu * t * p1.x + 3 * u * tt * p2.x + ttt * p3.x,
+    y: uuu * p0.y + 3 * uu * t * p1.y + 3 * u * tt * p2.y + ttt * p3.y,
+  };
+}
+
+/**
+ * Move the mouse along a cubic bezier with jitter. Real humans don't move
+ * in straight lines — linear mouse.move calls are a well-known tell.
+ */
+async function bezierMouseMove(page, toX, toY, opts = {}) {
+  const steps = opts.steps || 18 + Math.floor(Math.random() * 16);
+  const from = page.__lastMousePos || { x: 600 + Math.random() * 300, y: 400 + Math.random() * 200 };
+  const dx = toX - from.x, dy = toY - from.y;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+  const spread = Math.min(220, dist * 0.35 + 30);
+  const midX = from.x + dx * 0.4 + (Math.random() - 0.5) * spread;
+  const midY = from.y + dy * 0.4 + (Math.random() - 0.5) * spread;
+  const midX2 = from.x + dx * 0.75 + (Math.random() - 0.5) * spread * 0.6;
+  const midY2 = from.y + dy * 0.75 + (Math.random() - 0.5) * spread * 0.6;
+  const p0 = from, p1 = { x: midX, y: midY }, p2 = { x: midX2, y: midY2 }, p3 = { x: toX, y: toY };
+  for (let i = 1; i <= steps; i++) {
+    // Ease-in-out shaping so the cursor slows at both ends.
+    const rawT = i / steps;
+    const t = (rawT * rawT) / (rawT * rawT + (1 - rawT) * (1 - rawT));
+    const pt = bezierPoint(t, p0, p1, p2, p3);
+    const jx = pt.x + (Math.random() - 0.5) * 1.5;
+    const jy = pt.y + (Math.random() - 0.5) * 1.5;
+    try { await page.mouse.move(jx, jy); } catch { /* page may navigate */ }
+    await new Promise((r) => setTimeout(r, 6 + Math.floor(Math.random() * 14)));
+  }
+  page.__lastMousePos = { x: toX, y: toY };
+}
+
+/** Bezier-move mouse to a random point inside the element's bbox. */
 async function randomMouseMove(page, selector) {
   try {
-    const el = await page.waitForSelector(selector, { timeout: 10000 });
+    const el = typeof selector === 'string'
+      ? await page.waitForSelector(selector, { timeout: 10000 })
+      : selector;
     const box = await el.boundingBox();
     if (box) {
-      const x = box.x + box.width * Math.random();
-      const y = box.y + box.height * Math.random();
-      await page.mouse.move(x, y, { steps: Math.floor(Math.random() * 5) + 3 });
+      const x = box.x + box.width * (0.25 + Math.random() * 0.5);
+      const y = box.y + box.height * (0.25 + Math.random() * 0.5);
+      await bezierMouseMove(page, x, y);
     }
   } catch { /* non-critical */ }
 }
 
-/**
- * Start a background mouse-drift task. Humans don't hold the mouse perfectly
- * still — they drift a few pixels while reading/typing. Returns a stop fn.
- */
+/** Background mouse drift while reading — stops on returned fn. */
 function startMouseDrift(page) {
   let stopped = false;
-  let x = 600 + Math.random() * 400;
-  let y = 400 + Math.random() * 200;
+  let x = (page.__lastMousePos && page.__lastMousePos.x) || 600 + Math.random() * 400;
+  let y = (page.__lastMousePos && page.__lastMousePos.y) || 400 + Math.random() * 200;
   (async () => {
     while (!stopped) {
       try {
@@ -82,7 +138,8 @@ function startMouseDrift(page) {
         y += (Math.random() - 0.5) * 30;
         x = Math.max(100, Math.min(1800, x));
         y = Math.max(100, Math.min(1000, y));
-        await page.mouse.move(x, y, { steps: 3 + Math.floor(Math.random() * 4) });
+        await page.mouse.move(x, y);
+        page.__lastMousePos = { x, y };
       } catch { /* page may be navigating */ }
       await new Promise((r) => setTimeout(r, 400 + Math.random() * 600));
     }
@@ -91,103 +148,56 @@ function startMouseDrift(page) {
 }
 
 /**
- * Inject anti-detection scripts into the page context.
+ * Inject the full anti-detection script into every frame (incl. iframes).
+ * Playwright's addInitScript applies to all frames in the context, including
+ * cross-origin iframes (e.g. Turnstile widget).
  */
-async function injectStealth(context) {
-  await context.addInitScript(() => {
-    // 1. webdriver flag
-    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+async function injectStealth(context, profile) {
+  const script = buildStealthInitScript(profile);
+  await context.addInitScript({ content: script });
+}
 
-    // 2. Plugins
-    Object.defineProperty(navigator, 'plugins', {
-      get: () => [
-        { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
-        { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
-        { name: 'Native Client', filename: 'internal-nacl-plugin', description: '' },
-      ],
-    });
+/** Mark the profile as warmed — the shopper warmup has run at least once. */
+function markProfileWarmed() {
+  try {
+    fs.writeFileSync(PROFILE_WARMUP_FILE, JSON.stringify({ warmedAt: Date.now() }));
+  } catch { /* non-fatal */ }
+}
 
-    // 3. Languages
-    Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
-
-    // 4. Fake window.chrome
-    if (!window.chrome) {
-      window.chrome = {
-        runtime: { connect: () => {}, sendMessage: () => {} },
-        loadTimes: () => ({}),
-        csi: () => ({}),
-      };
-    }
-
-    // 5. permissions.query
-    const originalQuery = window.navigator.permissions && window.navigator.permissions.query;
-    if (originalQuery) {
-      window.navigator.permissions.query = (parameters) => {
-        if (parameters && parameters.name === 'notifications') {
-          return Promise.resolve({ state: Notification.permission });
-        }
-        return originalQuery.call(window.navigator.permissions, parameters);
-      };
-    }
-
-    // 6. WebGL vendor/renderer
-    try {
-      const getParameter = WebGLRenderingContext.prototype.getParameter;
-      WebGLRenderingContext.prototype.getParameter = function (parameter) {
-        if (parameter === 37445) return 'Intel Inc.';
-        if (parameter === 37446) return 'Intel Iris OpenGL Engine';
-        return getParameter.call(this, parameter);
-      };
-    } catch { /* ignore */ }
-
-    // 7. WebRTC leak block — critical. Without this, headed Chrome can leak
-    //    the server's real IP via STUN requests, contradicting the proxy IP
-    //    and instantly flagging us as a bot.
-    try {
-      const blockedRTC = function () { throw new Error('WebRTC disabled'); };
-      window.RTCPeerConnection = blockedRTC;
-      window.webkitRTCPeerConnection = blockedRTC;
-      window.RTCDataChannel = blockedRTC;
-      if (navigator.mediaDevices) {
-        navigator.mediaDevices.enumerateDevices = () => Promise.resolve([]);
-      }
-    } catch { /* ignore */ }
-
-    // 8. chrome.runtime.id removal
-    if (window.chrome && window.chrome.runtime) {
-      window.chrome.runtime.id = undefined;
-    }
-
-    // 9. Hardware concurrency — match a typical Win10 machine
-    try {
-      Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
-      Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
-    } catch { /* ignore */ }
-  });
+/** Has the profile been warmed within ttlHours? */
+function profileIsWarm(ttlHours = 24) {
+  try {
+    const raw = fs.readFileSync(PROFILE_WARMUP_FILE, 'utf8');
+    const data = JSON.parse(raw);
+    return data.warmedAt && Date.now() - data.warmedAt < ttlHours * 60 * 60 * 1000;
+  } catch { return false; }
 }
 
 /**
  * Launch a persistent-context stealth Chromium.
- * Persistent context is critical for Cloudflare Turnstile — a fresh /tmp
- * profile is a strong bot signal. We keep the profile directory around so
- * cookies, localStorage, and cache age naturally across runs.
+ *
+ * @param {Object} _options
+ * @param {boolean} [_options.skipStealth] - Diagnostic override: skip init script.
  */
 async function launchBrowser(_options = {}) {
-  // Ensure profile dir exists
   try { fs.mkdirSync(USER_DATA_DIR, { recursive: true }); } catch { /* exists */ }
 
   const useHeaded = !!process.env.DISPLAY;
+  const sessionId = config.PROXY_HOST && config.PROXY_PASS ? getOrCreateProxySession() : 'no-proxy';
+  const profile = pickProfile(sessionId);
 
   const args = [
     '--disable-blink-features=AutomationControlled',
     '--no-sandbox',
     '--disable-setuid-sandbox',
     '--disable-dev-shm-usage',
-    '--window-size=1920,1080',
+    `--window-size=${profile.screen.width},${profile.screen.height}`,
     '--window-position=0,0',
-    // WebRTC leak block at the browser level — complements the JS init script
+    `--lang=${profile.locale}`,
+    // WebRTC leak block at the browser level — complements JS init script
     '--webrtc-ip-handling-policy=disable_non_proxied_udp',
     '--force-webrtc-ip-handling-policy',
+    '--disable-features=IsolateOrigins,site-per-process',
   ];
   if (!useHeaded) {
     args.push('--disable-gpu', '--disable-software-rasterizer', '--disable-extensions',
@@ -196,11 +206,9 @@ async function launchBrowser(_options = {}) {
     args.push('--start-maximized', '--enable-features=NetworkService,NetworkServiceInProcess');
   }
 
-  // Sticky proxy config
   let proxyConfig = null;
   if (config.PROXY_HOST && config.PROXY_PASS) {
     const proxyPort = '7000';
-    const sessionId = getOrCreateProxySession();
     const proxyUser = `user-${config.PROXY_USER}-country-us-zip-06880-session-${sessionId}-sessionduration-1440`;
     proxyConfig = {
       server: `http://${config.PROXY_HOST}:${proxyPort}`,
@@ -213,26 +221,32 @@ async function launchBrowser(_options = {}) {
   }
 
   console.log(`[browser] Headed=${useHeaded} (DISPLAY=${process.env.DISPLAY || 'unset'}) profile=${USER_DATA_DIR}`);
+  console.log(`[browser] Fingerprint: ${profile.screen.width}x${profile.screen.height}@${profile.dpr}x cores=${profile.hardwareConcurrency} ram=${profile.deviceMemory}GB gpu="${profile.gpu.unmaskedRenderer}"`);
 
   const contextOptions = {
     headless: !useHeaded,
     args,
-    viewport: { width: 1920, height: 1080 },
-    userAgent: USER_AGENT,
-    locale: 'en-US',
-    timezoneId: 'America/New_York',
+    viewport: { width: profile.screen.width, height: profile.screen.height },
+    screen: { width: profile.screen.width, height: profile.screen.height },
+    deviceScaleFactor: profile.dpr,
+    userAgent: profile.userAgent,
+    locale: profile.locale,
+    timezoneId: profile.timezone,
+    colorScheme: 'light',
     extraHTTPHeaders: {
-      'Accept-Language': 'en-US,en;q=0.9',
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-      'sec-ch-ua': '"Chromium";v="131", "Google Chrome";v="131", "Not-A.Brand";v="24"',
+      'Accept-Language': profile.acceptLanguage,
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+      'sec-ch-ua': profile.secChUa,
       'sec-ch-ua-mobile': '?0',
-      'sec-ch-ua-platform': '"Windows"',
+      'sec-ch-ua-platform': profile.secChUaPlatform,
+      'sec-ch-ua-platform-version': profile.secChUaPlatformVersion,
+      'sec-ch-ua-full-version-list': profile.secChUaFullVersionList,
+      'Upgrade-Insecure-Requests': '1',
     },
   };
   if (proxyConfig) contextOptions.proxy = proxyConfig;
 
   // Priority: patchright → playwright-extra → plain playwright.
-  // launchPersistentContext returns a BrowserContext directly (no .newContext).
   let context;
   let launchMethod = 'unknown';
   try {
@@ -258,36 +272,30 @@ async function launchBrowser(_options = {}) {
     }
   }
 
-  await injectStealth(context);
+  if (!_options.skipStealth) {
+    await injectStealth(context, profile);
+  }
 
-  // Persistent context ships with a default page; reuse it so the profile's
-  // pre-existing session storage applies.
   const pages = context.pages();
   const page = pages.length > 0 ? pages[0] : await context.newPage();
 
-  // We return the context as `browser` for backwards compatibility with the
-  // caller, which only uses .close() — BrowserContext has the same method.
-  return { browser: context, page, launchMethod };
+  return { browser: context, page, launchMethod, profile };
 }
 
-/**
- * Safely close a browser/context instance.
- */
+/** Safely close a browser/context instance. */
 async function closeBrowser(browser) {
   try {
     if (browser) await browser.close();
   } catch { /* ignore close errors */ }
 }
 
-/**
- * Simulate human-like initial browsing behavior.
- */
+/** Simulate human-like initial browsing behavior. */
 async function simulateHumanBehavior(page) {
   try {
     for (let i = 0; i < 3; i++) {
       const x = 200 + Math.floor(Math.random() * 800);
       const y = 200 + Math.floor(Math.random() * 400);
-      await page.mouse.move(x, y, { steps: Math.floor(Math.random() * 10) + 5 });
+      await bezierMouseMove(page, x, y, { steps: 12 + Math.floor(Math.random() * 10) });
       await new Promise(r => setTimeout(r, Math.floor(Math.random() * 500) + 200));
     }
     await page.mouse.wheel(0, Math.floor(Math.random() * 200) + 50);
@@ -295,12 +303,38 @@ async function simulateHumanBehavior(page) {
   } catch { /* non-critical */ }
 }
 
+/**
+ * Simulate a brief tab blur/focus (alt-tab). Real users leave tabs in
+ * background sometimes — totally-focused lifetime is itself a signal.
+ */
+async function simulateBlurFocus(page) {
+  try {
+    await page.evaluate(() => {
+      window.dispatchEvent(new Event('blur'));
+      Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await new Promise((r) => setTimeout(r, 2000 + Math.random() * 3000));
+    await page.evaluate(() => {
+      window.dispatchEvent(new Event('focus'));
+      Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+  } catch { /* non-critical */ }
+}
+
 module.exports = {
   launchBrowser,
   humanDelay,
+  microDelay,
   humanType,
   randomMouseMove,
+  bezierMouseMove,
   closeBrowser,
   simulateHumanBehavior,
+  simulateBlurFocus,
   startMouseDrift,
+  markProfileWarmed,
+  profileIsWarm,
+  USER_DATA_DIR,
 };
