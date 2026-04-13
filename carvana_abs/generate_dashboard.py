@@ -171,6 +171,72 @@ def get_orig_bal(deal):
     return 405_000_000
 
 
+def _cert_dq_series(deal):
+    """Return a list of (distribution_date, dq_31_120_balance, ending_pool_balance)
+    parsed from every cached servicer cert for this deal.
+
+    dq_31_120 = sum of 31-60 + 61-90 + 91-120 balances as reported in the cert's
+    "Delinquency Data" block. The cert does NOT have a 120+ bucket (those loans
+    are charged off by day 120-150 under Carvana's servicing policy), so this is
+    a narrower definition than monthly_summary's 30+ DQ rate, which carries
+    pre-charge-off loans in dq_120_plus_balance.
+    """
+    filings = q("SELECT servicer_cert_url, filing_date FROM filings "
+                "WHERE deal=? AND servicer_cert_url IS NOT NULL", (deal,))
+    if filings.empty:
+        return []
+    from datetime import datetime as _dt
+    def _parse(s):
+        for fmt in ("%m/%d/%Y", "%Y-%m-%d", "%m-%d-%Y"):
+            try: return _dt.strptime(str(s).strip()[:10], fmt)
+            except (ValueError, TypeError): pass
+        return None
+    points = []
+    for _, row in filings.iterrows():
+        url = row["servicer_cert_url"]
+        p = urlparse(url)
+        path = os.path.join(_CACHE_DIR, p.path.strip("/").replace("/", "_"))
+        if not os.path.exists(path):
+            continue
+        try:
+            with open(path, "r", errors="replace") as f:
+                txt = f.read()
+        except OSError:
+            continue
+        body = re.sub(r"<[^>]+>", " ", re.sub(r"&nbsp;", " ", txt))
+        body = re.sub(r"\s+", " ", body)
+
+        # Delinquency rows look like: "31-60 187 991,951.44"  (bucket, count, balance)
+        # The count can be comma-formatted once it exceeds 999 (e.g. "1,482"), so
+        # use [\d,]+ for count, not \d+.
+        buckets = {}
+        for m in re.finditer(r"(31-60|61-90|91-120)\s+[\d,]+\s+([\d,]+\.\d+)", body):
+            buckets[m.group(1)] = float(m.group(2).replace(",", ""))
+        if len(buckets) < 3:
+            continue
+        dq_total = buckets["31-60"] + buckets["61-90"] + buckets["91-120"]
+
+        # Ending pool balance from same cert
+        m = re.search(r"Ending Pool Balance\s*\(?\s*\d+\s*\)?\s*[\d,]+\s+([\d,]+(?:\.\d+)?)", body)
+        if not m:
+            continue
+        epb = float(m.group(1).replace(",", ""))
+
+        # Distribution date
+        m = re.search(r"Distribution Date[:\s]+(\d{1,2}/\d{1,2}/\d{4})", body)
+        if not m:
+            continue
+        dt = _parse(m.group(1))
+        if dt is None:
+            continue
+        points.append((dt, dq_total, epb))
+    # Dedupe by date
+    by_date = {}
+    for dt, dq, epb in points:
+        by_date[dt] = (dq, epb)
+    return [(dt, dq, epb) for dt, (dq, epb) in sorted(by_date.items())]
+
+
 def _cum_net_loss_series(deal):
     """Return a list of (distribution_date, cum_net_loss_dollars) from every
     cached servicer cert for this deal, sorted chronologically. Used for the
@@ -807,17 +873,25 @@ def generate_deal_content(deal):
 
     # Build metrics + tabs HTML for this deal.
     # Prefer the latest servicer cert for cum net loss rate (authoritative).
-    # Fall back to the monthly_summary flow sum only if cert parse fails.
+    # 30+ DQ rate uses the cert's 31-60 + 61-90 + 91-120 bucket sum / pool
+    # balance, not monthly_summary which carries pre-charge-off loans in a
+    # dq_120_plus bucket that the cert doesn't report.
     cert_cum_loss = get_cum_net_loss_rate(deal, ORIG_BAL)
     cum_loss_display = (f"{cert_cum_loss:.2%}" if cert_cum_loss is not None
                         else f"{last['loss_rate']:.2%}")
+    dq_series = _cert_dq_series(deal)
+    if dq_series:
+        _, dq_last, epb_last = dq_series[-1]
+        dq_display = f"{dq_last / epb_last:.2%}" if epb_last else f"{last['dq_rate']:.2%}"
+    else:
+        dq_display = f"{last['dq_rate']:.2%}"
     metrics_html = f"""<div class="metrics">
 <div class="metric"><div class="mv">{fm(ORIG_BAL)}</div><div class="ml">Original Balance</div></div>
 <div class="metric"><div class="mv">{fm(last['total_balance'])}</div><div class="ml">Current Balance</div></div>
 <div class="metric"><div class="mv">{last['total_balance']/ORIG_BAL:.1%}</div><div class="ml">Pool Factor</div></div>
 <div class="metric"><div class="mv">{int(last['active_loans']):,}</div><div class="ml">Active Loans</div></div>
 <div class="metric"><div class="mv">{cum_loss_display}</div><div class="ml">Cum Loss Rate</div></div>
-<div class="metric"><div class="mv">{last['dq_rate']:.2%}</div><div class="ml">30+ DQ Rate</div></div>
+<div class="metric"><div class="mv">{dq_display}</div><div class="ml">30+ DQ Rate</div></div>
 </div>"""
 
     # Build tab buttons and content
@@ -1099,17 +1173,20 @@ def generate_comparison_content(deals, title):
                         "marker": {"size": 4},
                     })
 
-            # 30+ DQ rate: all delinquency buckets / current balance
+            # 30+ DQ rate: per-period 31-60 + 61-90 + 91-120 / ending pool balance,
+            # parsed from each cached servicer cert. Matches the cert's bucket
+            # definition (no 120+ bucket — those loans are charged off).
+            dq_series = _cert_dq_series(deal)
+            if dq_series:
+                dq_traces.append({
+                    "x": list(range(1, len(dq_series) + 1)),
+                    "y": [round(dq / epb, 6) if epb else 0 for _, dq, epb in dq_series],
+                    "type": "scatter", "mode": "lines", "name": deal,
+                    "line": {"color": color},
+                })
+
+            # Prior-month balance series for the annualized charge-off chart.
             bal = ms["total_balance"].astype(float)
-            total_dq = (ms["dq_30_balance"].fillna(0) + ms["dq_60_balance"].fillna(0)
-                        + ms["dq_90_balance"].fillna(0) + ms["dq_120_plus_balance"].fillna(0)).astype(float)
-            dq_rate = (total_dq / bal.where(bal > 0)).fillna(0)
-            dq_traces.append({
-                "x": list(range(1, len(ms) + 1)),
-                "y": [round(float(v), 6) for v in dq_rate.tolist()],
-                "type": "scatter", "mode": "lines", "name": deal,
-                "line": {"color": color},
-            })
 
             # Annualized net charge-off rate: (CO - recoveries) * 12 / avg pool balance.
             # Uses prior-month balance as the denominator (standard industry form).

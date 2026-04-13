@@ -85,11 +85,15 @@ def _parse_numbered_value(raw: str, expect_count_and_amount: bool = False) -> di
     if not raw:
         return result
 
-    # Check for percentage
-    if "%" in raw:
-        pct_match = re.search(r'(-?[\d,.]+)%', raw)
-        if pct_match:
-            result["pct"] = _clean_number(pct_match.group(1))
+    # Check for percentage — but ONLY if the first numeric token is a
+    # percentage. Many cert rows have values like "6,228,590 (d) Historical
+    # Net Loss Data ... 26,662,743 (25,523) -0.10%" where the real value is
+    # the leading dollar amount but a stray % appears later in unrelated
+    # trailing label text. Matching the first number+% ensures we only treat
+    # the field as a percentage when it genuinely is one.
+    leading = re.match(r'\s*(-?[\d,.]+)\s*(%?)', raw)
+    if leading and leading.group(2) == "%":
+        result["pct"] = _clean_number(leading.group(1))
         return result
 
     # Extract number tokens from the BEGINNING of the value string.
@@ -292,39 +296,72 @@ def _parse_from_numbered_text(text: str) -> dict:
         data["recoveries"] = _parse_numbered_value(fields[11]["raw"])["value"]
 
     # --- Losses (fields 8, 89-98) ---
+    # Line numbers shift across cert vintages (prime 2020-P1 uses 91/95/98;
+    # 2022+ vintages use 90/94/97; non-prime has a different numbering with
+    # the same labels). Try the "usual" field numbers first, then fall back
+    # to a label-based lookup that works across all variants.
+    def _by_label(label_substr):
+        for fnum, fdata in fields.items():
+            if label_substr in (fdata.get("label") or ""):
+                return fdata["raw"]
+        return None
+
     if 8 in fields:
         v = _parse_numbered_value(fields[8]["raw"], expect_count_and_amount=True)
         data["gross_charged_off_amount"] = v["value"]
-    if 90 in fields:
-        data["gross_charged_off_amount"] = data.get("gross_charged_off_amount") or _parse_numbered_value(fields[90]["raw"])["value"]
-    if 91 in fields:
-        data["cumulative_gross_losses"] = _parse_numbered_value(fields[91]["raw"])["value"]
-    if 93 in fields:
-        data["liquidation_proceeds"] = _parse_numbered_value(fields[93]["raw"])["value"]
-    if 95 in fields:
-        data["cumulative_liquidation_proceeds"] = _parse_numbered_value(fields[95]["raw"])["value"]
-    if 97 in fields:
-        data["net_charged_off_amount"] = _parse_numbered_value(fields[97]["raw"])["value"]
-    if 98 in fields:
-        data["cumulative_net_losses"] = _parse_numbered_value(fields[98]["raw"])["value"]
+    data["gross_charged_off_amount"] = (
+        data.get("gross_charged_off_amount")
+        or _parse_numbered_value(
+            _by_label("Gross Charged-Off Receivables losses occurring in current Collection Period") or ""
+        )["value"])
+    data["cumulative_gross_losses"] = _parse_numbered_value(
+        _by_label("Gross Charged-Off Receivables losses as of the last day of the current") or ""
+    )["value"]
+    data["liquidation_proceeds"] = _parse_numbered_value(
+        _by_label("Gross Liquidation Proceeds occurring in the current Collection Period") or ""
+    )["value"]
+    data["cumulative_liquidation_proceeds"] = _parse_numbered_value(
+        _by_label("Liquidation Proceeds as of the last day of the current") or ""
+    )["value"]
+    data["net_charged_off_amount"] = _parse_numbered_value(
+        _by_label("Net Charged-Off Receivables losses occurring in current Collection Period") or ""
+    )["value"]
+    data["cumulative_net_losses"] = _parse_numbered_value(
+        _by_label("Net Charged-Off Receivables losses as of the last day of the current") or ""
+    )["value"]
 
-    # --- Delinquency (fields 99-104) ---
-    if 99 in fields:
-        v = _parse_numbered_value(fields[99]["raw"], expect_count_and_amount=True)
-        data["delinquent_31_60_count"] = int(v["count"]) if v["count"] else None
-        data["delinquent_31_60_balance"] = v["value"]
-    if 100 in fields:
-        v = _parse_numbered_value(fields[100]["raw"], expect_count_and_amount=True)
-        data["delinquent_61_90_count"] = int(v["count"]) if v["count"] else None
-        data["delinquent_61_90_balance"] = v["value"]
-    if 101 in fields:
-        v = _parse_numbered_value(fields[101]["raw"], expect_count_and_amount=True)
-        data["delinquent_91_120_count"] = int(v["count"]) if v["count"] else None
-        data["delinquent_91_120_balance"] = v["value"]
-    if 102 in fields:
-        v = _parse_numbered_value(fields[102]["raw"], expect_count_and_amount=True)
-        total_dq_count = int(v["count"]) if v["count"] else None
-        data["total_delinquent_balance"] = v["value"]
+    # --- Delinquency buckets ---
+    # The bucket rows are numbered fields whose extracted "label" comes out
+    # empty; the bucket tag ("31-60", "61-90", "91-120") lives at the start
+    # of the raw string, e.g. "31-60 187 991,951.44". Look it up there.
+    for bucket, (count_key, bal_key) in {
+        "31-60": ("delinquent_31_60_count", "delinquent_31_60_balance"),
+        "61-90": ("delinquent_61_90_count", "delinquent_61_90_balance"),
+        "91-120": ("delinquent_91_120_count", "delinquent_91_120_balance"),
+    }.items():
+        raw = None
+        for fnum, fdata in fields.items():
+            lbl = (fdata.get("label") or "").strip()
+            rv = (fdata.get("raw") or "").strip()
+            if lbl.startswith(bucket) or rv.startswith(bucket):
+                raw = rv
+                # Drop the bucket tag so the count/amount parser sees clean values
+                raw = re.sub(rf"^{re.escape(bucket)}\s+", "", raw)
+                break
+        if raw:
+            v = _parse_numbered_value(raw, expect_count_and_amount=True)
+            if v["count"] is not None: data[count_key] = int(v["count"])
+            if v["value"] is not None: data[bal_key] = v["value"]
+    # Total delinquencies row — also empty-label with "Total Delinquencies" in raw
+    for fnum, fdata in fields.items():
+        rv = (fdata.get("raw") or "").strip()
+        lbl = (fdata.get("label") or "").strip()
+        if rv.startswith("Total Delinquencies") or lbl.startswith("Total Delinquencies"):
+            clean = re.sub(r"^Total Delinquencies\s+", "", rv)
+            v = _parse_numbered_value(clean, expect_count_and_amount=True)
+            if v["value"] is not None:
+                data["total_delinquent_balance"] = v["value"]
+            break
     if 103 in fields:
         data["delinquency_trigger_actual"] = _parse_numbered_value(fields[103]["raw"])["pct"]
         if data["delinquency_trigger_actual"]:

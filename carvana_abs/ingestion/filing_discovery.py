@@ -205,15 +205,18 @@ def link_absee_to_10d(deal: str = DEFAULT_DEAL, db_path: Optional[str] = None) -
             logger.debug(f"No XML found in ABS-EE {acc}")
             continue
 
-        # Find matching 10-D by filing date
+        # Find matching 10-D by filing date. The ABS-EE and 10-D for a given
+        # reporting period are typically filed on the same day, but a ~1-day
+        # offset shows up often enough that exact-match drops real pairings.
+        # Prefer same-day; fall back to ±3 days; take the closest.
         cursor.execute("""
-            SELECT accession_number FROM filings
+            SELECT accession_number, filing_date FROM filings
             WHERE deal = ? AND filing_type IN ('10-D', '10-D/A')
-            AND filing_date = ?
             AND (absee_url IS NULL OR absee_url = '')
-            ORDER BY filing_date
+            AND ABS(julianday(filing_date) - julianday(?)) <= 3
+            ORDER BY ABS(julianday(filing_date) - julianday(?))
             LIMIT 1
-        """, (deal, absee["filing_date"]))
+        """, (deal, absee["filing_date"], absee["filing_date"]))
         matching_10d = cursor.fetchone()
 
         if matching_10d:
