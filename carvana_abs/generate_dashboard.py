@@ -1355,6 +1355,102 @@ def generate_comparison_content(deals, title):
     return h
 
 
+def _loss_forecast_buildup_tables(model_results):
+    """Build the vintage loss-forecast build-up tables (one for Prime, one
+    for Non-Prime). For each deal we show:
+
+        Realized (net)     = cert's cumulative net charge-offs
+        31-60 DQ expected  = 31-60 balance × 20% roll × severity
+        61-90 DQ expected  = 61-90 balance × 50% roll × severity
+        91-120 DQ expected = 91-120 balance × 85% roll × severity
+        Future (model)     = max(0, model's lifetime net-loss forecast
+                             minus what's already realized or in DQ pipeline)
+        Total expected     = realized + dq_pending + future
+
+    Severity is per-deal: 1 − cum_liq / cum_gross, with a 60% fallback when
+    the cert doesn't have loss data yet (very new deals).
+    Roll-to-loss multipliers are industry-standard auto-ABS levels; they're
+    approximations, not modelled per deal — call that out in the table note.
+    """
+    forecast = model_results.get("segments", {}).get("lifetime_forecast_by_deal", {})
+
+    def build_for(deals, title):
+        rows = []
+        for deal in deals:
+            orig = get_orig_bal(deal)
+            if not orig or orig <= 0:
+                continue
+            t = _cert_totals(deal)
+            cum_gross = t.get("cum_gross_losses") or 0
+            cum_liq = t.get("cum_liquidation_proceeds") or 0
+            cum_net = t.get("cum_net_losses") or max(0, cum_gross - cum_liq)
+            severity = (1 - cum_liq / cum_gross) if cum_gross > 0 else 0.60
+
+            # Latest DQ from cert — _cert_dq_series returns
+            # [(dt, dq_31_120_sum, ending_pool_balance)], but we need the split.
+            # Parse from the latest cert directly.
+            dq31 = dq61 = dq91 = 0.0
+            rowq = q("SELECT servicer_cert_url FROM filings WHERE deal=? "
+                     "AND servicer_cert_url IS NOT NULL ORDER BY filing_date DESC LIMIT 1", (deal,))
+            if not rowq.empty:
+                url = rowq.iloc[0]["servicer_cert_url"]
+                p = urlparse(url)
+                path = os.path.join(_CACHE_DIR, p.path.strip("/").replace("/", "_"))
+                if os.path.exists(path):
+                    with open(path, "r", errors="replace") as f:
+                        txt = f.read()
+                    body = re.sub(r"<[^>]+>", " ", re.sub(r"&nbsp;", " ", txt))
+                    body = re.sub(r"\s+", " ", body)
+                    def _b(tag):
+                        m = re.search(rf"{tag}\s+[\d,]+\s+([\d,]+\.\d+)", body)
+                        return float(m.group(1).replace(",", "")) if m else 0.0
+                    dq31, dq61, dq91 = _b("31-60"), _b("61-90"), _b("91-120")
+
+            # In-flight DQ losses (net) with industry roll-to-loss multipliers
+            dq_loss_31 = dq31 * 0.20 * severity
+            dq_loss_61 = dq61 * 0.50 * severity
+            dq_loss_91 = dq91 * 0.85 * severity
+            dq_total = dq_loss_31 + dq_loss_61 + dq_loss_91
+
+            # Model's lifetime forecast (net of recoveries via same deal-level severity)
+            fdata = forecast.get(deal, {})
+            model_lifetime_net = (fdata.get("predicted_default_amount", 0) or 0) * severity
+            remaining = max(0.0, model_lifetime_net - cum_net - dq_total)
+            total_exp = cum_net + dq_total + remaining
+
+            def pct(x): return f"{x/orig:.2%}" if orig else "-"
+            rows.append({
+                "Deal": deal,
+                "Realized $": fm(cum_net),
+                "Realized %": pct(cum_net),
+                "31-60 DQ": fm(dq_loss_31),
+                "61-90 DQ": fm(dq_loss_61),
+                "91-120 DQ": fm(dq_loss_91),
+                "Model Future": fm(remaining),
+                "Total Expected $": fm(total_exp),
+                "Total Expected %": pct(total_exp),
+            })
+        if not rows:
+            return ""
+        return (f"<h3>{title} — Lifetime Loss Forecast Build-Up</h3>"
+                + table_html(pd.DataFrame(rows), cls="compare"))
+
+    h = ""
+    h += build_for([d for d in PRIME_DEALS], "Prime")
+    h += build_for([d for d in NONPRIME_DEALS], "Non-Prime")
+    if h:
+        h = ("<div class=\"tc\">" + h
+             + "<p style=\"font-size:.75rem;color:#666;margin-top:8px;\">"
+             "Build-up: <b>Realized</b> from the servicer cert's cumulative net "
+             "charge-off line. <b>DQ pipeline</b> = current 31-60/61-90/91-120 "
+             "balance × roll-to-loss (20/50/85%) × per-deal severity (1 − "
+             "cum&nbsp;recoveries / cum&nbsp;gross&nbsp;losses). <b>Model future</b> is the "
+             "default-model's dollar-weighted lifetime net-loss forecast for "
+             "this pool, minus what's already in realized and DQ to avoid "
+             "double-counting.</p></div>")
+    return h
+
+
 def generate_model_content():
     """Generate HTML for the Default Model analysis section."""
     mr = None
@@ -1400,6 +1496,9 @@ def generate_model_content():
 <div class="metric"><div class="mv">{ds['train_size']:,}</div><div class="ml">Train Set</div></div>
 <div class="metric"><div class="mv">{ds['test_size']:,}</div><div class="ml">Test Set</div></div>
 </div>"""
+
+    # ── Loss Forecast Build-Up (per deal, split Prime vs Non-Prime) ──
+    h += _loss_forecast_buildup_tables(results)
 
     # ── Model Comparison Table ──
     rows = []

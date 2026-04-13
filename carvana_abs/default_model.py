@@ -429,6 +429,32 @@ def train_models(df, feature_cols):
         "predicted_rate": [round(v, 4) for v in deal_seg["predicted_rate"]],
     }
 
+    # Dollar-weighted lifetime default forecast per deal — used by the loss
+    # build-up table on the Default Model tab. Weighting by original loan
+    # amount (rather than loan count) matters for loss projection since big
+    # loans default at different rates than small ones.
+    dollar_df = model_df.copy()
+    dollar_df["expected_default_$"] = dollar_df["pred_prob_lr"] * dollar_df["amount"].astype(float)
+    dollar_df["actual_default_$"] = dollar_df["defaulted"].astype(float) * dollar_df["amount"].astype(float)
+    deal_dollar = dollar_df.groupby("deal").agg(
+        loans=("defaulted", "count"),
+        total_orig_amount=("amount", "sum"),
+        predicted_default_amount=("expected_default_$", "sum"),
+        actual_default_amount=("actual_default_$", "sum"),
+    ).reset_index().sort_values("deal")
+    deal_dollar["predicted_default_rate_dollar"] = (
+        deal_dollar["predicted_default_amount"] / deal_dollar["total_orig_amount"])
+    segments["lifetime_forecast_by_deal"] = {
+        d: {
+            "loans": int(r["loans"]),
+            "total_orig_amount": round(float(r["total_orig_amount"]), 2),
+            "predicted_default_amount": round(float(r["predicted_default_amount"]), 2),
+            "actual_default_amount": round(float(r["actual_default_amount"]), 2),
+            "predicted_default_rate_dollar": round(float(r["predicted_default_rate_dollar"]), 6),
+        }
+        for d, r in zip(deal_dollar["deal"], deal_dollar.to_dict("records"))
+    }
+
     # Loss severity for defaulted loans
     defaults_only = model_df[model_df["defaulted"] == 1]
     if len(defaults_only) > 0:
