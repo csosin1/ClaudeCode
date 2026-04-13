@@ -1,10 +1,10 @@
 #!/bin/bash
 # Promote a project's preview to live.
-# Usage: promote.sh <landing|games|carvana|car-offers|gym-intelligence|all>
+# Usage: promote.sh <landing|games|carvana|car-offers|gym-intelligence|timeshare-surveillance|all>
 set -e
 
 usage() {
-    echo "Usage: $0 <landing|games|carvana|car-offers|gym-intelligence|all>" >&2
+    echo "Usage: $0 <landing|games|carvana|car-offers|gym-intelligence|timeshare-surveillance|all>" >&2
     exit 1
 }
 
@@ -43,18 +43,38 @@ promote_gym_intelligence() {
         venv .env '*.db' __pycache__
 }
 
+promote_timeshare_surveillance() {
+    # Two services per instance — restart both live units after rsync.
+    # Excludes preserve live's venv/.env/data (sqlite DB + state files).
+    local preview=/opt/timeshare-surveillance-preview
+    local live=/opt/timeshare-surveillance-live
+    if [ ! -d "$preview" ]; then
+        echo "[timeshare-surveillance] no preview dir at $preview — skipping" >&2
+        return 0
+    fi
+    rsync -a --delete \
+        --exclude=venv --exclude=.env --exclude=data --exclude=__pycache__ \
+        --exclude='*.pyc' --exclude='*.log' --exclude='.deps_installed' \
+        "$preview/" "$live/"
+    systemctl restart timeshare-surveillance-watcher.service
+    systemctl restart timeshare-surveillance-admin.service
+    echo "[timeshare-surveillance] promoted preview → live (watcher + admin restarted)"
+}
+
 case "${1:-}" in
-    landing)          promote_static landing /var/www/landing ;;
-    games)            promote_static games   /var/www/games ;;
-    carvana)          promote_static carvana /var/www/carvana ;;
-    car-offers)       promote_car_offers ;;
-    gym-intelligence) promote_gym_intelligence ;;
+    landing)                 promote_static landing /var/www/landing ;;
+    games)                   promote_static games   /var/www/games ;;
+    carvana)                 promote_static carvana /var/www/carvana ;;
+    car-offers)              promote_car_offers ;;
+    gym-intelligence)        promote_gym_intelligence ;;
+    timeshare-surveillance)  promote_timeshare_surveillance ;;
     all)
         promote_static landing /var/www/landing
         promote_static games   /var/www/games
         promote_static carvana /var/www/carvana
         promote_car_offers
         promote_gym_intelligence
+        promote_timeshare_surveillance
         ;;
     ""|-h|--help) usage ;;
     *)
