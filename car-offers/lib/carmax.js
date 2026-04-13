@@ -317,55 +317,93 @@ async function _getCarmaxOfferImpl({ vin, mileage, zip, condition, email, consum
       }
 
       // Accident / title / ownership questions + the multi-question
-      // condition page (rust, interior, tires, keys). CarMax stacks several
-      // radio groups on one page; click EVERY visible "No" / "None" /
-      // "1 owner" / "2" radio on the page in one pass to save round-trips.
-      if (!interacted) {
+      // condition page (rust, interior, tires, keys). CarMax stacks 10-15
+      // radio groups on one page using the kmx-radio-label pattern. Click
+      // EVERY un-checked radio whose visible text matches the safest answer
+      // for that question — "No" for damage/issue questions, "2" for keys.
+      // Use page.evaluate so we read all radios + their group state in one
+      // round-trip (much faster than per-radio iteration). Run on every
+      // iteration once mileage is filled — radio groups can appear after
+      // earlier groups are answered (CarMax progressively reveals them).
+      if (filledMileage) {
         try {
-          // Click all "No" radios for damage/issue questions. These are radios
-          // (one per question), not checkboxes. Use radio role for safety.
-          const safeRadios = await page.$$('label:has-text("No"):visible, [role="radio"]:has-text("No"):visible');
-          let radioClicks = 0;
-          for (const r of safeRadios) {
-            try {
-              const txt = (await r.textContent().catch(() => '') || '').trim();
-              // Only click radios whose visible text is exactly "No" (avoid
-              // "No accidents" / "Not sure" mismatches at this stage)
-              if (/^no$/i.test(txt)) {
-                await humanDelay(250, 550);
-                await r.click();
-                radioClicks++;
-                if (radioClicks >= 8) break;
-              }
-            } catch { /* next */ }
-          }
-          if (radioClicks > 0) {
-            log(`[carmax] clicked ${radioClicks} "No" radios for condition questions`);
-            interacted = true;
-            await humanDelay(600, 1200);
-          }
-        } catch { /* ok */ }
-      }
+          const result = await page.evaluate(() => {
+            // Find every radio input and its label text by walking the DOM
+            // (kmx-radio-label is associated via for=id; many sites also use
+            // <label><input>...text</label> wrapping pattern).
+            const radios = Array.from(document.querySelectorAll('input[type="radio"]'));
+            const groups = new Map();  // group name -> array of {label, input}
+            const out = { clicked: [], groupCount: 0 };
 
-      if (!interacted) {
-        // Number-of-keys radio: pick "2" as the standard "I have both keys"
-        // answer (also the most common factory-issue count).
-        try {
-          const keyRadios = await page.$$('label:visible, [role="radio"]:visible');
-          for (const r of keyRadios) {
-            try {
-              const txt = (await r.textContent().catch(() => '') || '').trim();
-              if (/^(2|two|2 keys|two keys)$/i.test(txt)) {
-                await humanDelay(250, 550);
-                await r.click();
-                log('[carmax] keys = 2');
-                interacted = true;
-                await humanDelay(500, 900);
-                break;
+            for (const inp of radios) {
+              if (!inp.name) continue;
+              if (!groups.has(inp.name)) groups.set(inp.name, []);
+              // Find associated label text
+              let labelText = '';
+              const id = inp.id;
+              if (id) {
+                const lab = document.querySelector(`label[for="${id}"]`);
+                if (lab) labelText = (lab.textContent || '').trim();
               }
-            } catch { /* next */ }
+              if (!labelText && inp.parentElement) {
+                labelText = (inp.parentElement.textContent || '').trim();
+              }
+              groups.get(inp.name).push({ input: inp, label: labelText });
+            }
+            out.groupCount = groups.size;
+
+            // For each group, pick the safest answer in priority order.
+            // Order matters: NO catches damage/issue questions; KEYS catches
+            // "How many keys"; OWNERSHIP / TITLE for the post-condition page.
+            const SAFE_NO = /^(no|none|no, never)$/i;
+            const SAFE_KEYS = /^(2|two|2 keys|two keys|both keys)$/i;
+            const SAFE_OWNERSHIP = /^(i own it|own outright|paid off|no loan|1 owner|original owner|i'm the original owner|i am the original owner)$/i;
+            const SAFE_TITLE = /^(clean|clean title|in my name)$/i;
+            const SAFE_USAGE = /^(personal|family|commute|none of these|none of the above)$/i;
+
+            for (const [name, opts] of groups) {
+              // Already answered? Skip.
+              if (opts.some(o => o.input.checked)) continue;
+              // Pick the "No" if present, else the "2" if it's a keys group, etc.
+              let pick = opts.find(o => SAFE_NO.test(o.label));
+              if (!pick) pick = opts.find(o => SAFE_KEYS.test(o.label));
+              if (!pick) pick = opts.find(o => SAFE_OWNERSHIP.test(o.label));
+              if (!pick) pick = opts.find(o => SAFE_TITLE.test(o.label));
+              if (!pick) pick = opts.find(o => SAFE_USAGE.test(o.label));
+              if (pick) {
+                // Click via the input element so the React handler fires.
+                // Some forms wrap the input in a span/label; clicking the
+                // input directly bypasses CSS pointer-events:none on the
+                // visible label. If click() doesn't dispatch a change event
+                // on the React component, manually fire one.
+                pick.input.click();
+                pick.input.dispatchEvent(new Event('change', { bubbles: true }));
+                out.clicked.push({ name, label: pick.label });
+              } else {
+                // Diagnostic: log what was unanswered
+                out.unanswered = out.unanswered || [];
+                out.unanswered.push({ name, options: opts.slice(0, 6).map(o => o.label) });
+              }
+            }
+            return out;
+          });
+          if (result.clicked.length > 0) {
+            log(`[carmax] auto-answered ${result.clicked.length}/${result.groupCount} radio groups: ${result.clicked.map(c => c.label).join(', ')}`);
+            interacted = true;
+            await humanDelay(800, 1400);
+          } else if (result.groupCount > 0) {
+            // No new groups answered. If unanswered remain, log them so we
+            // know what label vocab to add to the SAFE_ regexes.
+            const u = result.unanswered || [];
+            if (u.length > 0) {
+              log(`[carmax] ${u.length} unanswered groups (no safe answer): ${u.map(g => `${g.name}=[${g.options.join('|')}]`).slice(0, 6).join('; ')}`);
+            } else {
+              log(`[carmax] no unanswered radio groups (total=${result.groupCount})`);
+            }
           }
-        } catch { /* ok */ }
+        } catch (radioErr) {
+          log(`[carmax] radio auto-answer error: ${radioErr.message}`);
+        }
       }
 
       if (!interacted) {
