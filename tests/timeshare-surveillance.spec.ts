@@ -63,11 +63,11 @@ for (const vp of VIEWPORTS) {
 }
 
 test.describe('Admin setup page', () => {
-  test('loads with 401 without auth and WWW-Authenticate header', async ({ request }) => {
-    const resp = await request.get('/timeshare-surveillance/preview/admin/');
-    expect(resp.status()).toBe(401);
-    const auth = resp.headers()['www-authenticate'];
-    expect(auth || '').toMatch(/Basic/i);
+  test('loads publicly and shows the credentials form', async ({ page }) => {
+    const resp = await page.goto('/timeshare-surveillance/preview/admin/');
+    expect(resp?.status()).toBe(200);
+    await expect(page.getByTestId('admin-form')).toBeVisible();
+    await expect(page.getByTestId('admin-save')).toBeVisible();
   });
 });
 

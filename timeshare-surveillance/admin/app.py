@@ -8,20 +8,16 @@ sent to the app start with /admin/):
   POST /admin/save    — accept form, write .env atomically
   GET  /admin/status  — JSON status (basic-auth)
 
-Auth: HTTP Basic, username `admin`, password from ADMIN_TOKEN env. If
-ADMIN_TOKEN is not set in the env, every endpoint returns 503 with a clear
-message (avoids accidentally shipping an unauthenticated admin page).
+Auth: none — admin is public by explicit user request. Inputs are still
+validated (no newline/control-char injection into .env).
 """
 
 from __future__ import annotations
 
-import base64
-import hmac
 import logging
 import os
 import re
 import sys
-from functools import wraps
 from pathlib import Path
 
 _HERE = Path(__file__).resolve().parent
@@ -105,47 +101,9 @@ def create_app() -> Flask:
     def _configured() -> bool:
         return not _missing_keys()
 
-    def _valid_basic_auth(header: str | None) -> bool:
-        token = os.environ.get("ADMIN_TOKEN", "")
-        if not token:
-            return False
-        if not header or not header.startswith("Basic "):
-            return False
-        try:
-            decoded = base64.b64decode(header[6:]).decode("utf-8", errors="replace")
-        except Exception:
-            return False
-        if ":" not in decoded:
-            return False
-        user, pw = decoded.split(":", 1)
-        user_ok = hmac.compare_digest(user, "admin")
-        pw_ok = hmac.compare_digest(pw, token)
-        return user_ok and pw_ok
-
-    def require_admin(fn):
-        @wraps(fn)
-        def wrapper(*args, **kwargs):
-            if not os.environ.get("ADMIN_TOKEN"):
-                app.logger.error("ADMIN_TOKEN not configured; rejecting request")
-                return (
-                    jsonify({"error": "ADMIN_TOKEN not configured; rerun deploy"}),
-                    503,
-                )
-            if not _valid_basic_auth(request.headers.get("Authorization")):
-                app.logger.info("auth rejected for %s %s", request.method, request.path)
-                return (
-                    "Authentication required",
-                    401,
-                    {"WWW-Authenticate": 'Basic realm="timeshare-admin"'},
-                )
-            return fn(*args, **kwargs)
-
-        return wrapper
-
     # ---------------- routes ----------------
 
     @app.get("/admin/")
-    @require_admin
     def home():
         env = _parse_env()
         set_keys = [k for k in MANAGED_KEYS if env.get(k)]
@@ -165,7 +123,6 @@ def create_app() -> Flask:
         )
 
     @app.post("/admin/save")
-    @require_admin
     def save():
         env = _parse_env()
         # Reject newline injection; any other printable value is accepted.
@@ -189,7 +146,7 @@ def create_app() -> Flask:
             flash(f"Rejected invalid characters in: {', '.join(bad)}", "error")
             return redirect(url_for("home"))
 
-        # Preserve any keys already present (e.g. ADMIN_TOKEN) and update/append managed.
+        # Preserve any other keys already present and update/append managed.
         env.update(submitted)
         _write_env(env)
         app.logger.info(
@@ -205,17 +162,6 @@ def create_app() -> Flask:
 
     @app.get("/admin/status")
     def status():
-        if not os.environ.get("ADMIN_TOKEN"):
-            return (
-                jsonify({"error": "ADMIN_TOKEN not configured; rerun deploy"}),
-                503,
-            )
-        if not _valid_basic_auth(request.headers.get("Authorization")):
-            return (
-                jsonify({"error": "auth required"}),
-                401,
-                {"WWW-Authenticate": 'Basic realm="timeshare-admin"'},
-            )
         return jsonify({
             "configured": _configured(),
             "missing_keys": _missing_keys(),
