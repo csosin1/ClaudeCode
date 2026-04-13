@@ -11,6 +11,76 @@ Builder appends a per-task entry here after each build. Format:
 - **Things for the reviewer:**
 ```
 
+## 2026-04-13 — car-offers (add CarMax + Driveway + comparison)
+
+- **What was built:**
+  - `car-offers/lib/offer-input.js` — canonical `{vin, mileage, zip, condition}` shape + `normalizeOfferRequest()` validation (VIN regex rejects I/O/Q, zip is 5 digits, condition is Excellent|Good|Fair|Poor, default Good). `CONDITION_MAP[site][canonical]` translates the canonical condition to each site's vocabulary — Carvana maps Poor -> "Rough"; CarMax and Driveway use the canonical set 1:1. `EXTRA_ANSWERS` constants hold identical defaults for accident/title/loan/ownership/modifications/sellingReason across all three sites so the comparison is apples-to-apples.
+  - `car-offers/lib/offers-db.js` — SQLite wrapper (better-sqlite3) with the spec'd schema: `offers(id, run_id, vin, mileage, zip, condition, site, status, offer_usd, offer_expires, proxy_ip, ran_at, duration_ms, wizard_log)` plus 3 indexes (vin, run_id, site+vin+ran_at). Exports `openDb / insertOffer / getLatestByVin / getRuns / SITES`. Migration built in: if the pre-existing `offers` table has no `run_id` column (the droplet's dev DB did), it's renamed to `offers_legacy` on first open so the new schema can coexist without dropping the old rows.
+  - `car-offers/lib/offers-db.test.js` — in-memory SQLite unit test: 3-site insert for one run -> `getLatestByVin` returns all three rows, wizard_log round-trips JSON, 2nd run updates "latest" correctly, invalid site is rejected. Runs with `npm run test:unit` (or `node lib/offers-db.test.js`).
+  - `car-offers/lib/wizard-common.js` — shared wizard helpers: `screenshot`, generic `isBlocked` (Cloudflare + PerimeterX + generic CAPTCHAs + "we don't have an offer" soft-blocks), `waitForBlockResolve`, `humanInput` (drift + jittered per-char delay), `scanForOffer` (extract largest $ amount 500..250k from body text), `firstVisible`, `clickFirstByText`, `detectAccountWall` (SMS / phone / signin prompts). Carmax + Driveway both use these; carvana.js is untouched.
+  - `car-offers/lib/site-warmup.js` — short (60-120s) domain-agnostic warmup (`siteWarmup(page, {homepage, inventory}, log)`). Complements the existing carvana-flavored `miniBrowse` so each site sees cookies on its own domain before the sell flow.
+  - `car-offers/lib/carmax.js` — mirrors `lib/carvana.js` shape (launchBrowser + warmup + adaptive wizard loop + offer scan). Starting URL `https://www.carmax.com/sell-my-car`. Uses `siteConditionLabel('carmax', condition)` and `EXTRA_ANSWERS`. Stops with `status: 'account_required'` if an SMS / phone / sign-in wall is detected; never tries to bypass. Serialized per-instance (`activeRun` lock) like carvana.js — persistent Chrome profile is a Chromium singleton.
+  - `car-offers/lib/driveway.js` — same pattern. Starting URL `https://www.driveway.com/sell-your-car` (verified against the live site; the shorter `/sell` 404s as of 2026-04-13). Same account-wall rule; same serialization.
+  - `car-offers/server.js` — added 4 endpoints:
+    - `POST /api/carmax` — same envelope as /api/carvana: `{site, status, offer_usd, offer, offer_expires, error, details, wizardLog}`. Persists to offers.db.
+    - `POST /api/driveway` — same.
+    - `POST /api/quote-all` — takes `{vin, mileage, zip, condition}`, generates `run_id = run-<ts>-<hex>`, runs Carvana -> CarMax -> Driveway SEQUENTIALLY with a randomized 30-90s pause between sites. Each site's failure is caught so one site failing does not abort the others. Every row is written under the same run_id. Returns `{run_id, vin, mileage, zip, condition, comparedAt, carvana, carmax, driveway}`.
+    - `GET /api/compare/:vin` — latest row per site for that VIN. Always returns a well-formed object (never 500) — `{vin, carvana: null|row, carmax: null|row, driveway: null|row, run_id, ran_at}`.
+    - `GET /api/runs?limit=N` — recent comparison runs grouped by run_id.
+    - Shared helpers: `persistOffer()` catches DB errors (never throws), `extractUsdInt()` parses '$21,500' or raw numbers, `runSiteHandler()` is the common wrapper used by the three site endpoints so the envelope is uniform. Existing `POST /api/carvana` is now routed through the same wrapper — it still returns the same `{offer, details}` fields the existing UI expects because we preserve them on top of the new `{site, status, offer_usd, ...}` envelope keys.
+  - `car-offers/server.js` — `/dashboard` now has a "Compare all 3 buyers (same VIN)" card: VIN / mileage / zip / condition dropdown, orange "Run comparison" button that hits `/api/quote-all`, renders a 3-column flex result (ok = green, blocked = red, account_required = yellow, else grey), plus a "Check latest stored offers for this VIN" link that hits `/api/compare/:vin`. Mobile-first (wraps at small widths).
+  - `car-offers/package.json` — added `better-sqlite3 ^12.9.0` as an explicit dependency (was already present as a transitive on the droplet; now it's declared). Added `npm run test:unit` script that runs `offers-db.test.js` + `fingerprint.test.js`.
+
+- **Files modified:**
+  - new: `car-offers/lib/offer-input.js`
+  - new: `car-offers/lib/offers-db.js`
+  - new: `car-offers/lib/offers-db.test.js`
+  - new: `car-offers/lib/wizard-common.js`
+  - new: `car-offers/lib/site-warmup.js`
+  - new: `car-offers/lib/carmax.js`
+  - new: `car-offers/lib/driveway.js`
+  - changed: `car-offers/server.js` (4 new endpoints + Compare-all-3 dashboard card + persist helpers)
+  - changed: `car-offers/package.json` (better-sqlite3 declared, test:unit script)
+  - changed: `tests/car-offers.spec.ts` (6 new tests for compare / quote-all / carmax / driveway / dashboard card)
+  - untouched by design: `car-offers/lib/carvana.js`, `car-offers/lib/browser.js`, `car-offers/lib/stealth-init.js`, `car-offers/lib/fingerprint.js`, `car-offers/lib/shopper-warmup.js`, `car-offers/lib/config.js`, `deploy/car-offers.sh` (rsync excludes already keep `offers.db` safe via `--exclude='*.db'`; `.gitignore` already has `*.db` at repo root).
+
+- **Tests added:**
+  - Unit: `car-offers/lib/offers-db.test.js` — in-memory SQLite, 3-site insert for one run_id, getLatestByVin round-trip, wizard_log JSON round-trip, 2nd-run freshness override, invalid-site rejection. Passes: `node lib/offers-db.test.js`.
+  - Playwright: 6 new cases in `tests/car-offers.spec.ts`:
+    1. `GET /api/compare/:vin` with unknown VIN returns well-formed `{vin, carvana, carmax, driveway, run_id, ran_at}` (200, not 500).
+    2. `GET /api/runs` returns `{runs: [...]}` (skips on old builds).
+    3. `POST /api/quote-all` bad VIN -> 400 with error message (not 500 and not a hang).
+    4. `POST /api/carmax` bad input -> 400.
+    5. `POST /api/driveway` bad input -> 400.
+    6. Dashboard renders the "Compare all 3 buyers" card with VIN/condition/button locators.
+  - Smoke tested locally: `PORT=3198 node server.js` -> curl each endpoint returns the documented shape, migration log `[offers-db] Migrating legacy offers -> offers_legacy` fires once and is idempotent afterwards.
+
+- **Assumptions:**
+  - **CarMax and Driveway selectors are best-effort.** The live DOM couldn't be inspected headed from this sandbox. Every VIN/mileage/zip/email input uses a broad list of fallback selectors (name, placeholder, data-testid, aria-label, common classnames) that covers the historical variations; every button click falls back to text-based `clickFirstByText` so wording changes don't break the flow. Sections marked `// TODO(selector)` in each file are the spots most likely to need adjustment after the first real run.
+  - **Driveway's canonical URL is `/sell-your-car` not `/sell`.** `https://www.driveway.com/sell` returns 404; `/sell-your-car` is the entry linked from their homepage and FAQ. Recorded in-file.
+  - **Condition mapping:** Carvana's wizard uses "Rough" where we canonically say "Poor"; CarMax and Driveway both use the canonical 4-label set. Not verified against live Driveway wizard — if they use "Average" (older releases did) we'll see `status=error: no offer extracted` and can add the alias in one line.
+  - **EXTRA_ANSWERS held constant across all three sites:** accidents=None, title=Clean, loan=Own outright (paid off), ownership=I own it, modifications=None, sellingReason=Just selling. If a site's wizard adds a new required question not in that list, the adaptive loop will get stuck 3x and break — the row will be persisted with `status=error` and the wizardLog will surface the screen, which is the intended failure mode (transparent).
+  - **Serialized run order in /api/quote-all is Carvana -> CarMax -> Driveway** with 30-90s jittered pauses between sites. All three share the same sticky proxy session (via `lib/browser.js`'s `.proxy-session`) and the same per-session Chrome fingerprint (via `lib/fingerprint.js`), so the three buyers see the same "consumer machine" within a single 23h window — a feature, not a bug.
+  - **Account-wall detection is conservative.** `detectAccountWall()` in `lib/wizard-common.js` hits on SMS code prompts, phone verification, "sign in to CarMax", "create account", "we texted you", two-factor. If any fires, we stop with `status: 'account_required'` rather than try to bypass. If CarMax demands a phone number even to see an offer (we think yes — historically this has been their pattern), every CarMax row will be `account_required` and the user will need to surface an SMS-handling decision (2Captcha-style SMS receive vs real phone number).
+  - **Migration of legacy `offers` table:** The droplet's existing offers.db had an older-shape `offers(id, vin, source, offer_amount, ...)` table with zero meaningful rows. On first open the new code renames it to `offers_legacy` and creates the spec'd schema alongside. No data is dropped; the old rows are still queryable by hand if anyone wants them.
+
+- **Things for the reviewer:**
+  - **Scope:** stayed entirely inside `car-offers/` and `tests/car-offers.spec.ts`. Did NOT touch `deploy/car-offers.sh` (rsync excludes `*.db` and `.proxy-session` / `.chrome-profile` / `.profile-warmup` already — verified), did NOT touch shared files (CLAUDE.md, LESSONS.md, RUNBOOK.md, update_nginx.sh, .github/workflows, landing.html). One shared file WAS modified: `CHANGES.md` — that's expected; this is where builders log per-task summaries.
+  - **offers.db is NOT committed.** Repo root `.gitignore` has `*.db`. The file in `/opt/site-deploy/car-offers/offers.db` is the dev workspace; production data lives in `/opt/car-offers/offers.db` and `/opt/car-offers-preview/offers.db` which the deploy rsync explicitly preserves.
+  - **I did NOT merge to main and did NOT run finish-task.sh.** Branch `claude/car-offers-add-carmax-driveway` is pushed with 1 commit. Reviewer + orchestrator decide promotion.
+  - **Live-run verification is pending.** The sandbox can't run headed Chromium through the Decodo proxy, so neither the CarMax wizard nor the Driveway wizard has been end-to-end validated against a live offer. Orchestrator can smoke-test on preview with:
+      ```
+      curl -sS -X POST https://casinv.dev/car-offers/preview/api/carmax \
+        -H 'Content-Type: application/json' \
+        -d '{"vin":"1HGCV2F9XNA008352","mileage":"48000","zip":"06880","condition":"Good"}' | jq .
+      ```
+    and likewise `/api/driveway` and `/api/quote-all`. Expect 5-15 min per site (warmup + wizard). Each run writes a row to `/opt/car-offers-preview/offers.db` regardless of outcome — the wizard_log JSON tells you exactly which step the flow died at.
+  - **Things for the user to decide (surface when QA runs):**
+    1. **CarMax account wall.** If the first real run returns `status: account_required` from CarMax, the user needs to pick an SMS strategy: (a) buy an SMS-receive service ($1-3/mo) and wire it in, (b) use a real personal phone number for each CarMax run (expensive in user time), or (c) accept that CarMax stays "account_required" and compare only Carvana vs Driveway. This is a product call, not a code one.
+    2. **Condition-label drift.** If Driveway returns "No offer extracted" with a wizardLog showing their condition buttons are labeled something like "Average" instead of "Fair", we add the alias to `CONDITION_MAP.driveway` — 1 line.
+  - **Proxy burn rate:** `/api/quote-all` hits three different domains on ONE sticky proxy session with 30-90s inter-site pauses. That's deliberate — burning three sessions for one comparison is bot-like and wasteful. If the proxy session has already been flagged by any one of the three buyers, the other two will likely block too; that's fine and expected, all three rows get persisted with status=blocked and the user sees the pattern.
+  - **The existing `POST /api/carvana` contract is preserved.** Old body shape `{vin, mileage, zip}` still works (the validator defaults `condition=Good`). Old response fields `offer` and `details` are still present on the response; we just added `site`, `status`, `offer_usd`, `offer_expires` on top.
+
 ## 2026-04-13 — timeshare-surveillance (XBRL-first refactor)
 
 - **What was built:**

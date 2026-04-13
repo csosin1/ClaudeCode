@@ -5,9 +5,11 @@
   "main": "index.js",
   "scripts": {
     "start": "node server.js",
-    "carvana": "node index.js carvana"
+    "carvana": "node index.js carvana",
+    "test:unit": "node lib/offers-db.test.js && node lib/fingerprint.test.js"
   },
   "dependencies": {
+    "better-sqlite3": "^12.9.0",
     "dotenv": "^16.4.5",
     "express": "^4.21.0",
     "patchright": "^1.52.0",

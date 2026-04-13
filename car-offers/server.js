@@ -1,12 +1,72 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { execSync } = require('child_process');
 const config = require('./lib/config');
+const { normalizeOfferRequest } = require('./lib/offer-input');
 
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
+
+// --- SQLite offers DB (shared by /api/carvana, /api/carmax, /api/driveway, /api/quote-all) ---
+// Lazy-initialized so the server can boot even if better-sqlite3 is briefly
+// missing (deploy race); subsequent requests just try again.
+let _offersDb = null;
+function getOffersDb() {
+  if (_offersDb) return _offersDb;
+  try {
+    const { openDb } = require('./lib/offers-db');
+    _offersDb = openDb();
+    return _offersDb;
+  } catch (e) {
+    console.error('[offers-db] Failed to open:', e.message);
+    return null;
+  }
+}
+
+/**
+ * Persist one site's result to the offers DB. Never throws — logs on failure.
+ * Site handler result shape is normalized before insertion.
+ */
+function persistOffer({ site, runId, normalized, result, startedAt, durationMs, proxyIp }) {
+  const db = getOffersDb();
+  if (!db) return;
+  const { insertOffer } = require('./lib/offers-db');
+  try {
+    insertOffer(db, {
+      run_id: runId,
+      vin: normalized.vin,
+      mileage: Number(normalized.mileage),
+      zip: normalized.zip,
+      condition: normalized.condition,
+      site,
+      status: result.status || (result.offer_usd ? 'ok' : (result.error ? 'error' : 'ok')),
+      offer_usd: result.offer_usd == null ? null : Number(result.offer_usd),
+      offer_expires: result.offer_expires || null,
+      proxy_ip: proxyIp || null,
+      ran_at: new Date(startedAt || Date.now()).toISOString(),
+      duration_ms: durationMs || null,
+      wizard_log: result.wizardLog || null,
+    });
+  } catch (e) {
+    console.error(`[persist-offer] ${site} insert failed:`, e.message);
+  }
+}
+
+/**
+ * Extract a USD integer from a Carvana-style offer string ('$21,500') or a
+ * direct number. Returns null if no match.
+ */
+function extractUsdInt(raw) {
+  if (raw == null) return null;
+  if (typeof raw === 'number' && Number.isFinite(raw)) return Math.round(raw);
+  const m = String(raw).match(/\$?\s?([\d,]+)/);
+  if (!m) return null;
+  const n = parseInt(m[1].replace(/,/g, ''), 10);
+  return Number.isFinite(n) ? n : null;
+}
 
 // --- Startup self-test state ---
 const selfTest = {
@@ -653,6 +713,33 @@ app.get('/dashboard', (_req, res) => {
   </div>
 
   <div class="card">
+    <h2>Compare all 3 buyers (same VIN)</h2>
+    <div style="font-size:0.8rem;color:#94a3b8;margin-bottom:8px;">
+      Runs Carvana -> CarMax -> Driveway sequentially with the same inputs.
+      Takes 10-20 min. Results persist in offers.db.
+    </div>
+    <label style="display:block;font-size:0.8rem;color:#94a3b8;margin-top:10px;">VIN</label>
+    <input id="cmpVin" type="text" maxlength="17" autocapitalize="characters" placeholder="1HGCV2F9XNA008352" value="1HGCV2F9XNA008352" style="width:100%;padding:10px;border:1px solid #334155;border-radius:6px;background:#0f172a;color:#f1f5f9;font-size:0.9rem;outline:none;">
+    <label style="display:block;font-size:0.8rem;color:#94a3b8;margin-top:10px;">Mileage</label>
+    <input id="cmpMileage" type="number" inputmode="numeric" placeholder="48000" value="48000" style="width:100%;padding:10px;border:1px solid #334155;border-radius:6px;background:#0f172a;color:#f1f5f9;font-size:0.9rem;outline:none;">
+    <label style="display:block;font-size:0.8rem;color:#94a3b8;margin-top:10px;">Zip</label>
+    <input id="cmpZip" type="text" maxlength="5" inputmode="numeric" placeholder="06880" value="06880" style="width:100%;padding:10px;border:1px solid #334155;border-radius:6px;background:#0f172a;color:#f1f5f9;font-size:0.9rem;outline:none;">
+    <label style="display:block;font-size:0.8rem;color:#94a3b8;margin-top:10px;">Condition</label>
+    <select id="cmpCondition" style="width:100%;padding:10px;border:1px solid #334155;border-radius:6px;background:#0f172a;color:#f1f5f9;font-size:0.9rem;outline:none;">
+      <option value="Excellent">Excellent</option>
+      <option value="Good" selected>Good</option>
+      <option value="Fair">Fair</option>
+      <option value="Poor">Poor</option>
+    </select>
+    <button class="btn-orange" id="cmpBtn" onclick="runCompare()">Run comparison (10-20 min)</button>
+    <div id="cmpLog" style="margin-top:8px;font-size:0.8rem;color:#94a3b8;text-align:center;"></div>
+    <div id="cmpResults" style="margin-top:12px;"></div>
+    <div style="margin-top:10px;font-size:0.8rem;color:#94a3b8;text-align:center;">
+      <a href="#" id="cmpLatestLink" style="color:#38bdf8;text-decoration:none;">Check latest stored offers for this VIN</a>
+    </div>
+  </div>
+
+  <div class="card">
     <a href="/car-offers/setup" style="color:#38bdf8;text-decoration:none;font-size:0.9rem;">Setup Page &rarr;</a>
   </div>
 
@@ -794,6 +881,87 @@ app.get('/dashboard', (_req, res) => {
       }
       btn.disabled = false; btn.textContent = 'Get Carvana Offer';
     }
+
+    // --- Compare all 3 ---
+    async function runCompare() {
+      const btn = document.getElementById('cmpBtn');
+      const log = document.getElementById('cmpLog');
+      const out = document.getElementById('cmpResults');
+      const vin = document.getElementById('cmpVin').value.trim().toUpperCase();
+      const mileage = document.getElementById('cmpMileage').value.trim();
+      const zip = document.getElementById('cmpZip').value.trim();
+      const condition = document.getElementById('cmpCondition').value;
+      if (!vin || !mileage || !zip) {
+        log.innerHTML = '<span class="fail">Fill in VIN, mileage, zip</span>';
+        return;
+      }
+      btn.disabled = true; btn.textContent = 'Running (10-20 min)...';
+      log.innerHTML = '<span class="pending">Running Carvana -> CarMax -> Driveway sequentially...</span>';
+      out.innerHTML = '';
+      try {
+        const resp = await fetch('/car-offers/api/quote-all', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ vin, mileage, zip, condition }),
+        });
+        const data = await resp.json();
+        if (data.error && !data.run_id) {
+          log.innerHTML = '<span class="fail">' + esc(data.error) + '</span>';
+        } else {
+          log.innerHTML = '<span class="ok">Done — run ' + esc(data.run_id || '') + '</span>';
+          out.innerHTML = renderCompareCols(data);
+        }
+      } catch (e) {
+        log.innerHTML = '<span class="fail">' + esc(e.message) + '</span>';
+      } finally {
+        btn.disabled = false; btn.textContent = 'Run comparison (10-20 min)';
+      }
+    }
+
+    function renderCompareCols(data) {
+      var sites = ['carvana', 'carmax', 'driveway'];
+      var cols = sites.map(function(s) {
+        var r = data[s] || { status: 'missing' };
+        var color = r.status === 'ok' ? '#4ade80'
+                  : r.status === 'blocked' ? '#f87171'
+                  : r.status === 'account_required' ? '#fbbf24'
+                  : '#94a3b8';
+        var amt = r.offer_usd ? ('$' + Number(r.offer_usd).toLocaleString())
+                 : r.offer || '—';
+        return '<div style="flex:1;min-width:0;background:#0f172a;border-radius:8px;padding:10px;margin:4px;">'
+             + '<div style="color:#94a3b8;font-size:0.75rem;text-transform:uppercase;">' + esc(s) + '</div>'
+             + '<div style="font-size:1.4rem;font-weight:700;color:' + color + ';margin:4px 0;">' + esc(amt) + '</div>'
+             + '<div style="color:#94a3b8;font-size:0.7rem;">status: ' + esc(r.status || '?') + '</div>'
+             + (r.offer_expires ? '<div style="color:#94a3b8;font-size:0.7rem;">expires: ' + esc(r.offer_expires) + '</div>' : '')
+             + (r.error ? '<div style="color:#f87171;font-size:0.7rem;word-break:break-word;margin-top:4px;">' + esc(r.error.substring(0, 120)) + '</div>' : '')
+             + '</div>';
+      }).join('');
+      return '<div style="display:flex;flex-wrap:wrap;margin:-4px;">' + cols + '</div>'
+           + '<div style="margin-top:8px;font-size:0.75rem;color:#64748b;text-align:center;">VIN ' + esc(data.vin || '') + ' / ' + esc(String(data.mileage||'')) + ' mi / ' + esc(data.zip || '') + ' / ' + esc(data.condition || '') + '</div>';
+    }
+
+    // Wire up "check latest stored offers" link
+    document.getElementById('cmpLatestLink').addEventListener('click', async function(ev) {
+      ev.preventDefault();
+      var vin = document.getElementById('cmpVin').value.trim().toUpperCase();
+      if (!vin) return;
+      var out = document.getElementById('cmpResults');
+      out.innerHTML = '<span style="color:#94a3b8;font-size:0.8rem;">Loading stored offers...</span>';
+      try {
+        var r = await fetch('/car-offers/api/compare/' + encodeURIComponent(vin));
+        var data = await r.json();
+        out.innerHTML = renderCompareCols({
+          carvana: data.carvana ? { status: data.carvana.status, offer_usd: data.carvana.offer_usd, offer_expires: data.carvana.offer_expires, error: null } : { status: 'none' },
+          carmax:  data.carmax  ? { status: data.carmax.status,  offer_usd: data.carmax.offer_usd,  offer_expires: data.carmax.offer_expires,  error: null } : { status: 'none' },
+          driveway: data.driveway ? { status: data.driveway.status, offer_usd: data.driveway.offer_usd, offer_expires: data.driveway.offer_expires, error: null } : { status: 'none' },
+          vin: vin, mileage: (data.carvana||data.carmax||data.driveway||{}).mileage || '',
+          zip: (data.carvana||data.carmax||data.driveway||{}).zip || '',
+          condition: (data.carvana||data.carmax||data.driveway||{}).condition || '',
+        });
+      } catch (e) {
+        out.innerHTML = '<span style="color:#f87171;font-size:0.8rem;">' + esc(e.message) + '</span>';
+      }
+    });
 
     // Load on page open + refresh every 30s
     loadStatus();
@@ -959,34 +1127,616 @@ app.get('/api/diag-browser', async (_req, res) => {
   }
 });
 
-// --- API endpoint ---
-app.post('/api/carvana', async (req, res) => {
-  const { vin, mileage, zip } = req.body || {};
+// ============================================================================
+// Site-handler endpoints: /api/carvana, /api/carmax, /api/driveway
+// All take the same body shape: { vin, mileage, zip, condition? }
+// All persist to offers.db.
+// ============================================================================
 
-  if (!vin || !mileage || !zip) {
-    return res.status(400).json({ error: 'Missing required fields: vin, mileage, zip' });
-  }
-
-  let getCarvanaOffer;
+/**
+ * Normalize + persist a single-site handler result, returning the JSON body
+ * to send. `handler` is an async fn that takes {vin, mileage, zip, condition,
+ * email} and returns a result object. `site` is 'carvana'|'carmax'|'driveway'.
+ */
+async function runSiteHandler({ site, handler, req, res, runId }) {
+  let normalized;
   try {
-    ({ getCarvanaOffer } = require('./lib/carvana'));
-  } catch (loadErr) {
-    console.error('[server] Failed to load carvana module:', loadErr.message);
-    return res.status(503).json({ error: 'Carvana module not available yet — dependencies may still be installing. Try again in a minute.' });
+    normalized = normalizeOfferRequest(req.body || {});
+  } catch (e) {
+    return res.status(400).json({ error: e.message });
   }
-
+  const started = Date.now();
   try {
-    const result = await getCarvanaOffer({
-      vin: String(vin).toUpperCase(),
-      mileage: String(mileage),
-      zip: String(zip),
+    const result = await handler({
+      vin: normalized.vin,
+      mileage: normalized.mileage,
+      zip: normalized.zip,
+      condition: normalized.condition,
       email: config.PROJECT_EMAIL,
     });
-    res.json(result);
+    // Normalize: carvana.js returns { offer: '$...', details, wizardLog }.
+    // carmax/driveway return { status, offer_usd, offer_expires, ... }.
+    // Unify for persistence:
+    const offerUsd = result.offer_usd != null
+      ? Number(result.offer_usd)
+      : extractUsdInt(result.offer);
+    const status = result.status
+      || (offerUsd ? 'ok' : (result.error ? 'error' : 'ok'));
+    persistOffer({
+      site,
+      runId: runId || `${site}-${started}-${Math.random().toString(36).slice(2, 8)}`,
+      normalized,
+      result: { ...result, offer_usd: offerUsd, status },
+      startedAt: started,
+      durationMs: Date.now() - started,
+    });
+    return res.json({
+      site,
+      status,
+      offer_usd: offerUsd,
+      offer: result.offer || (offerUsd ? `$${offerUsd.toLocaleString()}` : null),
+      offer_expires: result.offer_expires || null,
+      error: result.error || null,
+      details: result.details || null,
+      wizardLog: result.wizardLog || [],
+    });
   } catch (err) {
-    console.error('[server] Carvana error:', err);
-    res.status(500).json({ error: err.message || 'Internal server error' });
+    console.error(`[server] ${site} error:`, err);
+    persistOffer({
+      site,
+      runId: runId || `${site}-${started}-${Math.random().toString(36).slice(2, 8)}`,
+      normalized,
+      result: { status: 'error', error: err.message },
+      startedAt: started,
+      durationMs: Date.now() - started,
+    });
+    return res.status(500).json({ site, status: 'error', error: err.message || 'Internal server error' });
   }
+}
+
+app.post('/api/carvana', async (req, res) => {
+  let getCarvanaOffer;
+  try { ({ getCarvanaOffer } = require('./lib/carvana')); }
+  catch (e) {
+    console.error('[server] Carvana module load failed:', e.message);
+    return res.status(503).json({ error: 'Carvana module not available — dependencies may still be installing.' });
+  }
+  return runSiteHandler({ site: 'carvana', handler: getCarvanaOffer, req, res });
+});
+
+app.post('/api/carmax', async (req, res) => {
+  let getCarmaxOffer;
+  try { ({ getCarmaxOffer } = require('./lib/carmax')); }
+  catch (e) {
+    console.error('[server] CarMax module load failed:', e.message);
+    return res.status(503).json({ error: 'CarMax module not available — dependencies may still be installing.' });
+  }
+  return runSiteHandler({ site: 'carmax', handler: getCarmaxOffer, req, res });
+});
+
+app.post('/api/driveway', async (req, res) => {
+  let getDrivewayOffer;
+  try { ({ getDrivewayOffer } = require('./lib/driveway')); }
+  catch (e) {
+    console.error('[server] Driveway module load failed:', e.message);
+    return res.status(503).json({ error: 'Driveway module not available — dependencies may still be installing.' });
+  }
+  return runSiteHandler({ site: 'driveway', handler: getDrivewayOffer, req, res });
+});
+
+// ============================================================================
+// Comparison: /api/quote-all runs the three buyers sequentially against the
+// SAME VIN/mileage/zip/condition, groups them under one run_id.
+// ============================================================================
+
+/** Random pause between site runs (30-90s) — avoids obvious bot-burst. */
+function interSitePause() {
+  const ms = 30000 + Math.floor(Math.random() * 60000);
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+app.post('/api/quote-all', async (req, res) => {
+  let normalized;
+  try {
+    normalized = normalizeOfferRequest(req.body || {});
+  } catch (e) {
+    return res.status(400).json({ error: e.message });
+  }
+
+  const runId = `run-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+  const comparedAt = new Date().toISOString();
+  const results = { carvana: null, carmax: null, driveway: null };
+
+  // Load handlers lazily so one missing module doesn't kill the others.
+  const siteHandlers = [
+    ['carvana', () => require('./lib/carvana').getCarvanaOffer],
+    ['carmax',  () => require('./lib/carmax').getCarmaxOffer],
+    ['driveway', () => require('./lib/driveway').getDrivewayOffer],
+  ];
+
+  for (let i = 0; i < siteHandlers.length; i++) {
+    const [site, loader] = siteHandlers[i];
+    const started = Date.now();
+    let siteResult;
+    try {
+      const handler = loader();
+      const raw = await handler({
+        vin: normalized.vin,
+        mileage: normalized.mileage,
+        zip: normalized.zip,
+        condition: normalized.condition,
+        email: config.PROJECT_EMAIL,
+      });
+      const offerUsd = raw.offer_usd != null ? Number(raw.offer_usd) : extractUsdInt(raw.offer);
+      const status = raw.status || (offerUsd ? 'ok' : (raw.error ? 'error' : 'ok'));
+      siteResult = {
+        site,
+        status,
+        offer_usd: offerUsd,
+        offer: raw.offer || (offerUsd ? `$${offerUsd.toLocaleString()}` : null),
+        offer_expires: raw.offer_expires || null,
+        error: raw.error || null,
+        duration_ms: Date.now() - started,
+      };
+      persistOffer({
+        site, runId, normalized,
+        result: { ...raw, status, offer_usd: offerUsd },
+        startedAt: started, durationMs: siteResult.duration_ms,
+      });
+    } catch (err) {
+      console.error(`[quote-all] ${site} failed:`, err.message);
+      siteResult = {
+        site, status: 'error', offer_usd: null, offer: null,
+        error: err.message, duration_ms: Date.now() - started,
+      };
+      persistOffer({
+        site, runId, normalized,
+        result: { status: 'error', error: err.message },
+        startedAt: started, durationMs: siteResult.duration_ms,
+      });
+    }
+    results[site] = siteResult;
+    // Gap between sites (skip after the last)
+    if (i < siteHandlers.length - 1) {
+      console.log(`[quote-all] ${site} done — pausing 30-90s before next site`);
+      await interSitePause();
+    }
+  }
+
+  return res.json({
+    run_id: runId,
+    vin: normalized.vin,
+    mileage: normalized.mileage,
+    zip: normalized.zip,
+    condition: normalized.condition,
+    comparedAt,
+    ...results,
+  });
+});
+
+/**
+ * GET /api/compare/:vin
+ * Returns the latest offer per site for the given VIN (across runs).
+ * Always returns a well-formed object, even if there are no rows.
+ */
+app.get('/api/compare/:vin', (req, res) => {
+  const db = getOffersDb();
+  if (!db) {
+    return res.json({
+      vin: (req.params.vin || '').toUpperCase(),
+      carvana: null, carmax: null, driveway: null,
+      run_id: null, ran_at: null,
+      error: 'offers DB not available',
+    });
+  }
+  try {
+    const { getLatestByVin } = require('./lib/offers-db');
+    const latest = getLatestByVin(db, req.params.vin || '');
+    return res.json(latest);
+  } catch (e) {
+    console.error('[compare] error:', e.message);
+    return res.status(500).json({
+      vin: (req.params.vin || '').toUpperCase(),
+      carvana: null, carmax: null, driveway: null,
+      run_id: null, ran_at: null,
+      error: e.message,
+    });
+  }
+});
+
+/**
+ * GET /api/runs?limit=N
+ * Recent comparison runs grouped by run_id.
+ */
+app.get('/api/runs', (req, res) => {
+  const db = getOffersDb();
+  if (!db) return res.json({ runs: [], error: 'offers DB not available' });
+  try {
+    const { getRuns } = require('./lib/offers-db');
+    const limit = parseInt(req.query.limit || '20', 10);
+    return res.json({ runs: getRuns(db, limit) });
+  } catch (e) {
+    console.error('[runs] error:', e.message);
+    return res.status(500).json({ runs: [], error: e.message });
+  }
+});
+
+/**
+ * GET /api/compare-all?limit=50
+ * Flat, view-friendly projection of recent runs for the /compare page.
+ * Shape:
+ *   {
+ *     total_runs: <number — distinct run_ids in DB>,
+ *     runs: [
+ *       {
+ *         run_id, ran_at, vin, mileage, zip, condition,
+ *         carvana: { status, offer_usd, offer_expires } | null,
+ *         carmax:  { status, offer_usd, offer_expires } | null,
+ *         driveway:{ status, offer_usd, offer_expires } | null
+ *       }, ...
+ *     ]
+ *   }
+ */
+app.get('/api/compare-all', (req, res) => {
+  const db = getOffersDb();
+  if (!db) return res.json({ runs: [], total_runs: 0, error: 'offers DB not available' });
+  try {
+    const { getRuns } = require('./lib/offers-db');
+    const limit = Math.max(1, Math.min(200, parseInt(req.query.limit || '50', 10) || 50));
+    const grouped = getRuns(db, limit);
+
+    // Count distinct runs overall (cheap)
+    let totalRuns = 0;
+    try {
+      const row = db.prepare(`SELECT COUNT(DISTINCT run_id) AS c FROM offers`).get();
+      totalRuns = (row && row.c) || 0;
+    } catch (_) { /* table may not exist yet */ }
+
+    const siteProjection = (r) => {
+      if (!r) return null;
+      return {
+        status: r.status || null,
+        offer_usd: r.offer_usd == null ? null : Number(r.offer_usd),
+        offer_expires: r.offer_expires || null,
+      };
+    };
+
+    const runs = grouped.map((g) => {
+      // Pull meta from any available row (they all share vin/mileage/zip/condition within a run)
+      const any = g.carvana || g.carmax || g.driveway || (g.rows && g.rows[0]) || {};
+      return {
+        run_id: g.run_id,
+        ran_at: g.latest_at || any.ran_at || null,
+        vin: g.vin || any.vin || null,
+        mileage: any.mileage == null ? null : Number(any.mileage),
+        zip: any.zip || null,
+        condition: any.condition || null,
+        carvana: siteProjection(g.carvana),
+        carmax: siteProjection(g.carmax),
+        driveway: siteProjection(g.driveway),
+      };
+    });
+
+    return res.json({ total_runs: totalRuns, runs });
+  } catch (e) {
+    console.error('[compare-all] error:', e.message);
+    return res.status(500).json({ runs: [], total_runs: 0, error: e.message });
+  }
+});
+
+/**
+ * GET /compare
+ * Read-only, mobile-first side-by-side view of recent comparison runs.
+ * Single HTML page, no external JS deps. Polls /api/compare-all every 30s.
+ */
+app.get('/compare', (_req, res) => {
+  res.set('Content-Type', 'text/html; charset=utf-8');
+  res.send(`<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Car Offers &mdash; Compare</title>
+<style>
+  :root {
+    --bg: #0e1116;
+    --panel: #161b22;
+    --panel-2: #1c232c;
+    --border: #2a313a;
+    --text: #e6edf3;
+    --muted: #9aa5b1;
+    --accent: #3fb950;
+    --warn: #d29922;
+    --err: #f85149;
+    --info: #58a6ff;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    font-size: 15px; line-height: 1.4; -webkit-text-size-adjust: 100%;
+  }
+  header { display: flex; justify-content: space-between; align-items: center;
+    padding: 12px 14px; border-bottom: 1px solid var(--border); gap: 10px; flex-wrap: wrap; }
+  header h1 { margin: 0; font-size: 17px; font-weight: 600; }
+  .badges { display: flex; gap: 6px; flex-wrap: wrap; }
+  .badge { display: inline-block; padding: 3px 8px; border-radius: 999px;
+    font-size: 12px; background: var(--panel-2); border: 1px solid var(--border); color: var(--muted); }
+  .badge.live { color: var(--info); }
+  .badge.inflight { color: var(--warn); }
+  main { padding: 14px; max-width: 1200px; margin: 0 auto; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px; margin-bottom: 14px; }
+  form.card { display: grid; grid-template-columns: 1fr; gap: 10px; }
+  label { display: flex; flex-direction: column; font-size: 13px; color: var(--muted); gap: 4px; }
+  input, select, button {
+    font: inherit; color: var(--text); background: var(--panel-2);
+    border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;
+    -webkit-appearance: none; appearance: none;
+  }
+  input:focus, select:focus { outline: 2px solid var(--info); outline-offset: 0; }
+  button {
+    background: var(--info); color: #0b1220; border-color: var(--info);
+    font-weight: 600; cursor: pointer; padding: 12px 14px;
+  }
+  button[disabled] { opacity: 0.5; cursor: not-allowed; }
+  .row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  h2 { font-size: 15px; margin: 18px 0 8px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+  .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch;
+    border: 1px solid var(--border); border-radius: 10px; background: var(--panel); }
+  table { width: 100%; border-collapse: collapse; min-width: 820px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; white-space: nowrap; font-size: 14px; }
+  th { position: sticky; top: 0; background: var(--panel-2); color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+  tr:last-child td { border-bottom: none; }
+  .mono { font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace; }
+  .offer { font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px;
+    font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }
+  .pill.blocked       { background: rgba(248,81,73,.12); color: var(--err); border: 1px solid rgba(248,81,73,.3); }
+  .pill.account_required { background: rgba(210,153,34,.15); color: var(--warn); border: 1px solid rgba(210,153,34,.3); }
+  .pill.error         { background: rgba(248,81,73,.10); color: var(--err); border: 1px solid rgba(248,81,73,.25); }
+  .pill.pending       { background: rgba(88,166,255,.10); color: var(--info); border: 1px solid rgba(88,166,255,.25); }
+  .pill.ok            { background: rgba(63,185,80,.10); color: var(--accent); border: 1px solid rgba(63,185,80,.25); }
+  .pill.none          { background: var(--panel-2); color: var(--muted); border: 1px solid var(--border); }
+  .empty { padding: 24px; text-align: center; color: var(--muted); }
+  .notes { font-size: 12px; color: var(--muted); white-space: normal; max-width: 280px; }
+  footer { padding: 18px 14px 30px; color: var(--muted); font-size: 13px; line-height: 1.7; border-top: 1px solid var(--border); margin-top: 14px; }
+  footer div { word-break: break-all; }
+  @media (max-width: 520px) {
+    .row-2 { grid-template-columns: 1fr; }
+    header h1 { font-size: 15px; }
+    main { padding: 10px; }
+    th, td { padding: 8px 10px; font-size: 13px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Car Offers &mdash; Compare</h1>
+  <div class="badges">
+    <span class="badge inflight" id="inflight-badge" title="Requests in flight">0 in flight</span>
+    <span class="badge" id="total-badge" title="Total runs in DB">0 runs</span>
+    <span class="badge live" id="updated-badge">never updated</span>
+  </div>
+</header>
+
+<main>
+  <form class="card" id="run-form" autocomplete="off">
+    <label>VIN
+      <input type="text" id="vin" name="vin" maxlength="17" required placeholder="17-char VIN" style="text-transform:uppercase">
+    </label>
+    <div class="row-2">
+      <label>Mileage
+        <input type="number" id="mileage" name="mileage" min="0" max="400000" required placeholder="48000">
+      </label>
+      <label>Zip
+        <input type="text" id="zip" name="zip" maxlength="5" pattern="[0-9]{5}" required placeholder="06880">
+      </label>
+    </div>
+    <label>Condition
+      <select id="condition" name="condition">
+        <option value="excellent">Excellent</option>
+        <option value="good" selected>Good</option>
+        <option value="fair">Fair</option>
+        <option value="poor">Poor</option>
+      </select>
+    </label>
+    <button type="submit" id="submit-btn">Run on all 3</button>
+    <div id="form-note" class="notes" style="min-height:18px"></div>
+  </form>
+
+  <h2>Recent Runs</h2>
+  <div class="table-wrap" id="table-wrap">
+    <table id="runs-table">
+      <thead>
+        <tr>
+          <th>Ran At</th>
+          <th>VIN</th>
+          <th>Mileage</th>
+          <th>Zip</th>
+          <th>Condition</th>
+          <th>Carvana</th>
+          <th>CarMax</th>
+          <th>Driveway</th>
+          <th>Notes</th>
+        </tr>
+      </thead>
+      <tbody id="runs-body">
+        <tr><td colspan="9" class="empty">Loading&hellip;</td></tr>
+      </tbody>
+    </table>
+  </div>
+</main>
+
+<footer>
+  <div>Live:  http://159.223.127.125/car-offers/ </div>
+  <div>Preview:  http://159.223.127.125/car-offers/preview/compare </div>
+</footer>
+
+<script>
+(function () {
+  var API_COMPARE_ALL = '/car-offers/api/compare-all?limit=50';
+  var API_COMPARE_ALL_PREVIEW = '/car-offers/preview/api/compare-all?limit=50';
+  var API_QUOTE_ALL = '/car-offers/api/quote-all';
+  var API_QUOTE_ALL_PREVIEW = '/car-offers/preview/api/quote-all';
+
+  // Detect whether we're being served from /preview/ so relative API calls
+  // stay on the same deployment slot.
+  var isPreview = window.location.pathname.indexOf('/preview/') !== -1;
+  var apiCompareAll = isPreview ? API_COMPARE_ALL_PREVIEW : API_COMPARE_ALL;
+  var apiQuoteAll = isPreview ? API_QUOTE_ALL_PREVIEW : API_QUOTE_ALL;
+
+  var inflight = 0;
+  var inflightBadge = document.getElementById('inflight-badge');
+  var totalBadge = document.getElementById('total-badge');
+  var updatedBadge = document.getElementById('updated-badge');
+  var tbody = document.getElementById('runs-body');
+  var form = document.getElementById('run-form');
+  var btn = document.getElementById('submit-btn');
+  var note = document.getElementById('form-note');
+
+  function fmtInflight() {
+    inflightBadge.textContent = inflight + ' in flight';
+    inflightBadge.style.display = inflight > 0 ? '' : 'inline-block';
+  }
+  function fmtUsd(n) {
+    if (n == null || isNaN(n)) return null;
+    try { return '$' + Number(n).toLocaleString('en-US'); } catch (_) { return '$' + n; }
+  }
+  function fmtAt(iso) {
+    if (!iso) return '';
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    // Mobile-friendly: MM/DD HH:MM
+    var pad = function (n) { return n < 10 ? '0' + n : '' + n; };
+    return pad(d.getMonth() + 1) + '/' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+  }
+  function escapeHtml(s) {
+    if (s == null) return '';
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
+    });
+  }
+  function siteCell(site) {
+    if (!site) return '<span class="pill none">&mdash;</span>';
+    var status = (site.status || '').toLowerCase();
+    if (status === 'ok' && site.offer_usd != null) {
+      var usd = fmtUsd(site.offer_usd);
+      return '<span class="offer">' + escapeHtml(usd) + '</span>';
+    }
+    var cls = 'pill';
+    if (status === 'blocked') cls += ' blocked';
+    else if (status === 'account_required') cls += ' account_required';
+    else if (status === 'error') cls += ' error';
+    else if (status === 'pending' || status === 'running') cls += ' pending';
+    else if (status === 'ok') cls += ' ok';
+    else cls += ' none';
+    var label = status ? status.replace(/_/g, ' ') : 'unknown';
+    return '<span class="' + cls + '">' + escapeHtml(label) + '</span>';
+  }
+  function notesCell(run) {
+    // Collect any non-ok status labels as a short rollup, or show offer_expires if any.
+    var bits = [];
+    ['carvana', 'carmax', 'driveway'].forEach(function (s) {
+      var r = run[s];
+      if (!r) return;
+      if (r.status && r.status !== 'ok') {
+        bits.push(s + ': ' + r.status);
+      } else if (r.offer_expires) {
+        bits.push(s + ' exp ' + r.offer_expires);
+      }
+    });
+    return escapeHtml(bits.join(' &middot; ')).replace(/&amp;middot;/g, '&middot;');
+  }
+
+  function renderRuns(data) {
+    var runs = (data && data.runs) || [];
+    if (typeof data.total_runs === 'number') {
+      totalBadge.textContent = data.total_runs + ' runs';
+    }
+    if (!runs.length) {
+      tbody.innerHTML = '<tr><td colspan="9" class="empty">No runs yet &mdash; submit a VIN above to start.</td></tr>';
+      return;
+    }
+    var html = runs.map(function (r) {
+      return '<tr>' +
+        '<td class="mono">' + escapeHtml(fmtAt(r.ran_at)) + '</td>' +
+        '<td class="mono">' + escapeHtml(r.vin || '') + '</td>' +
+        '<td>' + (r.mileage == null ? '' : Number(r.mileage).toLocaleString('en-US')) + '</td>' +
+        '<td>' + escapeHtml(r.zip || '') + '</td>' +
+        '<td>' + escapeHtml(r.condition || '') + '</td>' +
+        '<td>' + siteCell(r.carvana) + '</td>' +
+        '<td>' + siteCell(r.carmax) + '</td>' +
+        '<td>' + siteCell(r.driveway) + '</td>' +
+        '<td class="notes">' + notesCell(r) + '</td>' +
+      '</tr>';
+    }).join('');
+    tbody.innerHTML = html;
+  }
+
+  function refresh() {
+    fetch(apiCompareAll, { headers: { 'Accept': 'application/json' }, credentials: 'same-origin' })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        renderRuns(data || {});
+        var now = new Date();
+        updatedBadge.textContent = 'updated ' + now.toLocaleTimeString();
+      })
+      .catch(function (err) {
+        tbody.innerHTML = '<tr><td colspan="9" class="empty">Could not load runs: ' + escapeHtml(err && err.message || 'error') + '</td></tr>';
+      });
+  }
+
+  form.addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    var body = {
+      vin: (document.getElementById('vin').value || '').trim().toUpperCase(),
+      mileage: document.getElementById('mileage').value,
+      zip: (document.getElementById('zip').value || '').trim(),
+      condition: document.getElementById('condition').value,
+    };
+    if (!body.vin || body.vin.length !== 17) {
+      note.textContent = 'VIN must be 17 characters.';
+      return;
+    }
+    if (!body.mileage) {
+      note.textContent = 'Mileage required.';
+      return;
+    }
+    if (!/^[0-9]{5}$/.test(body.zip)) {
+      note.textContent = 'Zip must be 5 digits.';
+      return;
+    }
+    note.textContent = 'Submitted; Carvana/CarMax/Driveway run sequentially (2-5 min total). Table auto-refreshes.';
+    btn.disabled = true;
+    inflight++; fmtInflight();
+    fetch(apiQuoteAll, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify(body),
+      credentials: 'same-origin',
+    }).then(function (r) { return r.json().catch(function () { return {}; }); })
+      .then(function (data) {
+        note.textContent = 'Run complete' + (data && data.run_id ? ' (' + data.run_id + ')' : '') + '. See table below.';
+      })
+      .catch(function (err) {
+        note.textContent = 'Run failed: ' + (err && err.message || 'error');
+      })
+      .then(function () {
+        inflight = Math.max(0, inflight - 1); fmtInflight();
+        btn.disabled = false;
+        refresh();
+      });
+    // Also refresh now so the user sees previous runs update as this runs.
+    refresh();
+  });
+
+  fmtInflight();
+  refresh();
+  setInterval(refresh, 30000);
+})();
+</script>
+</body>
+</html>`);
 });
 
 // --- Start server ---
