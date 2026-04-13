@@ -9,3 +9,6 @@ offers.db
 offers.db-wal
 offers.db-shm
 offers.db-journal
+# Wizard debug captures — large PNG/HTML dumps written per wizard run.
+# Lives only on the preview instance; never commit or propagate to live.
+public-debug/

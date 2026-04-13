@@ -32,27 +32,55 @@ async function screenshot(page, prefix, label) {
 }
 
 /**
- * Debug-mode dump: take a screenshot AND save the HTML to /tmp/wizard-debug/<site>/.
- * Only called when the wizard is run with { debug: true } so production runs
- * don't fill /tmp with HTML dumps. Returns { png, html } paths or null on error.
+ * Debug-mode dump: take a screenshot AND save the HTML into
+ * <car-offers>/public-debug/<site>/step-<NN>-<slug>.{png,html}.
+ *
+ * The files are served (by server.js) at /debug/<site>/... so the user can
+ * actually see what the wizard sees in real time. Filenames are naturally
+ * sorted by a per-site, per-process step counter so the most recent run
+ * is easy to follow in the gallery.
+ *
+ * Only called when the wizard is run with { debug: true }. Returns
+ * { png, html } paths or null on error.
  */
+const DEBUG_DUMP_ROOT = path.join(__dirname, '..', 'public-debug');
+const _debugStepCounters = Object.create(null);
+
+function _slugifyLabel(label) {
+  return String(label || 'step')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60) || 'step';
+}
+
 async function debugDump(page, site, label) {
   try {
-    const dir = path.join('/tmp', 'wizard-debug', site);
+    const dir = path.join(DEBUG_DUMP_ROOT, site);
     fs.mkdirSync(dir, { recursive: true });
-    const stamp = `${label}-${Date.now()}`;
-    const png = path.join(dir, `${stamp}.png`);
-    const html = path.join(dir, `${stamp}.html`);
+    const n = (_debugStepCounters[site] = (_debugStepCounters[site] || 0) + 1);
+    const nn = String(n).padStart(2, '0');
+    const slug = _slugifyLabel(label);
+    const base = `step-${nn}-${slug}`;
+    const png = path.join(dir, `${base}.png`);
+    const html = path.join(dir, `${base}.html`);
     try { await page.screenshot({ path: png, fullPage: true }); } catch { /* ok */ }
     try {
       const content = await page.content();
       const url = page.url();
-      fs.writeFileSync(html, `<!-- url: ${url} -->\n${content}`);
+      fs.writeFileSync(html, `<!-- url: ${url} -->\n<!-- captured: ${new Date().toISOString()} -->\n${content}`);
     } catch { /* ok */ }
     return { png, html };
   } catch {
     return null;
   }
+}
+
+/** Reset the per-site debug step counter. Call at the start of a wizard run
+ *  so the first capture is always step-01. */
+function resetDebugCounter(site) {
+  if (site) _debugStepCounters[site] = 0;
+  else for (const k of Object.keys(_debugStepCounters)) _debugStepCounters[k] = 0;
 }
 
 /**
@@ -343,6 +371,7 @@ async function pickDropdownOption(page, triggerSelectors, optionLabels, timeoutM
 module.exports = {
   screenshot,
   debugDump,
+  resetDebugCounter,
   isBlocked,
   waitForBlockResolve,
   humanInput,

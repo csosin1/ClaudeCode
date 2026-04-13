@@ -52,6 +52,7 @@ rsync -a --delete \
     --exclude='.proxy-session' \
     --exclude='.proxy-sessions' \
     --exclude='.profile-warmup' \
+    --exclude='public-debug' \
     "$REPO_DIR/$PROJECT/" "$PREVIEW_DIR/"
 
 # --- npm install in preview (if package.json changed or deps missing) ---
@@ -116,7 +117,7 @@ command -v Xvfb >/dev/null 2>&1 && DISPLAY_LINE="Environment=DISPLAY=:99"
 # --- Bootstrap LIVE_DIR from preview if empty (first install only) ---
 if [ ! -d "$LIVE_DIR/node_modules" ]; then
     echo "$(date): Bootstrapping live from preview (first install)..." >> "$LOG"
-    rsync -a --exclude='.env' "$PREVIEW_DIR/" "$LIVE_DIR/"
+    rsync -a --exclude='.env' --exclude='public-debug' "$PREVIEW_DIR/" "$LIVE_DIR/"
 fi
 
 # --- systemd units (always rewrite to pick up changes) ---
