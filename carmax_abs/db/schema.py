@@ -45,6 +45,7 @@ def init_db(db_path: str = DB_PATH) -> None:
             -- Pool balance rollforward
             beginning_pool_balance REAL,
             ending_pool_balance REAL,
+            initial_pool_balance REAL,           -- cutoff (Ln 7) - CARMX only
             beginning_pool_count INTEGER,
             ending_pool_count INTEGER,
             -- Collections
