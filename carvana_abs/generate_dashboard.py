@@ -1383,6 +1383,18 @@ def _loss_forecast_buildup_tables(model_results):
     by_deal = cm_data.get("by_deal", {})
     p_def_ref = cm_data.get("p_default_reference", {})
 
+    # KBRA at-closing base-case loss projections from KBRA's CRVNA
+    # surveillance dashboard (Nov 2025 snapshot). Frozen here as a
+    # static benchmark — refresh when KBRA publishes an updated dashboard.
+    KBRA_INITIAL = {
+        "2020-P1": 0.0210, "2021-P1": 0.0215, "2021-P2": 0.0205,
+        "2022-P1": 0.0210, "2022-P2": 0.0220, "2022-P3": 0.0225,
+        "2024-P2": 0.0283,
+        # 2024-P3, 2024-P4, 2025-P2/P3/P4 not in the KBRA dashboard yet.
+        # 2021-P3, 2021-P4, 2023-P1..P5, 2024-P1 are private 144A — never
+        # on our public-SEC pipeline.
+    }
+
     def build_for(deals, title):
         rows = []
         for deal in deals:
@@ -1394,6 +1406,8 @@ def _loss_forecast_buildup_tables(model_results):
             mid = d["total_expected"]
             lo = d["total_minus_1sd"]; hi = d["total_plus_1sd"]
             def pct(x): return f"{x/orig:.2%}" if orig else "-"
+            kbra = KBRA_INITIAL.get(deal)
+            kbra_disp = f"{kbra:.2%}" if kbra is not None else "—"
             rows.append({
                 "Deal": deal,
                 "Active Loans": f"{d['active_loans']:,}",
@@ -1405,6 +1419,7 @@ def _loss_forecast_buildup_tables(model_results):
                 "Total $ midpoint": fm(mid),
                 "Total $ +1σ": fm(hi),
                 "Total %": pct(mid),
+                "KBRA Initial %": kbra_disp,
             })
         if not rows:
             return ""
