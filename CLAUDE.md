@@ -37,6 +37,7 @@ Multiple projects share this droplet. Each project touches only its own files.
 - `/opt/<project>/` on the server (or `games/<name>/` for static)
 - `deploy/<project>.sh` — install + systemd unit, sourced by the main deploy script
 - `tests/<project>.spec.ts` — its Playwright tests
+- `PROJECT_STATE.md` — per-project "where we left off" log (see Session Continuity below)
 - Its nginx location block, systemd unit, `/var/log/<project>/`, logrotate config, uptime cron
 
 **Shared — never modified from a project chat; propose via `CHANGES.md`:**
@@ -56,6 +57,7 @@ Every new project ships with **both** a live URL and a preview URL. Claude's wor
 4. Create `deploy/<name>.sh` that (a) builds/installs to `preview/`, (b) exposes a promote step that rsyncs `preview/` → `live/` (or swaps active port for services) only when a promote marker is set
 5. Set up `/var/log/<name>/` with logrotate and a 5-minute uptime cron (against the live URL)
 6. Add a `RUNBOOK.md` entry including both URLs
+7. Create `PROJECT_STATE.md` from `deploy/templates/PROJECT_STATE.md.template`
 
 If it's not linked from http://159.223.127.125/, it's not done.
 
@@ -86,6 +88,15 @@ Reusable patterns live in `SKILLS/*.md`. Check there before implementing anythin
 - `LESSONS.md` — append when something breaks. Builders and Reviewers read it first.
 - `CHANGES.md` — Builder's per-task log for the Reviewer.
 - `RUNBOOK.md` — per-project facts: URL, path, deps, env var names, health check.
+- `PROJECT_STATE.md` — per-project "where we left off" log (see Session Continuity).
+
+## Session Continuity
+Every project has a `PROJECT_STATE.md` at its root with four fixed sections: **Current focus**, **Last decisions**, **Open questions**, **Next step**.
+
+- **On entry to a project window:** read `PROJECT_STATE.md` first, before any other work. It is the bridge between sessions. `claude-project.sh` prompts the AI to read it automatically on spawn.
+- **Before ending a turn:** update it if anything about focus, decisions, open questions, or next step has changed. `end-project.sh` refuses to close a window whose `PROJECT_STATE.md` wasn't touched during the session (override with `--force`).
+- **Keep it short.** Four sections, no history. Git covers history; this file is the present.
+- **Missing file?** Create from `deploy/templates/PROJECT_STATE.md.template`.
 
 ## Multi-Project Windows
 Each active project gets its own Claude conversation in a separate tmux window. Avoids context bloat and keeps projects isolated.
