@@ -1393,6 +1393,7 @@ def _loss_forecast_buildup_tables(model_results):
             realized = d["realized"]; dq = d["dq_pending"]; perf = d["performing_future"]
             mid = d["total_expected"]
             lo = d["total_minus_1sd"]; hi = d["total_plus_1sd"]
+            cal_factor = d.get("calibration_factor", 1.0)
             def pct(x): return f"{x/orig:.2%}" if orig else "-"
             rows.append({
                 "Deal": deal,
@@ -1401,6 +1402,7 @@ def _loss_forecast_buildup_tables(model_results):
                 "Realized %": pct(realized),
                 "DQ Pipeline $": fm(dq),
                 "Performing Future $": fm(perf),
+                "Cohort Cal": f"{cal_factor:.2f}×",
                 "Total $ −1σ": fm(lo),
                 "Total $ midpoint": fm(mid),
                 "Total $ +1σ": fm(hi),

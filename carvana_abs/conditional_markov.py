@@ -110,6 +110,18 @@ def _parse_date_mdy(s):
     return None
 
 
+def _orig_quarter(orig_dt):
+    """Bucket origination date to YYYYQX (e.g. '2021Q3'). Pre-2018
+    collapsed into a single 'pre2018' bucket (very few of those)."""
+    if orig_dt is None:
+        return "unknown"
+    y = orig_dt.year
+    if y < 2018:
+        return "pre2018"
+    q = (orig_dt.month - 1) // 3 + 1
+    return f"{y}Q{q}"
+
+
 # ── Loan covariates loader ────────────────────────────────────────────
 
 def load_loan_covariates(conn, deals):
@@ -126,6 +138,7 @@ def load_loan_covariates(conn, deals):
         tier = TIER_OF_DEAL.get(deal)
         if tier is None:
             continue
+        orig_dt = _parse_date_mdy(orig_date)
         out[(deal, asset)] = {
             "tier": tier,
             "fico": float(fico) if fico is not None else None,
@@ -133,7 +146,8 @@ def load_loan_covariates(conn, deals):
             "term": int(term) if term is not None else None,
             "term_bucket": _term_bucket(int(term)) if term is not None else 60,
             "orig_amount": float(amount) if amount is not None else None,
-            "orig_dt": _parse_date_mdy(orig_date),
+            "orig_dt": orig_dt,
+            "orig_q": _orig_quarter(orig_dt),
         }
     return out
 
@@ -162,7 +176,10 @@ def build_aggregates(conn, deals, covariates):
     logger.info(f"  defaulted: {len(defaulted):,}  paid-off: {len(paidoff):,}")
 
     # Aggregates
-    # Transitions: trans[(tier, state, age_b, fico_b, ltv_b, mod)][to_state] = count
+    # Transitions: trans[(tier, state, age_b, fico_b, ltv_b, mod, orig_q)][to_state] = count
+    # Vintage (orig_q) added so the macro environment at origination is a
+    # first-class covariate. Sparse-cell fallback drops FICO/LTV before
+    # vintage — see cell_transition_matrix() ladder.
     trans = defaultdict(lambda: defaultdict(int))
     # Paydown: paydown[(tier, term_bucket, age_int)][0]=sum_ratio, [1]=count
     paydown_perf = defaultdict(lambda: [0.0, 0])
@@ -216,7 +233,7 @@ def build_aggregates(conn, deals, covariates):
                     pcov = covariates.get(prev_key)
                     if pcov:
                         pcell = (pcov["tier"], prev_state, prev_age_b,
-                                 prev_fico_b, prev_ltv_b, prev_mod)
+                                 prev_fico_b, prev_ltv_b, prev_mod, pcov["orig_q"])
                         trans[pcell][t] += 1
             prev_key = key
             prev_state = None
@@ -255,7 +272,7 @@ def build_aggregates(conn, deals, covariates):
         if prev_state is not None:
             pcov = covariates.get(prev_key) or cov
             pcell = (pcov["tier"], prev_state, prev_age_b, prev_fico_b,
-                     prev_ltv_b, prev_mod)
+                     prev_ltv_b, prev_mod, pcov["orig_q"])
             trans[pcell][cur_state] += 1
 
         # Save last snapshot (used for the per-loan forecast pass)
@@ -270,6 +287,7 @@ def build_aggregates(conn, deals, covariates):
             "term_bucket": cov["term_bucket"],
             "orig_amount": cov["orig_amount"],
             "term": cov["term"],
+            "orig_q": cov["orig_q"],
             "is_active": True,  # if zero_balance_code never set in this loan, it's active
         }
         prev_state = cur_state
@@ -286,7 +304,7 @@ def build_aggregates(conn, deals, covariates):
             pcov = covariates.get(prev_key)
             if pcov:
                 pcell = (pcov["tier"], prev_state, prev_age_b, prev_fico_b,
-                         prev_ltv_b, prev_mod)
+                         prev_ltv_b, prev_mod, pcov["orig_q"])
                 trans[pcell][t] += 1
 
     # Drop terminated loans from latest_state — only keep currently-active
@@ -303,8 +321,14 @@ def build_aggregates(conn, deals, covariates):
 
 # ── Cell-level transition matrix with smoothing fallback ──────────────
 
-def cell_transition_matrix(trans, tier, state, age_b, fico_b, ltv_b, mod):
-    """Try fully-stratified cell. Fall back to coarser strata if too sparse."""
+def cell_transition_matrix(trans, tier, state, age_b, fico_b, ltv_b, mod, orig_q):
+    """Try fully-stratified cell. Fall back to coarser strata if too sparse.
+
+    Fallback ladder is deliberately ordered so origination quarter (vintage)
+    is preserved longer than fine credit slicing. The macro environment at
+    origination tends to dominate when it changes, so we'd rather pool over
+    FICO buckets within a vintage than vice versa.
+    """
     def _make(cell):
         d = trans.get(cell)
         if not d:
@@ -322,16 +346,24 @@ def cell_transition_matrix(trans, tier, state, age_b, fico_b, ltv_b, mod):
                 row[N_STATES + 1] = v
         return row / total, total
 
-    # Try most-specific first, then fallback
+    # Order: try specific (with vintage), fall through credit dims while
+    # keeping age + vintage. Then drop vintage WHILE KEEPING AGE — never
+    # collapse age before vintage, otherwise newer vintages with only
+    # young-loan observations would get used to forecast late-life
+    # transitions where their data is empty (the bug that gave 2025-P3
+    # a 1.4% lifetime forecast).
     ladder = [
-        (tier, state, age_b, fico_b, ltv_b, mod),
-        (tier, state, age_b, fico_b, ltv_b, 0),       # drop modified flag
-        (tier, state, age_b, fico_b, "any", mod),     # drop LTV
-        (tier, state, age_b, "any", "any", mod),      # drop FICO + LTV
-        (tier, state, age_b, "any", "any", 0),
-        (tier, state, "any", "any", "any", 0),        # tier+state only
+        (tier, state, age_b, fico_b, ltv_b, mod, orig_q),
+        (tier, state, age_b, fico_b, ltv_b, 0, orig_q),     # drop modified
+        (tier, state, age_b, fico_b, "any", mod, orig_q),   # drop LTV
+        (tier, state, age_b, "any", "any", mod, orig_q),    # drop FICO + LTV
+        (tier, state, age_b, "any", "any", 0, orig_q),
+        (tier, state, age_b, fico_b, ltv_b, mod, "any"),    # drop vintage, keep age+credit
+        (tier, state, age_b, fico_b, "any", mod, "any"),
+        (tier, state, age_b, "any", "any", mod, "any"),
+        (tier, state, age_b, "any", "any", 0, "any"),       # population avg at this age
+        (tier, state, "any", "any", "any", 0, "any"),       # tier+state only (last resort)
     ]
-    # Build "any" aggregates lazily on first request
     return _resolve_ladder(trans, ladder, _make)
 
 
@@ -346,21 +378,21 @@ def _resolve_ladder(trans, ladder, _make):
             if row is not None:
                 return row, n
         else:
-            # Aggregate across wildcard dimension(s)
             if cell in _AGG_CACHE:
                 row, n = _AGG_CACHE[cell]
                 if row is not None and n >= MIN_CELL_OBS:
                     return row, n
                 continue
             agg = defaultdict(int)
-            tier, state, age_b, fico_b, ltv_b, mod = cell
+            tier, state, age_b, fico_b, ltv_b, mod, orig_q = cell
             for k, d in trans.items():
-                kt, ks, kab, kfb, klb, km = k
+                kt, ks, kab, kfb, klb, km, kq = k
                 if kt != tier or ks != state: continue
                 if age_b != "any" and kab != age_b: continue
                 if fico_b != "any" and kfb != fico_b: continue
                 if ltv_b != "any" and klb != ltv_b: continue
                 if mod != "any" and km != mod: continue
+                if orig_q != "any" and kq != orig_q: continue
                 for outk, v in d.items():
                     agg[outk] += v
             total = sum(agg.values())
@@ -462,17 +494,26 @@ _LGD_AGG_CACHE = {}
 # ── Per-loan forward simulation ───────────────────────────────────────
 
 def forecast_loan(loan, trans, perf_curve, mod_curve, lgd_lookup,
-                  cum_severity_by_tier=None):
-    """Walk forward month-by-month from loan's current state to original term.
-    Returns (expected_loss, variance_proxy, terminal_default_prob)."""
+                  start_state=None, start_age=None, end_age=None):
+    """Walk forward month-by-month from start_age (default = loan's current
+    age) to end_age (default = original_term).
+
+    Used in two modes:
+      • Forward forecast: defaults — start at current age & state, run to term
+      • Lookback for calibration: start_state=0, start_age=0, end_age=current
+        age — gives "what the model would have predicted for this loan from
+        origination through today."
+    """
     tier = loan["tier"]
-    state = loan["state"]
-    age = loan["age_months"]
+    state = loan["state"] if start_state is None else start_state
+    age = loan["age_months"] if start_age is None else start_age
     term = loan["term"] or 60
-    months_remaining = max(1, term - age)
+    final_age = (term if end_age is None else end_age)
+    months_remaining = max(0, final_age - age)
     fico_b = loan["fico_b"]
     ltv_b = loan["ltv_b"]
     mod = loan["modified"]
+    orig_q = loan.get("orig_q", "unknown")
     orig = loan["orig_amount"] or loan["balance"]
     tb = loan["term_bucket"]
     curve = mod_curve if mod else perf_curve
@@ -487,15 +528,12 @@ def forecast_loan(loan, trans, perf_curve, mod_curve, lgd_lookup,
     for step in range(months_remaining):
         cur_age += 1
         age_b = _bucket(cur_age, AGE_BUCKETS)
-        # Build transition matrix for this month: rows are CURRENT transient states 0..5
         Q = np.zeros((N_STATES + 2, N_STATES + 2))
-        # Absorbing rows are identity
         Q[N_STATES, N_STATES] = 1.0
         Q[N_STATES + 1, N_STATES + 1] = 1.0
         for s in STATES:
-            row, n = cell_transition_matrix(trans, tier, s, age_b, fico_b, ltv_b, mod)
+            row, n = cell_transition_matrix(trans, tier, s, age_b, fico_b, ltv_b, mod, orig_q)
             if row is None:
-                # Stay-in-place fallback
                 Q[s, s] = 1.0
             else:
                 Q[s, :] = row
@@ -538,14 +576,22 @@ def run(carvana_db=CARVANA_DB, dashboard_db=DASHBOARD_DB):
     deal_totals = defaultdict(lambda: {"expected_loss": 0.0, "variance": 0.0,
                                        "active_loans": 0, "active_balance": 0.0,
                                        "dq_loss": 0.0, "perf_loss": 0.0,
-                                       "dq_balance": 0.0, "perf_balance": 0.0})
+                                       "dq_balance": 0.0, "perf_balance": 0.0,
+                                       "lookback_predicted_loss": 0.0})
     for (deal, asset), loan in latest.items():
         el, var = forecast_loan(loan, trans, perf_curve, mod_curve, lgd_lookup)
+        # Lookback: what would the model have predicted for this loan from age 0
+        # through current age, given its origination covariates? Used to compute
+        # the deal-level calibration factor (realized / lookback_pred).
+        lookback_el, _ = forecast_loan(
+            loan, trans, perf_curve, mod_curve, lgd_lookup,
+            start_state=0, start_age=0, end_age=loan["age_months"])
         d = deal_totals[deal]
         d["expected_loss"] += el
         d["variance"] += var
         d["active_loans"] += 1
         d["active_balance"] += loan["balance"]
+        d["lookback_predicted_loss"] += lookback_el
         if loan["state"] == 0:
             d["perf_loss"] += el
             d["perf_balance"] += loan["balance"]
@@ -556,6 +602,16 @@ def run(carvana_db=CARVANA_DB, dashboard_db=DASHBOARD_DB):
     # Realized: pull from dashboard.db cert lookup
     sys.path.insert(0, "/opt/abs-dashboard")
     from carvana_abs.default_model import _cert_totals_lookup
+
+    # Per-deal original pool balance (cutoff). MAX(beginning_pool_balance)
+    # equals the cert's "(14) Original Pool Balance as of Cutoff Date" for any
+    # deal whose first 10-D we ingested; verified earlier in the audit.
+    deal_orig_bal = {}
+    for r in conn.execute(
+        f"SELECT deal, MAX(beginning_pool_balance) FROM pool_performance "
+        f"WHERE deal IN ({','.join(['?']*len(deals))}) GROUP BY deal", deals):
+        deal_orig_bal[r[0]] = float(r[1] or 0)
+
     by_deal = {}
     for deal in deals:
         cert = _cert_totals_lookup(deal, carvana_db)
@@ -564,20 +620,64 @@ def run(carvana_db=CARVANA_DB, dashboard_db=DASHBOARD_DB):
         ev = d.get("expected_loss", 0)
         var = d.get("variance", 0)
         sigma = float(np.sqrt(var)) if var > 0 else 0
+
+        # Pool-level early-performance calibration overlay.
+        # Compare realized cum gross losses to date with what the model would
+        # have predicted for ALL the pool's loans from age 0 to now. The
+        # lookback sum we collected only covers currently-active loans, so
+        # scale by (orig_pool / active_balance) to estimate the full-pool
+        # predicted-to-date. Apply the resulting factor to the forward
+        # forecast with guardrails:
+        #   • need ≥6 months of avg history before applying (else too noisy)
+        #   • clamp factor to [0.5, 2.0] to prevent freak early months from
+        #     blowing out the forecast
+        lookback_active = d.get("lookback_predicted_loss", 0)
+        active_bal = d.get("active_balance", 0) or 0
+        cum_gross = cert.get("cum_gross_losses") or 0
+        orig_bal = deal_orig_bal.get(deal, 0)
+        ages = [latest[k]["age_months"] for k in latest if k[0] == deal]
+        avg_age = (sum(ages) / len(ages)) if ages else 0
+
+        cal_factor = 1.0
+        cal_status = "uncalibrated (deal too young or no prior loss data)"
+        if avg_age >= 6 and orig_bal > 0 and active_bal > 0 and lookback_active > 0 and cum_gross > 0:
+            # Scale model's lookback prediction from active-loan basis to
+            # full-pool basis using the active-balance share of original pool
+            # as a proxy. Conservative: undercounts the predicted-cum-gross
+            # for already-terminated loans slightly, which biases the cal_factor
+            # marginally HIGHER (i.e. forecasts adjust UP if we observed worse
+            # than predicted, which is the right direction).
+            scale = orig_bal / max(active_bal, 1.0)
+            model_pred_to_date = lookback_active * scale
+            raw_factor = cum_gross / model_pred_to_date if model_pred_to_date > 0 else 1.0
+            cal_factor = max(0.5, min(2.0, raw_factor))
+            cal_status = (f"{cal_factor:.2f}× ({'capped' if cal_factor != raw_factor else 'within bounds'}, "
+                          f"raw={raw_factor:.2f})")
+
+        ev_calibrated = ev * cal_factor
+        sigma_calibrated = sigma * cal_factor
+
         by_deal[deal] = {
             "active_loans": d.get("active_loans", 0),
             "active_balance": round(d.get("active_balance", 0), 2),
+            "avg_age_months": round(avg_age, 1),
             "realized": round(cum_net, 2),
-            "dq_pending": round(d.get("dq_loss", 0), 2),
-            "performing_future": round(d.get("perf_loss", 0), 2),
-            "total_expected": round(cum_net + ev, 2),
-            "total_minus_1sd": round(cum_net + max(0, ev - sigma), 2),
-            "total_plus_1sd": round(cum_net + ev + sigma, 2),
-            "forecast_only": round(ev, 2),
-            "forecast_sigma": round(sigma, 2),
+            "realized_gross": round(cum_gross, 2),
+            "dq_pending": round(d.get("dq_loss", 0) * cal_factor, 2),
+            "performing_future": round(d.get("perf_loss", 0) * cal_factor, 2),
+            "total_expected": round(cum_net + ev_calibrated, 2),
+            "total_minus_1sd": round(cum_net + max(0, ev_calibrated - sigma_calibrated), 2),
+            "total_plus_1sd": round(cum_net + ev_calibrated + sigma_calibrated, 2),
+            "forecast_only": round(ev_calibrated, 2),
+            "forecast_sigma": round(sigma_calibrated, 2),
+            "lookback_predicted_loss": round(lookback_active, 2),
+            "calibration_factor": round(cal_factor, 4),
+            "calibration_status": cal_status,
+            "uncalibrated_forecast": round(ev, 2),
         }
-        logger.info(f"  {deal}: realized=${cum_net/1e6:.1f}M  forecast=${ev/1e6:.1f}M  "
-                    f"σ=${sigma/1e6:.1f}M  total=${(cum_net+ev)/1e6:.1f}M")
+        logger.info(f"  {deal}: realized=${cum_net/1e6:.1f}M  fcst=${ev_calibrated/1e6:.1f}M  "
+                    f"σ=${sigma_calibrated/1e6:.1f}M  total=${(cum_net+ev_calibrated)/1e6:.1f}M  "
+                    f"cal={cal_factor:.2f}×")
 
     # Reference table: average P(default | state, age, FICO) for sanity check.
     # Compute one-step Default probability from fully-stratified cells, then
@@ -591,7 +691,7 @@ def run(carvana_db=CARVANA_DB, dashboard_db=DASHBOARD_DB):
                 for fico_b in range(len(FICO_BUCKETS)):
                     fico_lbl = (f"<{FICO_BUCKETS[fico_b][1]}" if fico_b == 0
                                 else f"{FICO_BUCKETS[fico_b][0]}+")
-                    row, n = cell_transition_matrix(trans, tier, state_idx, age_b, fico_b, "any", "any")
+                    row, n = cell_transition_matrix(trans, tier, state_idx, age_b, fico_b, "any", "any", "any")
                     if row is not None and n > 0:
                         rows.append({"state": state_lbl, "age": age_lbl,
                                      "fico": fico_lbl, "n": int(n),
