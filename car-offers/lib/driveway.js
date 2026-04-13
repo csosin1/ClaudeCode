@@ -251,6 +251,26 @@ async function _drivewayPostVinLoop({ page, log, vin, mileage, zip, condition, c
       };
     }
 
+    // Driveway shows a "Whoops! Something went wrong on our end" modal when
+    // their backend chokes on a VIN submission (often a bot-detection signal
+    // disguised as a generic API error). Try to dismiss it once and retry,
+    // but if it persists, return a clear status — retrying within the same
+    // wizard run won't recover; the next biweekly shop is the natural retry.
+    try {
+      const bodyText = await page.textContent('body').catch(() => '');
+      if (/whoops/i.test(bodyText) && /something went wrong/i.test(bodyText)) {
+        log('[driveway] backend "Whoops" error modal detected — Driveway rejected the submission');
+        await screenshot(page, 'driveway', 'whoops-modal');
+        if (debug) await debugDump(page, 'driveway', 'whoops-modal');
+        return {
+          status: 'error',
+          error: 'driveway_backend_error: whoops modal — likely bot-flagged or VIN-not-recognized',
+          details: { at: 'whoops_modal', url, launchMethod },
+          wizardLog,
+        };
+      }
+    } catch { /* ok */ }
+
     const offerAmt = await scanForOffer(page);
     if (offerAmt && offerAmt > 500) {
       log(`[driveway] OFFER FOUND step ${step}: $${offerAmt}`);

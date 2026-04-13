@@ -316,7 +316,58 @@ async function _getCarmaxOfferImpl({ vin, mileage, zip, condition, email, consum
         }
       }
 
-      // Accident / title / ownership questions (held constant)
+      // Accident / title / ownership questions + the multi-question
+      // condition page (rust, interior, tires, keys). CarMax stacks several
+      // radio groups on one page; click EVERY visible "No" / "None" /
+      // "1 owner" / "2" radio on the page in one pass to save round-trips.
+      if (!interacted) {
+        try {
+          // Click all "No" radios for damage/issue questions. These are radios
+          // (one per question), not checkboxes. Use radio role for safety.
+          const safeRadios = await page.$$('label:has-text("No"):visible, [role="radio"]:has-text("No"):visible');
+          let radioClicks = 0;
+          for (const r of safeRadios) {
+            try {
+              const txt = (await r.textContent().catch(() => '') || '').trim();
+              // Only click radios whose visible text is exactly "No" (avoid
+              // "No accidents" / "Not sure" mismatches at this stage)
+              if (/^no$/i.test(txt)) {
+                await humanDelay(250, 550);
+                await r.click();
+                radioClicks++;
+                if (radioClicks >= 8) break;
+              }
+            } catch { /* next */ }
+          }
+          if (radioClicks > 0) {
+            log(`[carmax] clicked ${radioClicks} "No" radios for condition questions`);
+            interacted = true;
+            await humanDelay(600, 1200);
+          }
+        } catch { /* ok */ }
+      }
+
+      if (!interacted) {
+        // Number-of-keys radio: pick "2" as the standard "I have both keys"
+        // answer (also the most common factory-issue count).
+        try {
+          const keyRadios = await page.$$('label:visible, [role="radio"]:visible');
+          for (const r of keyRadios) {
+            try {
+              const txt = (await r.textContent().catch(() => '') || '').trim();
+              if (/^(2|two|2 keys|two keys)$/i.test(txt)) {
+                await humanDelay(250, 550);
+                await r.click();
+                log('[carmax] keys = 2');
+                interacted = true;
+                await humanDelay(500, 900);
+                break;
+              }
+            } catch { /* next */ }
+          }
+        } catch { /* ok */ }
+      }
+
       if (!interacted) {
         const extraAnswers = [
           EXTRA_ANSWERS.accidentHistory,     // "None"
@@ -328,6 +379,7 @@ async function _getCarmaxOfferImpl({ vin, mileage, zip, condition, email, consum
           'No accidents', 'No damage', 'Clean title',
           'I own it outright', 'Paid off', 'No loan',
           'No modifications', 'Factory stock',
+          '1 owner', 'Original owner', 'No, never',
         ];
         const extra = await clickFirstByText(page, extraAnswers, 1500);
         if (extra.clicked) {
