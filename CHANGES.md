@@ -176,3 +176,13 @@ Builder appends a per-task entry here after each build. Format:
   - Watcher subprocess model: each new-filing cycle invokes four separate Python processes (fetch / merge / red_flag / email). This is heavier than a single-process call graph but (a) matches spec, (b) isolates extraction crashes from the watcher loop, (c) keeps imports cheap since Anthropic SDK only loads inside `fetch_and_parse.py` when not in dry-run.
   - `merge.py` mirrors combined.json to `DASHBOARD_SERVE_DIR` — the deploy script sets this to `<instance>/dashboard` so nginx can serve it at `./data/combined.json` relative to the dashboard page (consistent with the frontend builder's expectation).
   - Scope boundary: this builder did NOT modify `dashboard/index.html`, `admin/templates/setup.html`, or `tests/timeshare-surveillance.spec.ts` — all owned by the frontend builder. Also did NOT touch `update_nginx.sh`, `auto_deploy_general.sh`, `landing.html`, or `CLAUDE.md` (already scaffolded in task #2).
+
+## 2026-04-13 — gym-intelligence (state audit; no code changes)
+
+- **What was built:** none — audit + state-refresh pass per orchestrator request.
+- **Files modified:** `gym-intelligence/PROJECT_STATE.md` (new, replaces stub at `/opt/gym-intelligence/PROJECT_STATE.md` orchestrator backfill).
+- **Tests added:** none.
+- **Things for the reviewer / orchestrator (shared infra, gym-intelligence chat cannot fix):**
+  - `RUNBOOK.md` gym-intelligence section (line ~39) is missing the preview URL. Suggest adding: `Preview: http://159.223.127.125/gym-intelligence/preview/` and a second systemd line `gym-intelligence-preview.service → app.py on port 8503`.
+  - `/var/log/general-deploy.log` shows `gym-intelligence.sh` last sourced 2026-04-12 19:30 UTC. Subsequent main-branch deploys (timeshare commits at 23:35, 23:42, 01:15) only logged timeshare blocks — the project loop appears to have stopped iterating other deploy scripts. Consequence: source `classify.py` (commit c412728, has the MIN_LOCATIONS_FOR_CLASSIFICATION = 4 floor) never propagated to `/opt/gym-intelligence-preview/classify.py`, which is still the Apr 6 version with no floor. `/opt/auto_deploy_general.sh` (deployed) diffs against `deploy/auto_deploy_general.sh` (source) — deployed copy is older, so STEP 0's self-update has been failing silently.
+  - Risk: if the live `classify.py` is invoked (manual or via `scheduler.py --now`) it will spend ~$220 reclassifying ~31k single-location entries, the very behaviour c412728 was meant to prevent. Mitigation until infra is fixed: don't run classify on live, or hand-promote `classify.py` to `/opt/gym-intelligence/` via promote.sh once preview catches up.
