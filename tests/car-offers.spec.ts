@@ -155,6 +155,46 @@ test.describe('Car-offers comparison (CarMax + Driveway + /api/compare + /api/qu
   });
 });
 
+test.describe('Car-offers consumer panel', () => {
+  test('GET /panel renders the panel HTML', async ({ page, request }) => {
+    const headResp = await request.get('/car-offers/panel');
+    if (headResp.status() === 404) test.skip(true, '/panel not on this build');
+    await page.goto('/car-offers/panel');
+    await expect(page.locator('h1', { hasText: 'Panel' })).toBeVisible();
+    await expect(page.locator('table')).toBeVisible();
+  });
+
+  test('GET /api/panel returns well-formed JSON', async ({ request }) => {
+    const resp = await request.get('/car-offers/api/panel');
+    if (resp.status() === 404) test.skip(true, '/api/panel not on this build');
+    expect([200, 503]).toContain(resp.status());
+    if (resp.status() === 200) {
+      const body = await resp.json();
+      expect(body).toHaveProperty('active_count');
+      expect(body).toHaveProperty('in_flight');
+      expect(body).toHaveProperty('rows');
+      expect(Array.isArray(body.rows)).toBeTruthy();
+    }
+  });
+
+  test('POST /api/panel/run/:id with bad id returns 400', async ({ request }) => {
+    const resp = await request.post('/car-offers/api/panel/run/0');
+    if (resp.status() === 404) test.skip(true, '/api/panel/run/:id not on this build');
+    expect(resp.status()).toBe(400);
+  });
+
+  test('POST /api/panel/seed is idempotent (409 or 200 after first)', async ({ request }) => {
+    // First seed (may be 200 OK or 409 if already seeded). Second must be 409.
+    const resp1 = await request.post('/car-offers/api/panel/seed', { data: {} });
+    if (resp1.status() === 404) test.skip(true, '/api/panel/seed not on this build');
+    expect([200, 409, 503]).toContain(resp1.status());
+    if (resp1.status() === 200 || resp1.status() === 409) {
+      const resp2 = await request.post('/car-offers/api/panel/seed', { data: {} });
+      expect(resp2.status()).toBe(409);
+    }
+  });
+});
+
 test.describe('Car-offers security', () => {
   test('.env is not served', async ({ request }) => {
     const resp = await request.get('/car-offers/.env');

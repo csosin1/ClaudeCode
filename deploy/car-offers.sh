@@ -48,7 +48,9 @@ rsync -a --delete \
     --exclude='.patchright_installed' \
     --exclude='.playwright_installed' \
     --exclude='.chrome-profile' \
+    --exclude='.chrome-profiles' \
     --exclude='.proxy-session' \
+    --exclude='.proxy-sessions' \
     --exclude='.profile-warmup' \
     "$REPO_DIR/$PROJECT/" "$PREVIEW_DIR/"
 
@@ -179,6 +181,22 @@ if [ ! -f /opt/.car_offers_logs_initialized ]; then
 LREOF
     (crontab -l 2>/dev/null; echo "*/5 * * * * curl -sf http://127.0.0.1:$LIVE_PORT/ > /dev/null || echo \"\$(date) DOWN\" >> $LOG_DIR/uptime.log") | crontab -
     touch /opt/.car_offers_logs_initialized
+fi
+
+# --- Consumer panel hourly cron (LIVE only — preview must not auto-scrape) ---
+# Runs /api/panel/run on the live service every hour at :00. The runner
+# internally filters consumers whose biweekly_slot+shop_hour matches the
+# current UTC hour — empty hours are cheap (just an SQL query).
+#
+# Installed exactly once, gated by a marker file on /opt so re-deploys don't
+# re-append the line.
+if [ ! -f /opt/.car_offers_panel_cron_installed ]; then
+    # Protect against double-append if the marker was manually deleted.
+    if ! crontab -l 2>/dev/null | grep -q '/api/panel/run'; then
+        (crontab -l 2>/dev/null; echo "0 * * * * curl -sf -X POST http://127.0.0.1:$LIVE_PORT/api/panel/run > /dev/null 2>&1") | crontab -
+        echo "$(date): [car-offers] panel hourly cron installed on live port $LIVE_PORT" >> "$LOG"
+    fi
+    touch /opt/.car_offers_panel_cron_installed
 fi
 
 echo "$(date): $PROJECT deploy block done (preview updated; live unchanged)." >> "$LOG"

@@ -44,7 +44,7 @@ const WARMUP_TTL_HOURS = 24;
 
 let activeRun = null;
 
-async function _getDrivewayOfferImpl({ vin, mileage, zip, condition, email }) {
+async function _getDrivewayOfferImpl({ vin, mileage, zip, condition, email, consumerId, fingerprintProfileId, proxyZip }) {
   const offerEmail = email || config.PROJECT_EMAIL || 'caroffers.tool@gmail.com';
   const conditionLabel = siteConditionLabel('driveway', condition);
   const wizardLog = [];
@@ -64,17 +64,17 @@ async function _getDrivewayOfferImpl({ vin, mileage, zip, condition, email }) {
   try {
     log(`[driveway] Starting VIN=${vin} mi=${mileage} zip=${zip} cond=${condition}->${conditionLabel}`);
 
-    const result = await launchBrowser();
+    const result = await launchBrowser({ consumerId, fingerprintProfileId, proxyZip: proxyZip || zip });
     browser = result.browser;
     const page = result.page;
     launchMethod = result.launchMethod || 'unknown';
     log(`[driveway] Browser: ${launchMethod} | headed: ${!!process.env.DISPLAY}`);
 
     // --- Warmup ---
-    const isWarm = profileIsWarm(WARMUP_TTL_HOURS);
+    const isWarm = profileIsWarm(consumerId, WARMUP_TTL_HOURS);
     log(`[driveway] Profile warm state: ${isWarm ? 'fresh' : 'cold'}`);
     if (!isWarm) {
-      try { await miniBrowse(page, log); markProfileWarmed(); } catch (e) { log(`[driveway] carvana warm fail: ${e.message}`); }
+      try { await miniBrowse(page, log); markProfileWarmed(consumerId); } catch (e) { log(`[driveway] carvana warm fail: ${e.message}`); }
     }
     try {
       await siteWarmup(page, { homepage: DRIVEWAY_HOMEPAGE, inventory: DRIVEWAY_INVENTORY }, log);

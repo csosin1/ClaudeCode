@@ -1424,6 +1424,310 @@ app.get('/api/compare-all', (req, res) => {
   }
 });
 
+// ============================================================================
+// Consumer panel — 12 permanent identities, biweekly shopping cadence.
+// ============================================================================
+
+/** GET /api/panel — summary + per-consumer latest offers. */
+app.get('/api/panel', (_req, res) => {
+  const db = getOffersDb();
+  if (!db) return res.status(503).json({ error: 'offers DB not available' });
+  try {
+    const { getPanelStatus } = require('./lib/offers-db');
+    return res.json(getPanelStatus(db));
+  } catch (e) {
+    console.error('[panel] status error:', e.message);
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+/**
+ * POST /api/panel/seed — one-time seed. Reads CONSUMERS from
+ * lib/panel-seed.js and inserts each. Refuses to run if the consumers
+ * table is already populated (idempotent). Optional JSON body with a
+ * `consumers` array overrides the default seed list.
+ */
+app.post('/api/panel/seed', (req, res) => {
+  const db = getOffersDb();
+  if (!db) return res.status(503).json({ error: 'offers DB not available' });
+  try {
+    const { listConsumers, insertConsumer } = require('./lib/offers-db');
+    const existing = listConsumers(db);
+    if (existing.length > 0) {
+      return res.status(409).json({
+        error: 'consumers table already seeded',
+        count: existing.length,
+      });
+    }
+    const body = req.body || {};
+    const seedList = Array.isArray(body.consumers) && body.consumers.length > 0
+      ? body.consumers
+      : require('./lib/panel-seed').CONSUMERS;
+    const inserted = [];
+    for (const c of seedList) {
+      try {
+        insertConsumer(db, c);
+        inserted.push({ id: c.id, vin: c.vin, name: c.name });
+      } catch (e) {
+        console.error(`[panel/seed] skip consumer ${c && c.id}: ${e.message}`);
+      }
+    }
+    return res.json({ ok: true, inserted: inserted.length, consumers: inserted });
+  } catch (e) {
+    console.error('[panel/seed] error:', e.message);
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+/**
+ * POST /api/panel/run — trigger runDueConsumers (hourly cron entry point).
+ * Returns immediately after kicking off the run; actual work happens in
+ * the background. The response describes how many consumers were due.
+ */
+app.post('/api/panel/run', async (_req, res) => {
+  try {
+    const { runDueConsumers } = require('./lib/panel-runner');
+    // Fire and forget — panel runs take minutes, don't tie up the HTTP client.
+    const promise = runDueConsumers({});
+    // Give it ~800ms so we can report the `due` count; the rest runs async.
+    let early;
+    try {
+      early = await Promise.race([
+        promise,
+        new Promise((r) => setTimeout(() => r({ pending: true }), 800)),
+      ]);
+    } catch (e) { early = { error: e.message }; }
+    return res.json({ ok: true, early });
+  } catch (e) {
+    console.error('[panel/run] error:', e.message);
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+/** POST /api/panel/run/:id — ad-hoc single-consumer run. */
+app.post('/api/panel/run/:id', async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'invalid id' });
+  try {
+    const { runConsumerById } = require('./lib/panel-runner');
+    // Fire-and-forget; the run can take 5-15 min. Return 202 with the
+    // consumer id so the client knows the work is queued.
+    runConsumerById(id).catch((e) => console.error(`[panel/run/${id}] background failed: ${e.message}`));
+    return res.status(202).json({ ok: true, consumer_id: id, status: 'queued' });
+  } catch (e) {
+    console.error(`[panel/run/${id}] error:`, e.message);
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+/** GET /panel — mobile-first HTML view of the panel. */
+app.get('/panel', (_req, res) => {
+  res.set('Content-Type', 'text/html; charset=utf-8');
+  res.send(`<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Car Offers &mdash; Panel</title>
+<style>
+  :root {
+    --bg:#0e1116; --panel:#161b22; --panel-2:#1c232c; --border:#2a313a;
+    --text:#e6edf3; --muted:#9aa5b1; --accent:#3fb950; --warn:#d29922;
+    --err:#f85149; --info:#58a6ff;
+  }
+  * { box-sizing: border-box; }
+  html,body { margin:0; padding:0; background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+    font-size:15px; line-height:1.4; -webkit-text-size-adjust:100%; }
+  header { display:flex; justify-content:space-between; align-items:center;
+    padding:12px 14px; border-bottom:1px solid var(--border); gap:10px; flex-wrap:wrap; }
+  header h1 { margin:0; font-size:17px; font-weight:600; }
+  .badges { display:flex; gap:6px; flex-wrap:wrap; }
+  .badge { padding:3px 8px; border-radius:999px; font-size:12px;
+    background:var(--panel-2); border:1px solid var(--border); color:var(--muted); }
+  .badge.live { color:var(--info); }
+  .badge.inflight { color:var(--warn); }
+  main { padding:14px; max-width:1200px; margin:0 auto; }
+  .summary { background:var(--panel); border:1px solid var(--border);
+    border-radius:10px; padding:14px; margin-bottom:14px; }
+  .summary-row { display:flex; flex-wrap:wrap; gap:16px; font-size:13px; color:var(--muted); }
+  .summary-row b { color:var(--text); }
+  .table-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch;
+    border:1px solid var(--border); border-radius:10px; background:var(--panel); }
+  table { width:100%; border-collapse:collapse; min-width:820px; }
+  th,td { text-align:left; padding:10px 12px; border-bottom:1px solid var(--border);
+    vertical-align:top; white-space:nowrap; font-size:14px; }
+  th { position:sticky; top:0; background:var(--panel-2); color:var(--muted);
+    font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:.04em; }
+  tr:last-child td { border-bottom:none; }
+  tr.detail-row td { background:var(--panel-2); white-space:normal; font-size:12px;
+    color:var(--muted); padding:10px 14px; }
+  tr.detail-row pre { white-space:pre-wrap; font-size:11px; margin:4px 0 0; max-height:260px; overflow:auto; }
+  .mono { font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; }
+  .offer { font-weight:700; color:var(--accent); font-variant-numeric:tabular-nums; }
+  .pill { display:inline-block; padding:2px 8px; border-radius:999px; font-size:11px;
+    font-weight:600; text-transform:uppercase; letter-spacing:.03em; }
+  .pill.blocked { background:rgba(248,81,73,.12); color:var(--err); border:1px solid rgba(248,81,73,.3); }
+  .pill.account_required { background:rgba(210,153,34,.15); color:var(--warn); border:1px solid rgba(210,153,34,.3); }
+  .pill.error   { background:rgba(248,81,73,.10); color:var(--err); border:1px solid rgba(248,81,73,.25); }
+  .pill.running { background:rgba(88,166,255,.10); color:var(--info); border:1px solid rgba(88,166,255,.25); }
+  .pill.ok      { background:rgba(63,185,80,.10); color:var(--accent); border:1px solid rgba(63,185,80,.25); }
+  .pill.none    { background:var(--panel-2); color:var(--muted); border:1px solid var(--border); }
+  .btn { background:var(--info); color:#0b1220; border:none; border-radius:6px;
+    padding:4px 10px; font-size:12px; font-weight:600; cursor:pointer; }
+  .btn[disabled] { opacity:.4; cursor:not-allowed; }
+  .name-cell { max-width:220px; white-space:normal; }
+  .expander { cursor:pointer; user-select:none; }
+  footer { padding:18px 14px 30px; color:var(--muted); font-size:13px; border-top:1px solid var(--border); margin-top:14px; }
+  footer a { color:var(--info); }
+  @media (max-width:520px) {
+    header h1 { font-size:15px; }
+    main { padding:10px; }
+    th,td { padding:8px 10px; font-size:13px; }
+  }
+</style>
+</head><body>
+<header>
+  <h1>Car Offers &mdash; Panel</h1>
+  <div class="badges">
+    <span class="badge" id="active-badge">&mdash; active</span>
+    <span class="badge inflight" id="inflight-badge">0 in flight</span>
+    <span class="badge live" id="updated-badge">never updated</span>
+  </div>
+</header>
+<main>
+  <div class="summary" id="summary">Loading&hellip;</div>
+  <div class="table-wrap">
+    <table id="panel-table">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Consumer</th>
+          <th>Last Carvana</th>
+          <th>Last CarMax</th>
+          <th>Last Driveway</th>
+          <th>Last Ran</th>
+          <th>Next Scheduled</th>
+          <th>Status</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="panel-body">
+        <tr><td colspan="9" style="padding:24px;text-align:center;color:var(--muted);">Loading&hellip;</td></tr>
+      </tbody>
+    </table>
+  </div>
+</main>
+<footer>
+  <div>See all runs: <a href="compare">/compare</a></div>
+</footer>
+<script>
+(function(){
+  var isPreview = window.location.pathname.indexOf('/preview/') !== -1;
+  var apiPanel = isPreview ? '/car-offers/preview/api/panel' : '/car-offers/api/panel';
+  var apiRunOne = function (id) {
+    return isPreview ? '/car-offers/preview/api/panel/run/' + id : '/car-offers/api/panel/run/' + id;
+  };
+  var summary = document.getElementById('summary');
+  var body = document.getElementById('panel-body');
+  var activeBadge = document.getElementById('active-badge');
+  var inflightBadge = document.getElementById('inflight-badge');
+  var updatedBadge = document.getElementById('updated-badge');
+
+  function escapeHtml(s){ if(s==null) return ''; return String(s).replace(/[&<>"']/g,function(c){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]; }); }
+  function fmtUsd(n){ if(n==null||isNaN(n)) return null; try { return '$' + Number(n).toLocaleString('en-US'); } catch(_) { return '$' + n; } }
+  function fmtAt(iso){ if(!iso) return ''; var d = new Date(iso); if(isNaN(d.getTime())) return iso;
+    var pad = function(n){ return n<10?'0'+n:''+n; };
+    return pad(d.getMonth()+1) + '/' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+  }
+  function timeSince(iso){ if(!iso) return 'never'; var ms = Date.now() - new Date(iso).getTime(); if(ms<0) return fmtAt(iso);
+    var s=Math.floor(ms/1000); if(s<60) return s+'s ago'; var m=Math.floor(s/60); if(m<60) return m+'m ago';
+    var h=Math.floor(m/60); if(h<48) return h+'h ago'; return Math.floor(h/24)+'d ago';
+  }
+  function siteCell(r){
+    if(!r) return '<span class="pill none">&mdash;</span>';
+    var status=(r.status||'').toLowerCase();
+    if(status==='ok' && r.offer_usd!=null) return '<span class="offer">' + escapeHtml(fmtUsd(r.offer_usd)) + '</span>';
+    var cls='pill '+(status||'none').replace(/[^a-z_]/g,'');
+    return '<span class="'+cls+'">'+escapeHtml(status||'none').replace(/_/g,' ')+'</span>';
+  }
+
+  function renderRows(rows){
+    if(!rows || !rows.length){ body.innerHTML = '<tr><td colspan="9" style="padding:24px;text-align:center;color:var(--muted);">No consumers yet. The panel has not been seeded.</td></tr>'; return; }
+    var html = [];
+    rows.forEach(function(row){
+      var c = row.consumer || {};
+      var L = row.latest || {};
+      var label = (c.year||'') + ' ' + (c.make||'') + ' ' + (c.model||'');
+      var statusLbl = (row.latest_panel_run && row.latest_panel_run.status) || '-';
+      html.push(
+        '<tr data-id="'+c.id+'">'+
+        '<td class="mono">'+escapeHtml(c.id)+'</td>'+
+        '<td class="name-cell"><b>'+escapeHtml(c.name||'')+'</b><br><span class="mono" style="color:var(--muted);font-size:11px;">'+escapeHtml(label.trim())+' &middot; '+escapeHtml(c.home_zip||'')+' &middot; '+escapeHtml(c.vin||'')+'</span></td>'+
+        '<td>'+siteCell(L.carvana)+'</td>'+
+        '<td>'+siteCell(L.carmax)+'</td>'+
+        '<td>'+siteCell(L.driveway)+'</td>'+
+        '<td class="mono" style="color:var(--muted);">'+escapeHtml(timeSince(row.last_ran_at))+'</td>'+
+        '<td class="mono" style="color:var(--muted);">'+escapeHtml(fmtAt(row.next_scheduled_at))+'</td>'+
+        '<td><span class="pill '+statusLbl+'">'+escapeHtml(statusLbl)+'</span></td>'+
+        '<td><button class="btn" data-run="'+c.id+'" title="Run now (ad-hoc)">Run</button> <button class="btn expander" data-expand="'+c.id+'" style="background:var(--panel-2);color:var(--text);">&plus;</button></td>'+
+        '</tr>'+
+        '<tr class="detail-row" id="detail-'+c.id+'" style="display:none;"><td colspan="9"><div><b>wizard_log (latest, Carvana):</b><pre>'+escapeHtml((L.carvana && L.carvana.wizard_log && JSON.stringify(L.carvana.wizard_log,null,2)) || '(none)')+'</pre></div><div><b>CarMax:</b><pre>'+escapeHtml((L.carmax && L.carmax.wizard_log && JSON.stringify(L.carmax.wizard_log,null,2)) || '(none)')+'</pre></div><div><b>Driveway:</b><pre>'+escapeHtml((L.driveway && L.driveway.wizard_log && JSON.stringify(L.driveway.wizard_log,null,2)) || '(none)')+'</pre></div></td></tr>'
+      );
+    });
+    body.innerHTML = html.join('');
+
+    body.querySelectorAll('button[data-run]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        var id = btn.getAttribute('data-run');
+        btn.disabled = true; btn.textContent='...';
+        fetch(apiRunOne(id), { method:'POST', headers:{'Accept':'application/json'} })
+          .then(function(r){ return r.json().catch(function(){return{};}); })
+          .then(function(){ btn.textContent='queued'; setTimeout(refresh, 1000); })
+          .catch(function(e){ btn.textContent='err'; console.error(e); });
+      });
+    });
+    body.querySelectorAll('button[data-expand]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        var id = btn.getAttribute('data-expand');
+        var el = document.getElementById('detail-'+id);
+        if(el) el.style.display = (el.style.display === 'none' ? '' : 'none');
+      });
+    });
+  }
+
+  function renderSummary(data){
+    var active = data && data.active_count != null ? data.active_count : 0;
+    var inflight = data && data.in_flight != null ? data.in_flight : 0;
+    activeBadge.textContent = active + ' active';
+    inflightBadge.textContent = inflight + ' in flight';
+    summary.innerHTML = '<div class="summary-row">' +
+      '<div><b>' + active + '</b> active consumers</div>' +
+      '<div>Last run: <b>' + escapeHtml(timeSince(data && data.last_ran_at)) + '</b></div>' +
+      '<div>Next scheduled: <b>' + escapeHtml(fmtAt(data && data.next_scheduled_at)) + ' UTC</b></div>' +
+      '<div>In flight: <b>' + inflight + '</b></div>' +
+      '</div>';
+  }
+
+  function refresh(){
+    fetch(apiPanel, { headers:{'Accept':'application/json'} })
+      .then(function(r){ return r.json(); })
+      .then(function(data){
+        renderSummary(data||{});
+        renderRows((data && data.rows) || []);
+        updatedBadge.textContent = 'updated ' + new Date().toLocaleTimeString();
+      })
+      .catch(function(err){
+        summary.textContent = 'Could not load panel: ' + (err && err.message || 'error');
+      });
+  }
+
+  refresh();
+  setInterval(refresh, 30000);
+})();
+</script>
+</body></html>`);
+});
+
 /**
  * GET /compare
  * Read-only, mobile-first side-by-side view of recent comparison runs.

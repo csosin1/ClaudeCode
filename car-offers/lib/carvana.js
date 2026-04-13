@@ -71,8 +71,58 @@ async function isBlocked(page) {
  * @param {string} [params.email] - Email for the offer (falls back to config)
  * @returns {{ offer?: string, details?: object, error?: string }}
  */
-async function _getCarvanaOfferImpl({ vin, mileage, zip, email }) {
+/**
+ * Simple ZIP -> US state map by ZIP prefix. Covers all 50 states via the
+ * first one or two digits. Used to pick the "State" option on Carvana's
+ * getoffer/entry page when the VIN mode requires a state dropdown.
+ * Source: USPS ZIP code ranges. Intentionally rough — the panel's 12 zips
+ * are all in populous metros so the prefix is unambiguous.
+ */
+function zipToState(zip) {
+  const z = String(zip || '').replace(/[^0-9]/g, '').padStart(5, '0').slice(0, 5);
+  const p3 = z.slice(0, 3);
+  const p2 = z.slice(0, 2);
+  const p1 = z.slice(0, 1);
+  // Some 3-digit prefixes land in a single state; check those first.
+  const p3Map = {
+    '006': 'PR', '007': 'PR', '009': 'PR',
+    '200': 'DC', '202': 'DC', '203': 'DC', '204': 'DC', '205': 'DC',
+  };
+  if (p3Map[p3]) return p3Map[p3];
+  const p2Map = {
+    // Northeast
+    '00': 'CT', '01': 'MA', '02': 'MA', '03': 'NH', '04': 'ME', '05': 'VT',
+    '06': 'CT', '07': 'NJ', '08': 'NJ', '09': 'NJ',
+    '10': 'NY', '11': 'NY', '12': 'NY', '13': 'NY', '14': 'NY',
+    '15': 'PA', '16': 'PA', '17': 'PA', '18': 'PA', '19': 'PA',
+    // Mid-Atlantic / South
+    '20': 'DC', '21': 'MD', '22': 'VA', '23': 'VA', '24': 'VA',
+    '25': 'WV', '26': 'WV', '27': 'NC', '28': 'NC', '29': 'SC',
+    '30': 'GA', '31': 'GA', '32': 'FL', '33': 'FL', '34': 'FL',
+    '35': 'AL', '36': 'AL', '37': 'TN', '38': 'TN', '39': 'MS',
+    // Midwest
+    '40': 'KY', '41': 'KY', '42': 'KY', '43': 'OH', '44': 'OH', '45': 'OH',
+    '46': 'IN', '47': 'IN', '48': 'MI', '49': 'MI',
+    '50': 'IA', '51': 'IA', '52': 'IA', '53': 'WI', '54': 'WI',
+    '55': 'MN', '56': 'MN', '57': 'SD', '58': 'ND', '59': 'MT',
+    '60': 'IL', '61': 'IL', '62': 'IL', '63': 'MO', '64': 'MO', '65': 'MO',
+    '66': 'KS', '67': 'KS', '68': 'NE', '69': 'NE',
+    // South-central
+    '70': 'LA', '71': 'LA', '72': 'AR', '73': 'OK', '74': 'OK',
+    '75': 'TX', '76': 'TX', '77': 'TX', '78': 'TX', '79': 'TX',
+    // Mountain / West
+    '80': 'CO', '81': 'CO', '82': 'WY', '83': 'ID', '84': 'UT',
+    '85': 'AZ', '86': 'AZ', '87': 'NM', '88': 'NM', '89': 'NV',
+    '90': 'CA', '91': 'CA', '92': 'CA', '93': 'CA', '94': 'CA', '95': 'CA', '96': 'CA',
+    '97': 'OR', '98': 'WA', '99': 'AK',
+  };
+  if (p2Map[p2]) return p2Map[p2];
+  return p1 === '0' ? 'MA' : 'NY'; // generic fallback, rarely hit
+}
+
+async function _getCarvanaOfferImpl({ vin, mileage, zip, email, consumerId, fingerprintProfileId, proxyZip }) {
   const offerEmail = email || config.PROJECT_EMAIL || 'caroffers.tool@gmail.com';
+  const stateCode = zipToState(zip);
   if (!offerEmail) {
     return { error: 'No email configured. Set PROJECT_EMAIL in .env' };
   }
@@ -105,7 +155,11 @@ async function _getCarvanaOfferImpl({ vin, mileage, zip, email }) {
     let page;
     let launchMethod = 'unknown';
     try {
-      result = await launchBrowser();
+      result = await launchBrowser({
+        consumerId,
+        fingerprintProfileId,
+        proxyZip: proxyZip || zip,
+      });
     } catch (launchErr) {
       console.error(`[carvana] Browser launch failed: ${launchErr.message}`);
       throw launchErr;
@@ -120,14 +174,14 @@ async function _getCarvanaOfferImpl({ vin, mileage, zip, email }) {
     // pre-submission behavior; a cold jump to /sell-my-car looks robotic.
     // If profile was warmed within WARMUP_TTL_HOURS, do a short mini-browse;
     // otherwise run the full 10-15 min warmup once and mark it.
-    const isWarm = profileIsWarm(WARMUP_TTL_HOURS);
+    const isWarm = profileIsWarm(consumerId, WARMUP_TTL_HOURS);
     log(`[carvana] Profile warm state: ${isWarm ? 'fresh (mini browse)' : 'cold (full warmup)'}`);
     try {
       if (isWarm) {
         await miniBrowse(page, log);
       } else {
         await fullWarmup(page, log);
-        markProfileWarmed();
+        markProfileWarmed(consumerId);
       }
     } catch (warmErr) {
       log(`[carvana] Warmup error (non-fatal): ${warmErr.message}`);
@@ -281,38 +335,147 @@ async function _getCarvanaOfferImpl({ vin, mileage, zip, email }) {
       }
     });
 
-    // --- Step 2: Switch to VIN tab and enter VIN ---
-    console.log('[carvana] Step 2: Looking for VIN entry...');
+    // --- Step 2: Navigate to entry page (license/VIN toggle) and switch to VIN ---
+    console.log('[carvana] Step 2: Getting to VIN-entry page...');
     checkTimeout();
 
-    // Carvana shows license plate input by default. VIN is on a secondary tab.
-    // Look for a VIN tab/button to click first.
-    const vinTabSelectors = [
-      'button:has-text("VIN")',
-      'a:has-text("VIN")',
+    // Carvana's flow is: landing page -> click "Get My Offer" / "Get Started" ->
+    // /sell-my-car/getoffer/entry. That entry page has:
+    //   - a radio toggle: "License Plate" (default) vs "VIN"
+    //   - ONE text input (reused for whichever mode is selected)
+    //   - sometimes a "State" dropdown (required in both modes)
+    //   - a "Get My Offer" submit button
+    //
+    // The old wizard detected the single input and immediately tried to fill
+    // it with the VIN, failing because License Plate was still selected.
+    //
+    // Fix strategy:
+    //   1. If we're still on /sell-my-car (landing), click Get My Offer to
+    //      advance to /getoffer/entry.
+    //   2. On /getoffer/entry, click the VIN radio BEFORE touching the input.
+    //   3. If a State dropdown is present, pick the consumer's state derived
+    //      from their home zip.
+    //   4. Fill VIN, then click Get My Offer.
+    async function clickLandingGetOffer() {
+      const landingCtaSelectors = [
+        'a[href*="/getoffer"]',
+        'button:has-text("Get My Offer")',
+        'button:has-text("Get Started")',
+        'a:has-text("Get My Offer")',
+        'a:has-text("Get Started")',
+      ];
+      for (const sel of landingCtaSelectors) {
+        try {
+          const el = await page.waitForSelector(sel, { timeout: 3000 });
+          if (el && await el.isVisible()) {
+            await randomMouseMove(page, sel).catch(() => {});
+            await humanDelay(600, 1300);
+            await el.click();
+            log(`[carvana] Clicked landing CTA: ${sel}`);
+            return true;
+          }
+        } catch { /* try next */ }
+      }
+      return false;
+    }
+
+    if (page.url().includes('/sell-my-car') && !page.url().includes('/getoffer')) {
+      await clickLandingGetOffer();
+      await humanDelay(2000, 4000);
+      try { await page.waitForURL(/getoffer/i, { timeout: 15000 }); } catch { /* continue anyway */ }
+      await screenshot(page, '02-after-landing-cta');
+    }
+
+    // On /getoffer/entry — select the VIN radio BEFORE filling the input.
+    // Carvana ships several DOM shapes; try all of them before giving up.
+    // The radio group uses role="radio" with aria-label or <label> text.
+    const vinRadioSelectors = [
+      // Direct radio inputs
+      'input[type="radio"][value="VIN"]',
+      'input[type="radio"][value="vin"]',
+      'input[type="radio"][id*="vin" i]',
+      'input[type="radio"][name*="lookup" i][value*="vin" i]',
+      // ARIA-based
+      '[role="radio"]:has-text("VIN")',
       '[role="tab"]:has-text("VIN")',
+      '[role="button"]:has-text("VIN")',
+      // Label wrappers
       'label:has-text("VIN")',
-      'span:has-text("VIN")',
-      '[data-testid*="vin-tab"]',
-      '[data-testid*="vin"]',
+      'label[for*="vin" i]',
+      // data-testid variants we've seen on Carvana
+      '[data-testid*="vin-toggle" i]',
+      '[data-testid*="vin-radio" i]',
+      '[data-testid*="toggle-vin" i]',
+      'button:has-text("VIN")',
     ];
 
-    for (const sel of vinTabSelectors) {
+    let vinRadioClicked = false;
+    for (const sel of vinRadioSelectors) {
       try {
-        const tab = await page.waitForSelector(sel, { timeout: 3000 });
-        if (tab && await tab.isVisible()) {
-          console.log(`  [carvana] Found VIN tab: ${sel} — clicking...`);
+        const el = await page.waitForSelector(sel, { timeout: 2000 });
+        if (el && await el.isVisible()) {
+          log(`[carvana] Clicking VIN radio: ${sel}`);
           await randomMouseMove(page, sel).catch(() => {});
+          await humanDelay(400, 900);
+          // Some radios are hidden-input + styled-label; force check first.
+          try { await el.check({ force: true }); vinRadioClicked = true; }
+          catch {
+            try { await el.click(); vinRadioClicked = true; } catch { /* next */ }
+          }
+          if (vinRadioClicked) {
+            await humanDelay(700, 1500);
+            await screenshot(page, '02a-vin-radio-clicked');
+            break;
+          }
+        }
+      } catch { /* next */ }
+    }
+    if (!vinRadioClicked) {
+      log('[carvana] VIN radio not found — proceeding (some layouts default to VIN already)');
+    }
+
+    // State dropdown (may or may not be present). Pick consumer's state.
+    const stateSelectSelectors = [
+      'select[name*="state" i]',
+      'select[id*="state" i]',
+      'select[aria-label*="state" i]',
+      '[data-testid*="state" i] select',
+    ];
+    for (const sel of stateSelectSelectors) {
+      try {
+        const dd = await page.waitForSelector(sel, { timeout: 1500 });
+        if (dd && await dd.isVisible()) {
+          try {
+            await dd.selectOption({ value: stateCode });
+            log(`[carvana] Selected state by value: ${stateCode}`);
+          } catch {
+            try {
+              await dd.selectOption({ label: stateCode });
+              log(`[carvana] Selected state by label: ${stateCode}`);
+            } catch (selErr) {
+              log(`[carvana] State select failed for ${stateCode}: ${selErr.message}`);
+            }
+          }
           await humanDelay(500, 1000);
-          await tab.click();
-          await humanDelay(1000, 2000);
-          await screenshot(page, '02-vin-tab-clicked');
           break;
         }
-      } catch {
-        continue;
-      }
+      } catch { /* no state dropdown; may not be required */ }
     }
+
+    // Custom (non-<select>) state picker: listbox with a button.
+    try {
+      const stateBtn = await page.$('[aria-label*="state" i][role="button"], button:has-text("Select State"), button:has-text("Choose State")');
+      if (stateBtn && await stateBtn.isVisible()) {
+        await stateBtn.click();
+        await humanDelay(500, 1000);
+        const opt = await page.$(`[role="option"]:has-text("${stateCode}"), li:has-text("${stateCode}")`);
+        if (opt) {
+          await opt.click();
+          log(`[carvana] Picked custom state widget: ${stateCode}`);
+          await humanDelay(500, 1000);
+        }
+      }
+    } catch { /* no custom state widget */ }
 
     // Now look for the VIN input field
     const vinSelectors = [

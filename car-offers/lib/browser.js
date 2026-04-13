@@ -1,35 +1,91 @@
 const fs = require('fs');
 const path = require('path');
 const config = require('./config');
-const { pickProfile } = require('./fingerprint');
+const { pickProfile, pickProfileByIndex } = require('./fingerprint');
 const { buildStealthInitScript } = require('./stealth-init');
 
-// Persistent Chrome profile — makes the browser "look aged" (cookies,
-// localStorage, history). This is patchright's single biggest recommendation
-// for Cloudflare Turnstile success: ephemeral /tmp profiles get flagged.
-const USER_DATA_DIR = path.join(__dirname, '..', '.chrome-profile');
+// ---------------------------------------------------------------------------
+// Per-consumer isolated state
+// ---------------------------------------------------------------------------
+// Every consumer in the panel gets their OWN persistent Chrome profile and
+// their OWN sticky proxy session. Without isolation, one flagged session
+// would contaminate everyone — a panel is only useful if each consumer looks
+// like a distinct real person over time.
+//
+// Filesystem layout (all excluded from rsync / git):
+//   .chrome-profiles/cons01/       <- patchright user-data-dir
+//   .chrome-profiles/cons01.warmup <- marker file for shopper warmup age
+//   .proxy-sessions/cons01.json    <- { sessionId, createdAt } for Decodo
+//
+// Legacy single-profile paths (.chrome-profile/, .proxy-session,
+// .profile-warmup) are still honored when launchBrowser() is called without
+// a consumerId so the existing /api/carvana / /api/carmax / /api/driveway
+// endpoints don't break.
 
-// Sticky proxy session — keep the same residential IP across runs. Cloudflare
-// treats "new IP + new fingerprint every request" as bot-like. 23h TTL so we
-// refresh before Decodo's 24h max-session expires.
-const SESSION_FILE = path.join(__dirname, '..', '.proxy-session');
+const LEGACY_USER_DATA_DIR = path.join(__dirname, '..', '.chrome-profile');
+const LEGACY_SESSION_FILE  = path.join(__dirname, '..', '.proxy-session');
+const LEGACY_WARMUP_FILE   = path.join(__dirname, '..', '.profile-warmup');
+
+const CHROME_PROFILES_DIR  = path.join(__dirname, '..', '.chrome-profiles');
+const PROXY_SESSIONS_DIR   = path.join(__dirname, '..', '.proxy-sessions');
+
 const SESSION_TTL_MS = 23 * 60 * 60 * 1000;
 
-// Marker file — records when the persistent profile was last warmed via the
-// shopper warmup flow. Read by carvana.js to decide whether a warmup is due.
-const PROFILE_WARMUP_FILE = path.join(__dirname, '..', '.profile-warmup');
+/** Normalize a consumerId into a filesystem-safe slug (e.g. 1 -> "cons01"). */
+function _consumerSlug(consumerId) {
+  if (consumerId == null) return null;
+  const raw = String(consumerId).trim();
+  if (!raw) return null;
+  // If the caller already passed a slug like "cons01", keep it.
+  if (/^cons\d+$/i.test(raw)) return raw.toLowerCase();
+  const n = Number(raw);
+  if (Number.isFinite(n) && n >= 0) {
+    return `cons${String(Math.floor(n)).padStart(2, '0')}`;
+  }
+  // Fallback: strip any non-alphanumeric and prefix.
+  return `cons${raw.replace(/[^a-zA-Z0-9]/g, '').slice(0, 16).toLowerCase()}`;
+}
 
-function getOrCreateProxySession() {
+/** Resolve per-consumer filesystem paths. Legacy fallback when slug is null. */
+function _pathsForConsumer(slug) {
+  if (!slug) {
+    return {
+      userDataDir: LEGACY_USER_DATA_DIR,
+      sessionFile: LEGACY_SESSION_FILE,
+      warmupFile:  LEGACY_WARMUP_FILE,
+      slug: null,
+    };
+  }
+  return {
+    userDataDir: path.join(CHROME_PROFILES_DIR, slug),
+    sessionFile: path.join(PROXY_SESSIONS_DIR, `${slug}.json`),
+    warmupFile:  path.join(CHROME_PROFILES_DIR, `${slug}.warmup`),
+    slug,
+  };
+}
+
+/**
+ * Get or create the sticky proxy session id for a consumer (or for the
+ * legacy single-profile path when sessionFile points at .proxy-session).
+ *
+ * For a consumer the sessionId uses a deterministic base seed so the same
+ * residential IP is preserved across browser launches within the 23h TTL —
+ * and when the TTL rolls, the NEXT session still embeds the slug so the
+ * consumer remains distinct from their siblings.
+ */
+function getOrCreateProxySession(sessionFile, slug) {
   try {
-    const raw = fs.readFileSync(SESSION_FILE, 'utf8');
+    const raw = fs.readFileSync(sessionFile, 'utf8');
     const data = JSON.parse(raw);
     if (data.sessionId && data.createdAt && Date.now() - data.createdAt < SESSION_TTL_MS) {
       return data.sessionId;
     }
   } catch { /* no session or expired */ }
-  const sessionId = `stick${Math.random().toString(36).slice(2, 10)}`;
+  const suffix = Math.random().toString(36).slice(2, 8);
+  const sessionId = slug ? `${slug}-stick-${suffix}` : `stick${Math.random().toString(36).slice(2, 10)}`;
   try {
-    fs.writeFileSync(SESSION_FILE, JSON.stringify({ sessionId, createdAt: Date.now() }));
+    fs.mkdirSync(path.dirname(sessionFile), { recursive: true });
+    fs.writeFileSync(sessionFile, JSON.stringify({ sessionId, createdAt: Date.now() }));
   } catch { /* non-fatal */ }
   return sessionId;
 }
@@ -157,17 +213,33 @@ async function injectStealth(context, profile) {
   await context.addInitScript({ content: script });
 }
 
-/** Mark the profile as warmed — the shopper warmup has run at least once. */
-function markProfileWarmed() {
+/**
+ * Mark the consumer's profile as warmed. With no argument, writes the legacy
+ * single-profile marker (preserves old behavior for existing routes).
+ */
+function markProfileWarmed(consumerId) {
+  const { warmupFile } = _pathsForConsumer(_consumerSlug(consumerId));
   try {
-    fs.writeFileSync(PROFILE_WARMUP_FILE, JSON.stringify({ warmedAt: Date.now() }));
+    fs.mkdirSync(path.dirname(warmupFile), { recursive: true });
+    fs.writeFileSync(warmupFile, JSON.stringify({ warmedAt: Date.now() }));
   } catch { /* non-fatal */ }
 }
 
-/** Has the profile been warmed within ttlHours? */
-function profileIsWarm(ttlHours = 24) {
+/** Has the consumer's profile been warmed within ttlHours? */
+function profileIsWarm(ttlHoursOrConsumerId, maybeTtlHours) {
+  // Backward-compat: old signature was profileIsWarm(ttlHours).
+  // New signature: profileIsWarm(consumerId, ttlHours).
+  let consumerId = null;
+  let ttlHours = 24;
+  if (typeof ttlHoursOrConsumerId === 'number' && maybeTtlHours === undefined) {
+    ttlHours = ttlHoursOrConsumerId;
+  } else {
+    consumerId = ttlHoursOrConsumerId;
+    if (typeof maybeTtlHours === 'number') ttlHours = maybeTtlHours;
+  }
+  const { warmupFile } = _pathsForConsumer(_consumerSlug(consumerId));
   try {
-    const raw = fs.readFileSync(PROFILE_WARMUP_FILE, 'utf8');
+    const raw = fs.readFileSync(warmupFile, 'utf8');
     const data = JSON.parse(raw);
     return data.warmedAt && Date.now() - data.warmedAt < ttlHours * 60 * 60 * 1000;
   } catch { return false; }
@@ -176,16 +248,30 @@ function profileIsWarm(ttlHours = 24) {
 /**
  * Launch a persistent-context stealth Chromium.
  *
- * @param {Object} _options
+ * @param {Object} [_options]
  * @param {boolean} [_options.skipStealth] - Diagnostic override: skip init script.
+ * @param {number|string} [_options.consumerId] - Panel consumer id. When set,
+ *   uses per-consumer isolated profile dir + proxy session + warmup marker,
+ *   and overrides fingerprint via the consumer's fingerprint_profile_id.
+ * @param {number} [_options.fingerprintProfileId] - Direct fingerprint index
+ *   from fingerprint.PROFILES. Used by panel consumers so their visual
+ *   machine identity is fixed across the life of the panel.
+ * @param {string} [_options.proxyZip] - Override the residential proxy zip
+ *   hint. Defaults to 06880 (Westport CT); panel consumers pass their own
+ *   home_zip so their residential IP reflects where they actually live.
  */
 async function launchBrowser(_options = {}) {
+  const slug = _consumerSlug(_options.consumerId);
+  const paths = _pathsForConsumer(slug);
+  const USER_DATA_DIR = paths.userDataDir;
+  const SESSION_FILE = paths.sessionFile;
+
   try { fs.mkdirSync(USER_DATA_DIR, { recursive: true }); } catch { /* exists */ }
 
   // Clear stale SingletonLock from a previous crashed Chromium. Persistent
   // profiles leave these behind on SIGKILL / process crash and refuse to
   // launch until removed. Safe as long as no other Chromium is actually
-  // using this profile right now (we check pgrep).
+  // using THIS consumer's profile right now (we check pgrep).
   try {
     const { execSync } = require('child_process');
     const running = execSync('pgrep -f "user-data-dir=' + USER_DATA_DIR + '" || true').toString().trim();
@@ -197,8 +283,14 @@ async function launchBrowser(_options = {}) {
   } catch { /* non-fatal */ }
 
   const useHeaded = !!process.env.DISPLAY;
-  const sessionId = config.PROXY_HOST && config.PROXY_PASS ? getOrCreateProxySession() : 'no-proxy';
-  const profile = pickProfile(sessionId);
+  const sessionId = config.PROXY_HOST && config.PROXY_PASS
+    ? getOrCreateProxySession(SESSION_FILE, slug)
+    : 'no-proxy';
+  // Consumer has a fixed fingerprint_profile_id; otherwise derive from session.
+  const profile = _options.fingerprintProfileId != null
+    ? pickProfileByIndex(_options.fingerprintProfileId, sessionId)
+    : pickProfile(sessionId);
+  const proxyZip = String(_options.proxyZip || '06880').replace(/[^0-9]/g, '').slice(0, 5) || '06880';
 
   const args = [
     '--disable-blink-features=AutomationControlled',
@@ -223,13 +315,13 @@ async function launchBrowser(_options = {}) {
   let proxyConfig = null;
   if (config.PROXY_HOST && config.PROXY_PASS) {
     const proxyPort = '7000';
-    const proxyUser = `user-${config.PROXY_USER}-country-us-zip-06880-session-${sessionId}-sessionduration-1440`;
+    const proxyUser = `user-${config.PROXY_USER}-country-us-zip-${proxyZip}-session-${sessionId}-sessionduration-1440`;
     proxyConfig = {
       server: `http://${config.PROXY_HOST}:${proxyPort}`,
       username: proxyUser,
       password: config.PROXY_PASS,
     };
-    console.log(`[browser] Using proxy: ${config.PROXY_HOST}:${proxyPort} stickySession=${sessionId}`);
+    console.log(`[browser] Using proxy: ${config.PROXY_HOST}:${proxyPort} stickySession=${sessionId} zip=${proxyZip} consumer=${slug || 'legacy'}`);
   } else {
     console.log('[browser] No proxy configured — using direct connection');
   }
@@ -293,7 +385,7 @@ async function launchBrowser(_options = {}) {
   const pages = context.pages();
   const page = pages.length > 0 ? pages[0] : await context.newPage();
 
-  return { browser: context, page, launchMethod, profile };
+  return { browser: context, page, launchMethod, profile, sessionId, consumerSlug: slug };
 }
 
 /** Safely close a browser/context instance. */
@@ -350,5 +442,7 @@ module.exports = {
   startMouseDrift,
   markProfileWarmed,
   profileIsWarm,
-  USER_DATA_DIR,
+  USER_DATA_DIR: LEGACY_USER_DATA_DIR,
+  CHROME_PROFILES_DIR,
+  PROXY_SESSIONS_DIR,
 };
