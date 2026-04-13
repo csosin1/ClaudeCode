@@ -1356,49 +1356,55 @@ def generate_comparison_content(deals, title):
 
 
 def _loss_forecast_buildup_tables(model_results):
-    """Per-deal lifetime loss-forecast build-up using the empirical Markov
-    absorption model (see default_model._build_markov_absorption).
+    """Per-deal lifetime loss-forecast build-up using the conditional Markov
+    forward simulation (see carvana_abs/conditional_markov.py).
 
-    For each deal:
-        Realized (net)    = cert's cumulative net charge-offs
-        DQ pipeline       = sum over loans currently in state ≥ 1 of
-                            P(default | state, tier) × ending_balance × severity
-        Performing future = sum over loans currently in state 0 of
-                            P(default | state=0, tier) × ending_balance × severity
-        Total expected    = realized + DQ pipeline + performing future
+    For each currently-active loan we walk its (state, age, balance) forward
+    month-by-month to original term, applying transition probabilities binned
+    by (tier, current_state, age_bucket, FICO_bucket, LTV_bucket, modified)
+    and amortizing the balance via empirical paydown curves binned by
+    (tier, term_bucket, age). Mass entering Default at month t contributes
+    expected loss = mass × balance(t) × LGD(tier, age, FICO, LTV).
 
-    Per-state P(default) comes from a 6-state absorbing Markov chain
-    (Curr / 1pmt / 2pmt / 3pmt / 4pmt / 5+pmt → Default | Payoff) fit on
-    the tier's full loan_performance transition history. No heuristic
-    multipliers — the probability of eventual default given current
-    delinquency status is read directly from observed transitions.
+    Output columns:
+        Realized $/% — cert's cumulative net charge-off
+        DQ pipeline $ — sum of expected future loss for loans currently 1+ payment behind
+        Performing future $ — same for loans currently up-to-date
+        Total $ midpoint — realized + dq + performing
+        Total $ −1σ / +1σ — total ± 1 standard deviation of forecast (Bernoulli per loan, summed)
     """
-    bu = model_results.get("segments", {}).get("empirical_loss_buildup", {})
-    by_deal = bu.get("by_deal", {})
-    absorption = bu.get("markov_absorption", {})
+    # Read from dashboard.db model_results['conditional_markov'] directly so
+    # the build-up table picks up forecasts written by conditional_markov.py
+    # without the model_results JSON blob having to be re-saved.
+    cm = q("SELECT value FROM model_results WHERE key='conditional_markov'")
+    if cm.empty:
+        return ""
+    cm_data = json.loads(cm.iloc[0]["value"])
+    by_deal = cm_data.get("by_deal", {})
+    p_def_ref = cm_data.get("p_default_reference", {})
 
     def build_for(deals, title):
         rows = []
         for deal in deals:
             d = by_deal.get(deal)
-            if not d:
-                continue
+            if not d: continue
             orig = get_orig_bal(deal)
-            if not orig or orig <= 0:
-                continue
-            realized = d["realized"]; dq_pending = d["dq_pending"]
-            performing = d["performing_future"]; total = d["total_expected"]
+            if not orig or orig <= 0: continue
+            realized = d["realized"]; dq = d["dq_pending"]; perf = d["performing_future"]
+            mid = d["total_expected"]
+            lo = d["total_minus_1sd"]; hi = d["total_plus_1sd"]
             def pct(x): return f"{x/orig:.2%}" if orig else "-"
             rows.append({
                 "Deal": deal,
                 "Active Loans": f"{d['active_loans']:,}",
-                "Severity": f"{d['severity']:.0%}",
                 "Realized $": fm(realized),
                 "Realized %": pct(realized),
-                "DQ Pipeline $": fm(dq_pending),
-                "Performing Future $": fm(performing),
-                "Total Expected $": fm(total),
-                "Total Expected %": pct(total),
+                "DQ Pipeline $": fm(dq),
+                "Performing Future $": fm(perf),
+                "Total $ −1σ": fm(lo),
+                "Total $ midpoint": fm(mid),
+                "Total $ +1σ": fm(hi),
+                "Total %": pct(mid),
             })
         if not rows:
             return ""
@@ -1409,31 +1415,35 @@ def _loss_forecast_buildup_tables(model_results):
     h += build_for(PRIME_DEALS, "Prime")
     h += build_for(NONPRIME_DEALS, "Non-Prime")
 
-    # Per-state P(default) reference table — shows the actual probabilities
-    # the buildup is using.
-    if absorption:
-        labels = ["Curr (0)", "1 pmt", "2 pmt", "3 pmt", "4 pmt", "5+ pmt"]
-        ref = pd.DataFrame([
-            {"State": labels[i],
-             "Prime P(default)": f"{absorption['prime'][i]:.2%}" if absorption.get("prime") else "-",
-             "Non-Prime P(default)": f"{absorption['nonprime'][i]:.2%}" if absorption.get("nonprime") else "-"}
-            for i in range(6)
-        ])
-        h += "<h3>Empirical P(eventual default | current state)</h3>"
-        h += table_html(ref, cls="compare")
+    # Reference table: 1-month default + payoff probabilities at the most
+    # populated (state, age, FICO) cells. Lets you eyeball the model.
+    for tier in ("Prime", "NonPrime"):
+        rows = p_def_ref.get(tier, [])
+        if not rows: continue
+        # Collapse to most-populated cells, sort by N descending, top 30
+        rows_sorted = sorted(rows, key=lambda r: -r["n"])[:30]
+        ref_df = pd.DataFrame([{
+            "State": r["state"], "Age": r["age"], "FICO": r["fico"],
+            "n obs": f"{r['n']:,}",
+            "P(Default) 1mo": f"{r['p_default_1mo']:.4%}",
+            "P(Payoff) 1mo": f"{r['p_payoff_1mo']:.4%}",
+        } for r in rows_sorted])
+        h += f"<h3>{tier} — One-month transition probabilities (top 30 cells)</h3>"
+        h += table_html(ref_df, cls="compare")
 
     if h:
         h = ("<div class=\"tc\">" + h
              + "<p style=\"font-size:.75rem;color:#666;margin-top:8px;\">"
-             "<b>Realized</b> from the servicer cert's cumulative net charge-off "
-             "line. <b>DQ pipeline</b> = sum over each loan currently 1+ payment "
-             "behind of P(default | current state, tier) × current balance × "
-             "per-deal severity. <b>Performing future</b> = same calculation "
-             "for loans currently up-to-date. P(default) is fit by inverting the "
-             "tier's 6-state absorbing Markov chain on its full loan_performance "
-             "transition history — no heuristic multipliers. Severity per deal = "
-             "1 − cum&nbsp;recoveries / cum&nbsp;gross&nbsp;losses (60% baseline if no loss "
-             "history yet).</p></div>")
+             "<b>Realized</b> from the servicer cert's cumulative net charge-off line. "
+             "<b>DQ pipeline</b> + <b>Performing future</b> are the per-loan forward "
+             "simulation results for active loans currently delinquent / current. "
+             "Transitions binned by tier × state × age × FICO × LTV × modified flag "
+             "with sparse-cell fallbacks. Balance amortized monthly via empirical "
+             "paydown curves observed in performing loans (modified loans use a "
+             "separate curve or held flat if too sparse). LGD per defaulted loan "
+             "binned by tier × age × FICO × LTV. ±1σ accumulates per-loan "
+             "Bernoulli variance — captures within-portfolio dispersion, not macro "
+             "shock.</p></div>")
     return h
 
 
