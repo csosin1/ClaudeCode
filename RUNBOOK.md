@@ -28,12 +28,16 @@ Last updated: 2026-04-12
 - Deploy: auto-deploy syncs `carvana/` → `/var/www/carvana/`
 
 ### Car Offer Comparison Tool
-- URL: http://159.223.127.125/car-offers/
-- Server path: /opt/car-offers/
-- Process: systemd `car-offers.service` → `node server.js` on port 3100
-- Dependencies: playwright-extra, puppeteer-extra-plugin-stealth, dotenv, express
-- Env vars: `PROXY_HOST`, `PROXY_PORT`, `PROXY_USER`, `PROXY_PASS`, `PROJECT_EMAIL`, `PORT`
-- Deploy script: `deploy/car-offers.sh`
+- Live:    https://casinv.dev/car-offers/
+- Preview: https://casinv.dev/car-offers/preview/
+- Server paths: /opt/car-offers/ (live) and /opt/car-offers-preview/ (preview)
+- Process: two systemd units — `car-offers.service` on port 3100 (live) and `car-offers-preview.service` on port 3101 (preview), both running `node server.js`
+- Browser stack: Patchright-patched Chromium, headed on Xvfb :99 (deploy-script-managed). Persistent profile at `<path>/.chrome-profile/`, sticky Decodo session at `<path>/.proxy-session` (23h TTL).
+- Dependencies: patchright, playwright, dotenv, express (plus `playwright-extra` + `puppeteer-extra-plugin-stealth` still in package.json as fallback — active code path is Patchright)
+- Env vars (in `/opt/car-offers{,-preview}/.env`): `PROXY_HOST`, `PROXY_PORT`, `PROXY_USER`, `PROXY_PASS`, `PROJECT_EMAIL`, `PORT`
+- Deploy script: `deploy/car-offers.sh` (preview-first; promote via `deploy/promote.sh car-offers`)
+- Health check: `curl -sf https://casinv.dev/car-offers/ | head -c 200`
+- Diagnostics endpoint: `/api/last-run` returns last Carvana attempt's wizard log + proxy diag
 
 ### Gym Intelligence
 - URL: http://159.223.127.125/gym-intelligence/
