@@ -356,20 +356,31 @@ async function _getCarmaxOfferImpl({ vin, mileage, zip, condition, email, consum
             // Order matters: NO catches damage/issue questions; KEYS catches
             // "How many keys"; OWNERSHIP / TITLE for the post-condition page.
             const SAFE_NO = /^(no|none|no, never)$/i;
-            const SAFE_KEYS = /^(2|two|2 keys|two keys|both keys)$/i;
+            // CarMax keys-question options observed: "2 or more" + "1".
+            // "2 or more" is the standard "I have both factory keys" answer.
+            const SAFE_KEYS = /^(2|two|2 keys|two keys|both keys|2 or more)$/i;
             const SAFE_OWNERSHIP = /^(i own it|own outright|paid off|no loan|1 owner|original owner|i'm the original owner|i am the original owner)$/i;
             const SAFE_TITLE = /^(clean|clean title|in my name)$/i;
             const SAFE_USAGE = /^(personal|family|commute|none of these|none of the above)$/i;
+            // Sell-vs-trade question: pick the trade-side so the offer is the
+            // "trade-in" value (apples-to-apples with carvana/driveway which
+            // also default to selling outright). CarMax's sell-only path is
+            // "Selling only".
+            const SAFE_INTENT = /^(selling only|sell|just selling|sell only)$/i;
 
             for (const [name, opts] of groups) {
               // Already answered? Skip.
               if (opts.some(o => o.input.checked)) continue;
+              // Empty-label groups (e.g. select-style hidden radios) — skip,
+              // we can't pick safely without seeing the label text.
+              if (!opts.some(o => o.label && o.label.trim())) continue;
               // Pick the "No" if present, else the "2" if it's a keys group, etc.
               let pick = opts.find(o => SAFE_NO.test(o.label));
               if (!pick) pick = opts.find(o => SAFE_KEYS.test(o.label));
               if (!pick) pick = opts.find(o => SAFE_OWNERSHIP.test(o.label));
               if (!pick) pick = opts.find(o => SAFE_TITLE.test(o.label));
               if (!pick) pick = opts.find(o => SAFE_USAGE.test(o.label));
+              if (!pick) pick = opts.find(o => SAFE_INTENT.test(o.label));
               if (pick) {
                 // Click via the input element so the React handler fires.
                 // Some forms wrap the input in a span/label; clicking the
