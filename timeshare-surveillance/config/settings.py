@@ -17,6 +17,7 @@ COMBINED_JSON = DATA_DIR / "combined.json"
 FLAG_STATE_JSON = DATA_DIR / "flag_state.json"
 SEEN_ACCESSIONS_JSON = DATA_DIR / "seen_accessions.json"
 FIXTURES_DIR = BASE_DIR / "pipeline" / "fixtures"
+SQLITE_DB_PATH = DATA_DIR / "surveillance.db"
 
 LOG_DIR = Path("/var/log/timeshare-surveillance")
 LOG_FILE = LOG_DIR / "pipeline.log"
@@ -50,15 +51,109 @@ TARGETS = [
 EDGAR_USER_AGENT = "CAS Investment Partners research@casinvestmentpartners.com"
 EDGAR_RATE_LIMIT_PER_SEC = 8
 FILING_TYPES = ["10-K", "10-Q"]
-LOOKBACK_FILINGS = 12
+LOOKBACK_FILINGS = 4
 
 # ----- Anthropic -----
 
-ANTHROPIC_MODEL = "claude-opus-4-5"
-# chars/4 heuristic; keep chunks under this to stay within context safely.
-CHUNK_CHAR_LIMIT = 75_000 * 4          # ~75k tokens
-CHUNK_OVERLAP_CHARS = 5_000 * 4        # ~5k tokens overlap
-FULL_DOC_CHAR_LIMIT = 80_000 * 4       # above this we chunk
+ANTHROPIC_MODEL = "claude-sonnet-4-6"
+# Legacy chunking constants (unused after XBRL-first refactor, kept to avoid
+# breaking any out-of-tree callers).
+CHUNK_CHAR_LIMIT = 75_000 * 4
+CHUNK_OVERLAP_CHARS = 5_000 * 4
+FULL_DOC_CHAR_LIMIT = 80_000 * 4
+
+# Narrative excerpt budget — cap per section handed to Claude (~3k tokens).
+NARRATIVE_EXCERPT_CHAR_LIMIT = 12_000
+
+# ----- XBRL tag mapping -----
+#
+# Each METRIC_SCHEMA key maps to one or more candidate us-gaap (or company-ext)
+# concept names. The fetcher walks candidates in order and stops at the first
+# that has a value for the target period. `scale` multiplies the raw USD value
+# so "_mm" fields end up in millions.
+#
+# Tag names are the un-namespaced local names as they appear in companyfacts
+# JSON (SEC exposes us-gaap and any company-specific extension namespace under
+# `facts.<namespace>.<TagName>`). The fetcher searches us-gaap first, then any
+# other namespace present in the JSON.
+
+XBRL_TAG_MAP: dict[str, dict] = {
+    "gross_receivables_total_mm": {
+        "tags": [
+            "FinancingReceivableBeforeAllowanceForCreditLoss",
+            "TimeshareFinancingReceivable",
+            "NotesReceivableGross",
+        ],
+        "unit": "USD",
+        "scale": 1e-6,
+    },
+    "allowance_for_loan_losses_mm": {
+        "tags": [
+            "FinancingReceivableAllowanceForCreditLoss",
+            "AllowanceForLoanAndLeaseLossesReceivablesNetReportedAmount",
+        ],
+        "unit": "USD",
+        "scale": 1e-6,
+    },
+    "net_receivables_mm": {
+        "tags": [
+            "FinancingReceivableAfterAllowanceForCreditLoss",
+            "NotesReceivableNet",
+        ],
+        "unit": "USD",
+        "scale": 1e-6,
+    },
+    "provision_for_loan_losses_mm": {
+        "tags": [
+            "ProvisionForLoanAndLeaseLosses",
+            "ProvisionForLoanLossesExpensed",
+            "ProvisionForDoubtfulAccounts",
+        ],
+        "unit": "USD",
+        "scale": 1e-6,
+    },
+    "originations_mm": {
+        "tags": [
+            "TimeshareFinancingReceivableOriginations",
+            "PaymentsToAcquireNotesReceivable",
+        ],
+        "unit": "USD",
+        "scale": 1e-6,
+    },
+    "securitized_receivables_mm": {
+        "tags": [
+            "SecuritizedTimeshareFinancingReceivable",
+            "SecuritizedReceivablesFairValueDisclosure",
+        ],
+        "unit": "USD",
+        "scale": 1e-6,
+    },
+    "gain_on_sale_mm": {
+        "tags": [
+            "GainLossOnSalesOfLoansNet",
+            "GainLossOnSaleOfNotesReceivable",
+        ],
+        "unit": "USD",
+        "scale": 1e-6,
+    },
+}
+
+# ----- Narrative section locator patterns -----
+#
+# Each section maps to a list of case-insensitive keyword regexes. A section is
+# considered located when any keyword matches the stripped filing text; the
+# fetcher then captures a bounded window around the first match.
+
+NARRATIVE_SECTION_PATTERNS: dict[str, list[str]] = {
+    "delinquency": [r"delinqu", r"past due", r"aging"],
+    "fico": [r"\bFICO\b", r"credit score"],
+    "vintage": [r"vintage", r"static pool"],
+    "management_commentary": [
+        r"Critical Accounting",
+        r"Credit Losses",
+        r"Allowance for",
+    ],
+}
 
 # ----- Thresholds (CRITICAL + WARNING) — exactly per user spec.
 # comparator tuples: (op, value). op is ">" (strict), "<" (strict), "==".

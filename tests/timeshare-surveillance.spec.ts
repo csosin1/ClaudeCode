@@ -79,3 +79,36 @@ test.describe('Landing page link', () => {
     await expect(card).toContainText(/Timeshare/i);
   });
 });
+
+// XBRL-first refactor: combined.json must still be served alongside the
+// dashboard and must preserve the METRIC_SCHEMA shape the React code relies
+// on. These tests fetch combined.json directly (via the browser) and assert
+// structural properties without caring whether the pipeline ran against real
+// EDGAR data or the --dry-run stub path.
+test.describe('combined.json shape (XBRL-first refactor)', () => {
+  test('served at the expected URL with a JSON array body', async ({ page }) => {
+    const resp = await page.goto('/timeshare-surveillance/preview/data/combined.json');
+    // 200 when the pipeline has run, 404 is also acceptable if nothing has
+    // landed yet — but when 200, the body must parse as an array.
+    if (resp && resp.status() === 200) {
+      const body = await resp.json();
+      expect(Array.isArray(body)).toBeTruthy();
+      if (body.length > 0) {
+        const first = body[0];
+        // Every record carries at minimum these bookkeeping fields.
+        for (const k of ['ticker', 'period_end', 'accession']) {
+          expect(first).toHaveProperty(k);
+        }
+        // And at least one METRIC_SCHEMA-style numeric key.
+        expect(first).toHaveProperty('gross_receivables_total_mm');
+      }
+    }
+  });
+
+  test('dashboard HTML references ./data/combined.json (not a legacy path)', async ({ page }) => {
+    const resp = await page.goto('/timeshare-surveillance/preview/');
+    expect(resp?.status()).toBe(200);
+    const html = await page.content();
+    expect(html).toContain('data/combined.json');
+  });
+});
