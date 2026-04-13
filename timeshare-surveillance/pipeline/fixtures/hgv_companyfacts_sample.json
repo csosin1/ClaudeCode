@@ -1,0 +1,126 @@
+{
+  "cik": 1674168,
+  "entityName": "Hilton Grand Vacations Inc.",
+  "facts": {
+    "us-gaap": {
+      "FinancingReceivableBeforeAllowanceForCreditLoss": {
+        "label": "Financing Receivable, before Allowance for Credit Loss",
+        "description": "Amount, before allowance for credit loss, of financing receivable.",
+        "units": {
+          "USD": [
+            {
+              "end": "2024-12-31",
+              "val": 3380000000,
+              "accn": "0001674168-25-000002",
+              "fy": 2024,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2025-02-21",
+              "frame": "CY2024Q4I"
+            },
+            {
+              "end": "2025-03-31",
+              "val": 3450000000,
+              "accn": "0001674168-25-000012",
+              "fy": 2025,
+              "fp": "Q1",
+              "form": "10-Q",
+              "filed": "2025-05-02",
+              "frame": "CY2025Q1I"
+            }
+          ]
+        }
+      },
+      "FinancingReceivableAllowanceForCreditLoss": {
+        "label": "Financing Receivable, Allowance for Credit Loss",
+        "description": "Amount of allowance for credit loss on financing receivable.",
+        "units": {
+          "USD": [
+            {
+              "end": "2024-12-31",
+              "val": 372000000,
+              "accn": "0001674168-25-000002",
+              "fy": 2024,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2025-02-21",
+              "frame": "CY2024Q4I"
+            },
+            {
+              "end": "2025-03-31",
+              "val": 380000000,
+              "accn": "0001674168-25-000012",
+              "fy": 2025,
+              "fp": "Q1",
+              "form": "10-Q",
+              "filed": "2025-05-02",
+              "frame": "CY2025Q1I"
+            }
+          ]
+        }
+      },
+      "ProvisionForLoanAndLeaseLosses": {
+        "label": "Provision for Loan and Lease Losses",
+        "description": "Amount of expense related to credit loss from transactions.",
+        "units": {
+          "USD": [
+            {
+              "start": "2024-01-01",
+              "end": "2024-12-31",
+              "val": 210000000,
+              "accn": "0001674168-25-000002",
+              "fy": 2024,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2025-02-21",
+              "frame": "CY2024"
+            },
+            {
+              "start": "2025-01-01",
+              "end": "2025-03-31",
+              "val": 54000000,
+              "accn": "0001674168-25-000012",
+              "fy": 2025,
+              "fp": "Q1",
+              "form": "10-Q",
+              "filed": "2025-05-02",
+              "frame": "CY2025Q1"
+            }
+          ]
+        }
+      }
+    },
+    "hgv": {
+      "TimeshareFinancingReceivableOriginations": {
+        "label": "Timeshare Financing Receivable Originations",
+        "description": "Gross originations of timeshare financing receivables during the period.",
+        "units": {
+          "USD": [
+            {
+              "start": "2024-01-01",
+              "end": "2024-12-31",
+              "val": 1450000000,
+              "accn": "0001674168-25-000002",
+              "fy": 2024,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2025-02-21",
+              "frame": "CY2024"
+            },
+            {
+              "start": "2025-01-01",
+              "end": "2025-03-31",
+              "val": 375000000,
+              "accn": "0001674168-25-000012",
+              "fy": 2025,
+              "fp": "Q1",
+              "form": "10-Q",
+              "filed": "2025-05-02",
+              "frame": "CY2025Q1"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

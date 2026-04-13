@@ -1,83 +1,90 @@
 ## Current Task
-Name:              timeshare-surveillance (initial build)
+Name:              timeshare-surveillance (XBRL-first refactor)
 Status:            building
-Spec approved:     yes (user-provided detailed spec, 2026-04-12)
-Rollback tag:      n/a (new project, no prior live)
-Branch:            claude/timeshare-surveillance-build-edgar-credit-surveillance-pipeline
+Spec approved:     yes (user asked for hybrid XBRL + narrative-only LLM, 2026-04-13)
+Rollback tag:      n/a (preview-only; not yet promoted)
+Branch:            claude/timeshare-surveillance-refactor-to-xbrl-first-extraction-with-s
 Resume hint:       Read CLAUDE.md, LESSONS.md, RUNBOOK.md, then this file's Spec section before starting.
 
 ## Spec
 
-**Goal:** Production credit surveillance system for timeshare receivables (HGV, VAC, TNL). Three layers: SEC EDGAR data pipeline, auto-update watcher daemon, and a Bloomberg-terminal-style React dashboard.
+**Problem with v1:** we send the entire 10-Q / 10-K text to Claude and ask for a full JSON extract. A single HGV 10-K chunk is ~75k input tokens, which busted the account's 30k-TPM Anthropic rate limit. Also wasteful — most of what we extract (total receivables, allowance, provision, originations) is already structured in the SEC's XBRL feed, which is free and instant.
 
-**Success criteria (what Playwright/QA verifies on preview):**
-- https://casinv.dev/timeshare-surveillance/preview/ returns 200 at 390px and 1280px.
-- Dashboard header shows "Timeshare Receivable Surveillance" and "HGV · VAC · TNL".
-- KPI scorecard has 3 columns (HGV, VAC, TNL).
-- Red-flag panel renders (empty state allowed when no data yet).
-- All 6 charts render without JS console errors.
-- Admin setup page at /timeshare-surveillance/preview/admin/ loads, has fields for SMTP_HOST, SMTP_USER, SMTP_PASSWORD, ALERT_EMAIL, ANTHROPIC_API_KEY, is protected by ADMIN_TOKEN basic auth, and writes to the preview `.env`.
-- Landing page (http://159.223.127.125/) has the Timeshare Surveillance card and it returns 200.
-- Pipeline unit test: running `pipeline/fetch_and_parse.py --ticker HGV --dry-run` uses a bundled fixture HTML and writes a valid JSON extract to `data/raw/` (no network needed for the test — fixture mode only).
-- `pipeline/red_flag_diff.py` with fixture data returns correct NEW/ESCALATED/RESOLVED diff state.
+**Refactor:** hybrid extraction.
 
-### File layout (inside site-deploy repo, under `timeshare-surveillance/`)
-```
-timeshare-surveillance/
-├── config/settings.py
-├── pipeline/
-│   ├── fetch_and_parse.py        # supports --ticker, --dry-run (fixture)
-│   ├── merge.py
-│   ├── red_flag_diff.py
-│   ├── fixtures/hgv_10q_sample.html   # small fake filing for offline testing
-│   └── requirements.txt
-├── watcher/
-│   ├── edgar_watcher.py
-│   ├── watcher.service.template
-│   ├── admin.service.template
-│   └── cron_refresh.sh
-├── alerts/email_alert.py
-├── admin/
-│   ├── app.py                    # Flask /setup page, basic auth via ADMIN_TOKEN
-│   └── templates/setup.html      # mobile-first form
-├── dashboard/index.html          # self-contained React + Recharts + Tailwind CDN
-├── data/
-│   ├── raw/                      # gitkeep
-│   ├── combined.json             # empty array at bootstrap
-│   └── flag_state.json           # empty object at bootstrap
-├── deploy/nginx-snippet.conf     # reference only; real nginx is in site-deploy/deploy/update_nginx.sh
-├── tests-unit/                   # pytest for pipeline/red_flag_diff
-│   └── test_red_flag_diff.py
-└── README.md
-```
+1. **XBRL first (free, structured, fast).** Hit `data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json` once per ticker. It returns every US-GAAP-tagged fact the company has ever filed, keyed by tag and period. Map the tags we care about into our METRIC_SCHEMA. This covers the balance-sheet / P&L stuff exactly — no LLM call needed.
+2. **Claude on narrow snippets only.** For the remaining fields (delinquency bucket percentages, FICO distribution, vintage loss table, management commentary), download the filing HTML, locate the relevant section via heuristic markers (section headers like "Delinquency", "Past Due", "FICO", "Vintage", plus MD&A / "Critical Accounting Estimates"), and send ONLY those ~2–5k-token excerpts to Claude. No more whole-filing uploads.
+3. **SQLite persistence.** Store everything in `data/surveillance.db`. Replaces per-filing JSON blobs in `data/raw/`. `merge.py` becomes "export from DB to combined.json".
 
-Deploy script location (NOT under timeshare-surveillance/ — sourced by main deploy):
-```
-/opt/site-deploy/deploy/timeshare-surveillance.sh
-```
+### Success criteria
 
-Playwright spec location:
-```
-/opt/site-deploy/tests/timeshare-surveillance.spec.ts
-```
+- `python pipeline/fetch_and_parse.py --ticker HGV` (no `--dry-run`) pulls recent 10-Qs and 10-Ks for HGV, populates the DB, and reports: records ingested, XBRL fields populated per filing, narrative-Claude calls made per filing, total input tokens used.
+- A typical filing consumes **≤15k total input tokens** to Claude (vs ~225k in v1 for a 3-chunk 10-K). Multiple filings per minute feasible on the 30k-TPM account.
+- Dashboard renders unchanged — `combined.json` has the same shape as v1 so the React code doesn't change.
+- `--dry-run` still works (fixture XBRL JSON + fixture HTML snippets, no network).
+- All 24 Playwright tests still pass on preview.
+- Unit tests for xbrl_fetch (parsing SEC companyfacts JSON) and narrative_extract (locating sections in sample HTML) both pass.
 
-### Site-deploy adaptations vs. the user-provided spec
-- Replace standalone `install.sh` with `deploy/timeshare-surveillance.sh` that follows the gym-intelligence / car-offers pattern: rsync to `/opt/timeshare-surveillance-{live,preview}/`, per-instance venv, write systemd units, restart preview only.
-- Dashboard served by nginx as static (no Flask-served setup page on same port). Admin lives on a separate Flask process bound to 127.0.0.1:8510 (live) / 8511 (preview), proxied under `/timeshare-surveillance/admin/` and `/timeshare-surveillance/preview/admin/`.
-- Two systemd units per instance: `timeshare-surveillance-watcher{,-preview}.service` and `timeshare-surveillance-admin{,-preview}.service`.
-- `.env` lives in `/opt/timeshare-surveillance-{live,preview}/.env` — deploy script creates it with empty template on first install. User fills via the admin setup page.
-- `ADMIN_TOKEN` — randomly generated on first install and written to both `.env` and `/var/log/timeshare-surveillance/ADMIN_TOKEN.txt` (chmod 600) so the orchestrator can retrieve it and send via notify.sh. Basic-auth gate on the admin page.
-- Combined.json served to dashboard at relative path `./data/combined.json` (dashboard lives under `dashboard/`, pipeline writes into sibling `data/` dir; rsync includes data dir so nginx can serve it at `/timeshare-surveillance/preview/data/combined.json`).
+### File layout changes
 
-### Non-goals (explicit)
-- No HTTPS management in this task (casinv.dev already has Let's Encrypt via certbot — update_nginx.sh handles it).
-- No auth beyond the ADMIN_TOKEN basic auth on /admin/. Dashboard is public (read-only research tool).
-- No database — flat-file JSON is sufficient for this dataset.
-- No historical backfill on first deploy — watcher's first run captures new filings going forward; the manual `fetch_and_parse.py` without `--dry-run` is what pulls history when creds are configured.
+**New files:**
+- `timeshare-surveillance/pipeline/xbrl_fetch.py`
+- `timeshare-surveillance/pipeline/narrative_extract.py`
+- `timeshare-surveillance/pipeline/db.py`
+- `timeshare-surveillance/pipeline/schema.sql`
+- `timeshare-surveillance/pipeline/fixtures/hgv_companyfacts_sample.json`
+- `timeshare-surveillance/pipeline/fixtures/hgv_delinquency_section.html`
+- `timeshare-surveillance/tests-unit/test_xbrl_fetch.py`
+- `timeshare-surveillance/tests-unit/test_narrative_extract.py`
+- `timeshare-surveillance/tests-unit/test_db.py`
 
-### Reference: user-provided spec
+**Rewritten files:**
+- `timeshare-surveillance/pipeline/fetch_and_parse.py` — orchestrator only. No more monolithic Claude call.
+- `timeshare-surveillance/pipeline/merge.py` — `db.export_combined() → combined.json`, plus derived QoQ/YoY.
+- `timeshare-surveillance/config/settings.py` — add `XBRL_TAG_MAP`, `NARRATIVE_SECTION_PATTERNS`, `SQLITE_DB_PATH`. Switch `ANTHROPIC_MODEL` to `claude-sonnet-4-6`. Restore `LOOKBACK_FILINGS = 4` and `FILING_TYPES = ["10-K","10-Q"]`.
 
-See the full original spec in this session's history. Key excerpts codified above. The user-provided metrics list (METRIC_SCHEMA), THRESHOLDS dict, chart list (6 charts + vintage + peer table + management commentary), EDGAR config (8 req/s, LOOKBACK_FILINGS=12), Claude extraction system prompt, and email alert format are all authoritative — the builder must reproduce them exactly.
+**Unchanged:**
+- `dashboard/index.html` (reads combined.json, shape stays the same)
+- `admin/` (Flask app + template, already public per user request)
+- `alerts/email_alert.py`
+- `pipeline/red_flag_diff.py`
+- `deploy/timeshare-surveillance.sh` (sqlite3 is stdlib, no dep changes)
+- `watcher/edgar_watcher.py` — internal subprocess call path unchanged; the orchestrator under the hood just does less LLM.
+
+### XBRL_TAG_MAP starter — builder must verify tag names against a live companyfacts JSON before trusting:
+
+| METRIC_SCHEMA key                     | Likely US-GAAP tag(s)                                                                          | Unit | Scale  |
+|---------------------------------------|------------------------------------------------------------------------------------------------|------|--------|
+| gross_receivables_total_mm            | FinancingReceivableBeforeAllowanceForCreditLoss, company-ext TimeshareFinancingReceivable       | USD  | 1e-6   |
+| allowance_for_loan_losses_mm          | FinancingReceivableAllowanceForCreditLoss                                                      | USD  | 1e-6   |
+| net_receivables_mm                    | FinancingReceivableAfterAllowanceForCreditLoss                                                 | USD  | 1e-6   |
+| provision_for_loan_losses_mm          | ProvisionForLoanAndLeaseLosses / ProvisionForLoanLossesExpensed                                 | USD  | 1e-6   |
+| originations_mm                       | company-specific; inspect companyfacts and pick the best fit                                    | USD  | 1e-6   |
+| securitized_receivables_mm            | company-ext                                                                                     | USD  | 1e-6   |
+| gain_on_sale_mm                       | GainLossOnSalesOfLoansNet / company-ext                                                         | USD  | 1e-6   |
+
+Derived: `allowance_coverage_pct = allowance/gross_receivables`.
+
+Everything else — delinquency bucket %, FICO distribution, vintage table, gain-on-sale margin %, advance rates, rescission, VPG, tour flow, management commentary — via narrow Claude calls on located HTML sections.
+
+### Narrative extraction approach
+
+Function: `narrative_extract.locate_sections(html) → dict[section_name, excerpt_text]`.
+
+Section finders (case-insensitive regex match on nearby headings/text, then pull a bounded window of following text, stripped of HTML tags, capped at ~3k tokens per section):
+- `delinquency` — "delinqu", "past due", "aging"
+- `fico` — "FICO", "credit score"
+- `vintage` — "vintage", "static pool"
+- `management_commentary` — "Critical Accounting", "Credit Losses" in MD&A, or "Allowance for" discussion in MD&A
+
+One Claude call per located section, each ~2–4k input tokens, return only the fields relevant to that section. Combine with XBRL metrics into one filing record. Persist.
+
+### Non-goals
+
+- No change to `combined.json` shape.
+- No backfill migration of v1 JSON blobs.
+- No change to watcher cadence, email alerts, or red-flag thresholds.
+- No promote to live — preview only until user accepts.
 
 ## Builder Output
 (pending)
@@ -89,4 +96,4 @@ See the full original spec in this session's history. Key excerpts codified abov
 (pending)
 
 ## Blockers
-None at build time. After deploy, user must paste SMTP credentials + ANTHROPIC_API_KEY into the /admin/ setup page before the watcher can run productively. Dashboard renders empty-state without them.
+None at build time. Hard design constraint: ≤15k total Claude input tokens per filing to fit 30k-TPM.

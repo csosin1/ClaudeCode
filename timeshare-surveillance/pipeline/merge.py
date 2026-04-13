@@ -19,21 +19,18 @@ _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent))
 
 from config import settings  # noqa: E402
+from pipeline import db as pdb  # noqa: E402
 
 log = logging.getLogger("merge")
 
 
-def _load_raw() -> list[dict]:
-    out = []
-    if not settings.RAW_DIR.exists():
-        return out
-    for p in sorted(settings.RAW_DIR.glob("*.json")):
-        try:
-            with open(p) as f:
-                out.append(json.load(f))
-        except (OSError, json.JSONDecodeError) as e:
-            log.error("skip unreadable raw file %s: %s", p, e)
-    return out
+def _load_records() -> list[dict]:
+    """Pull every filing from SQLite. Legacy data/raw/*.json is ignored."""
+    try:
+        return pdb.export_combined(settings.SQLITE_DB_PATH)
+    except Exception as e:
+        log.error("failed to export from %s: %s", settings.SQLITE_DB_PATH, e)
+        return []
 
 
 def _as_date_key(rec: dict) -> str:
@@ -102,7 +99,7 @@ def _write_atomic(path: Path, data) -> None:
 
 
 def build_combined() -> list[dict]:
-    records = _load_raw()
+    records = _load_records()
     records = _derive(records)
     # Stable sort: ticker asc, period_end asc
     records.sort(key=lambda r: (r.get("ticker", ""), _as_date_key(r)))

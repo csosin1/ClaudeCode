@@ -11,6 +11,68 @@ Builder appends a per-task entry here after each build. Format:
 - **Things for the reviewer:**
 ```
 
+## 2026-04-13 — timeshare-surveillance (XBRL-first refactor)
+
+- **What was built:**
+  - Hybrid extraction: SEC XBRL companyfacts JSON for structured balance-sheet / P&L metrics, narrow Claude calls only for narrative sections (delinquency aging, FICO mix, vintage tables, MD&A credit commentary). Eliminates the v1 monolithic ~75k-token-per-chunk Claude pass that busted the 30k-TPM rate limit.
+  - SQLite persistence (`data/surveillance.db`, stdlib only) replaces per-filing `data/raw/*.json` blobs. `merge.py` now exports from DB to `combined.json` with the same shape the React dashboard already consumes — zero frontend changes required.
+  - `pipeline/xbrl_fetch.py` — hits `data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json`, walks `XBRL_TAG_MAP` (us-gaap first, company-ext fallback), de-dupes per period preferring the latest `filed`. Supports `fixture_path=` for offline tests / `--dry-run`.
+  - `pipeline/narrative_extract.py` — `locate_sections(html)` matches keyword regexes against the stripped text and returns `{section_name: excerpt}` capped at `NARRATIVE_EXCERPT_CHAR_LIMIT = 12_000` chars (~3k tokens). `extract_from_sections()` makes one Claude call per located section asking for ONLY the fields that section could plausibly cover (SECTION_FIELDS routing table), tracks per-call token usage.
+  - `pipeline/db.py` + `pipeline/schema.sql` — `init_db`, `connect`, `upsert_filing` (UPSERT on `(ticker, accession)`), `export_combined` (returns dicts with the exact METRIC_SCHEMA key set; `vintage_pools` JSON-encoded in the column, deserialised on the way out). Indexed on `(ticker, period_end)`.
+  - `pipeline/metric_schema.py` — single source of truth for METRIC_SCHEMA; lifted out of `fetch_and_parse.py` so db / merge / narrative all share one definition. fetch_and_parse re-exports it for backward-compat.
+  - `pipeline/fetch_and_parse.py` rewritten as orchestrator: per ticker → XBRL once (cached) → list filings → for each filing: fetch HTML → locate sections → narrative Claude calls → merge XBRL+narrative (XBRL wins for fields it covers) → upsert. Per-ticker token totals logged. `--dry-run` upserts the same three v1 stubs through the DB so the dashboard snapshot is byte-for-byte stable. `--ticker`/`--all` flags preserved. `process_ticker()` signature unchanged so `watcher/edgar_watcher.py` subprocess call still works.
+  - `pipeline/merge.py` — `_load_records()` calls `db.export_combined()` instead of globbing `data/raw/`. `_derive()`, `_write_atomic()`, `DASHBOARD_SERVE_DIR` mirroring all unchanged.
+  - `config/settings.py` — added `SQLITE_DB_PATH`, `XBRL_TAG_MAP` (7 metrics with us-gaap + company-ext candidates and per-metric scale), `NARRATIVE_SECTION_PATTERNS`, `NARRATIVE_EXCERPT_CHAR_LIMIT`. `ANTHROPIC_MODEL` -> `claude-sonnet-4-6`. `LOOKBACK_FILINGS` restored to 4 per spec. THRESHOLDS, TARGETS, secrets untouched.
+  - Fixtures: `pipeline/fixtures/hgv_companyfacts_sample.json` (realistic SEC shape, 4 us-gaap + 1 company-ext tag, 2 quarterly periods) and `pipeline/fixtures/hgv_delinquency_section.html` (delinquency aging table + FICO paragraph for the locator test).
+
+- **Files modified:**
+  - new: `timeshare-surveillance/pipeline/xbrl_fetch.py`
+  - new: `timeshare-surveillance/pipeline/narrative_extract.py`
+  - new: `timeshare-surveillance/pipeline/db.py`
+  - new: `timeshare-surveillance/pipeline/schema.sql`
+  - new: `timeshare-surveillance/pipeline/metric_schema.py`
+  - new: `timeshare-surveillance/pipeline/fixtures/hgv_companyfacts_sample.json`
+  - new: `timeshare-surveillance/pipeline/fixtures/hgv_delinquency_section.html`
+  - new: `timeshare-surveillance/tests-unit/conftest.py`
+  - new: `timeshare-surveillance/tests-unit/test_xbrl_fetch.py`
+  - new: `timeshare-surveillance/tests-unit/test_narrative_extract.py`
+  - new: `timeshare-surveillance/tests-unit/test_db.py`
+  - rewritten: `timeshare-surveillance/pipeline/fetch_and_parse.py`
+  - changed: `timeshare-surveillance/pipeline/merge.py` (DB-backed loader)
+  - changed: `timeshare-surveillance/config/settings.py` (XBRL_TAG_MAP, NARRATIVE_SECTION_PATTERNS, SQLITE_DB_PATH, model bump, lookback)
+  - changed: `tests/timeshare-surveillance.spec.ts` (added 2 tests for combined.json shape and dashboard fetch path)
+  - changed: `CHANGES.md` (this entry)
+
+- **Tests added:**
+  - 4 db tests (init_db, upsert/export round-trip preserves every METRIC_SCHEMA key, idempotent upsert, missing-DB -> empty)
+  - 3 xbrl_fetch tests (fixture exists, period mapping covers ≥3 metrics across 2 periods, top-level helper)
+  - 3 narrative_extract tests (fixture exists, locates 'delinquency' + 'fico' sections, char cap respected)
+  - 2 Playwright tests (combined.json served as JSON array with required keys; dashboard HTML still references `data/combined.json`)
+  - All 17 tests-unit pass: `python3 -m pytest tests-unit/ -q` -> 17 passed in 0.09s
+  - End-to-end dry-run validated: `fetch_and_parse.py --all --dry-run && merge.py` produces a 3-record combined.json with HGV/VAC/TNL, every METRIC_SCHEMA key present, identical numeric values to v1.
+
+- **Token budget claim:**
+  - Per filing: up to 4 located sections × ~3k input tokens (12k chars cap) + per-call schema (~150 tokens) + system prompt (~80 tokens) ≈ ~12k input tokens worst case. Output capped at `max_tokens=1500` per call × 4 sections = 6k output max, typical ≤2k. Well under the 15k input-token spec ceiling.
+  - At 30k TPM that's ~2.5 filings/minute, comfortably above the watcher's per-cycle workload (3 tickers × ≤1 new filing per cycle).
+  - vs v1: a single HGV 10-K spent ~75k tokens × 3 chunks = 225k tokens. Reduction is ≥15× per filing.
+
+- **Assumptions:**
+  - The starter `XBRL_TAG_MAP` candidate tag names are best-guesses against SEC convention. The fetcher walks candidates in order and falls back gracefully when a tag is absent — first real-network run will reveal which candidates each issuer actually uses; missing metrics simply stay null until narrative or future tag additions cover them. Spec explicitly flagged this as "builder must verify against live companyfacts," and verification needs network the sandbox doesn't have. Reviewer / first-real-run will close the loop.
+  - XBRL period match is exact-or-≤5-day-earlier. SEC `instant` tags occasionally settle on the last business day rather than calendar quarter-end; this prevents hard misses without pulling the wrong quarter.
+  - `dry_run` and `extraction_error` are persisted as INTEGER (0/1) and stripped from the exported record when falsy so the dashboard's existing field set is unchanged. `vintage_pools` round-trips through JSON TEXT.
+  - Fixtures use real-shape companyfacts JSON (start/end/val/accn/fy/fp/form/filed/frame keys) so the fetcher logic is exercised against the same parser path it will use in production.
+  - Legacy `data/raw/*.json` blobs from prior runs are intentionally ignored — `merge.py` reads only from SQLite now (per spec). They can be deleted at the operator's leisure.
+  - `claude-sonnet-4-6` model name taken from `SKILLS/anthropic-api.md` (matches the global default for new builds).
+
+- **Things for the reviewer:**
+  - **Scope:** stayed inside `timeshare-surveillance/` and `tests/timeshare-surveillance.spec.ts`. No shared files touched (deploy/, .github/workflows/, root CLAUDE.md/LESSONS.md/RUNBOOK.md, deploy/landing.html, deploy/update_nginx.sh).
+  - **Backward-compat:** `combined.json` keys are unchanged — verified by running dry-run + merge and asserting every METRIC_SCHEMA key is present in the exported record. Dashboard React code requires no edit.
+  - **Watcher contract preserved:** `process_ticker(ticker, dry_run=False)` signature and CLI flags (`--ticker`, `--all`, `--dry-run`) unchanged. `edgar_watcher.py` subprocesses `pipeline/fetch_and_parse.py --ticker X` then `pipeline/merge.py` then `pipeline/red_flag_diff.py` — all three still valid.
+  - **No new pip deps.** sqlite3 is stdlib. No `pip-audit` / `npm audit` run needed.
+  - **Network-failure tolerance:** XBRL fetch failure on a single ticker logs and continues with narrative-only extraction (XBRL slice will be empty, narrative still runs). EDGAR submissions-API failure on a ticker logs and skips that ticker — does not crash the run.
+  - **Things I could not verify in-sandbox:** real Anthropic call (no API key in this env), live XBRL fetch (the unit tests use the fixture). First real preview run on the droplet will surface any missed tag-name guesses; fix is to add aliases to `XBRL_TAG_MAP[...]['tags']`.
+  - **Playwright tests:** could not run locally from the sandbox (no preview URL accessible). Tests are added to the spec file and will execute on the QA gate after preview deploy. They are read-only assertions against the dashboard HTML and combined.json — no fixtures needed on the QA side.
+
 ## 2026-04-12 — timeshare-surveillance (frontend build)
 
 - **What was built:**

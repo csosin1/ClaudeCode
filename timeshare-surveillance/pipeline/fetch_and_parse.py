@@ -1,11 +1,21 @@
 #!/usr/bin/env python3
-"""Fetch SEC EDGAR filings and extract credit metrics via Claude.
+"""Hybrid XBRL-first + narrative-Claude filing extractor.
+
+Per ticker:
+  1. Pull companyfacts XBRL JSON once; derive period-indexed structured
+     metrics (receivables, allowance, provision, originations, ...).
+  2. List recent 10-K / 10-Q filings from the submissions API.
+  3. For each filing: download the primary doc, locate named sections
+     (delinquency / FICO / vintage / MD&A credit commentary), and send only
+     those excerpts to Claude — one call per located section.
+  4. Merge XBRL + narrative into a single METRIC_SCHEMA record. XBRL wins
+     for fields it covers.
+  5. Upsert into data/surveillance.db via pipeline.db.
 
 Usage:
     python pipeline/fetch_and_parse.py --ticker HGV
     python pipeline/fetch_and_parse.py --all
     python pipeline/fetch_and_parse.py --ticker HGV --dry-run
-    python pipeline/fetch_and_parse.py --all --dry-run
 """
 
 from __future__ import annotations
@@ -13,94 +23,31 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import os
 import re
 import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-# Allow running both as a module and as a script.
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent))
 
 from config import settings  # noqa: E402
+from pipeline import db as pdb  # noqa: E402
+from pipeline import narrative_extract as nx  # noqa: E402
+from pipeline import xbrl_fetch as xf  # noqa: E402
+from pipeline.metric_schema import METRIC_SCHEMA, null_record  # noqa: E402
 
 log = logging.getLogger("fetch_and_parse")
 
 
-# ---------------------------------------------------------------------------
-# Metric schema — keep in sync with the user spec. Callers rely on key names.
-# ---------------------------------------------------------------------------
-
-METRIC_SCHEMA: dict[str, str] = {
-    "gross_receivables_total_mm": "float, millions USD",
-    "allowance_for_loan_losses_mm": "float, millions USD",
-    "net_receivables_mm": "float, millions USD",
-    "allowance_coverage_pct": "float 0-1, allowance as share of gross receivables",
-    "provision_for_loan_losses_mm": "float, millions USD (period provision)",
-    "delinquent_30_59_days_pct": "float 0-1",
-    "delinquent_60_89_days_pct": "float 0-1",
-    "delinquent_90_plus_days_pct": "float 0-1",
-    "delinquent_total_pct": "float 0-1",
-    "default_rate_annualized_pct": "float 0-1, annualized",
-    "weighted_avg_fico_origination": "int FICO score, origination-weighted",
-    "fico_700_plus_pct": "float 0-1",
-    "fico_below_600_pct": "float 0-1",
-    "avg_loan_size_dollars": "float, dollars",
-    "avg_contract_term_months": "float, months",
-    "securitized_receivables_mm": "float, millions USD",
-    "retained_interests_mm": "float, millions USD",
-    "warehouse_facility_balance_mm": "float, millions USD (outstanding)",
-    "new_securitization_volume_mm": "float, millions USD (this period)",
-    "new_securitization_advance_rate_pct": "float 0-1",
-    "weighted_avg_coupon_new_deals_pct": "float 0-1",
-    "overcollateralization_pct": "float 0-1",
-    "gain_on_sale_mm": "float, millions USD",
-    "gain_on_sale_margin_pct": "float 0-1, gain / originations",
-    "originations_mm": "float, millions USD",
-    "sales_to_existing_owners_pct": "float 0-1",
-    "tour_flow_count": "int, number of tours this period",
-    "vpg_dollars": "float, volume per guest (dollars)",
-    "contract_rescission_rate_pct": "float 0-1",
-    "weighted_avg_ltv_pct": "float 0-1",
-    "vintage_pools": (
-        "array of {vintage_year:int, original_balance_mm:float, "
-        "cumulative_default_rate_pct:float 0-1, as_of_period:str}"
-    ),
-    "management_flagged_credit_concerns": "bool, true if management notes credit stress",
-    "management_credit_commentary": "string, <=2 sentences summarizing management credit commentary",
-}
-
-
-SYSTEM_PROMPT = (
-    "You are a senior credit analyst extracting timeshare-receivable credit "
-    "metrics from SEC filings. Return ONLY valid JSON matching the schema. "
-    "Use null for any field the filing does not explicitly disclose. Never "
-    "invent numbers. Express percentages as decimals (12.5% -> 0.125). Express "
-    "dollar amounts in millions unless the key name ends with _dollars. "
-    "Be strict: if a value is implied but not stated, prefer null."
-)
-
-
-def _build_user_prompt(ticker: str, filing_type: str, period_end: str, html: str) -> str:
-    schema_lines = "\n".join(f'  "{k}": {v}' for k, v in METRIC_SCHEMA.items())
-    return (
-        f"Issuer: {ticker}. Filing type: {filing_type}. Period ended: {period_end}.\n\n"
-        f"Extract the following JSON object from the filing text below. Schema:\n"
-        f"{{\n{schema_lines}\n}}\n\n"
-        f"Rules:\n"
-        f"- Return a single JSON object, no markdown fences, no commentary.\n"
-        f"- Any field not disclosed: null.\n"
-        f"- Percentages as decimals (7.1% -> 0.071).\n"
-        f"- Dollar fields ending in _mm are in millions.\n"
-        f"- vintage_pools: include every vintage year disclosed in the pool tables.\n\n"
-        f"Filing text:\n-----\n{html}\n-----"
-    )
+# Re-export METRIC_SCHEMA for out-of-tree callers that may have imported it
+# from this module in v1.
+__all__ = ["METRIC_SCHEMA", "process_ticker", "main"]
 
 
 # ---------------------------------------------------------------------------
-# Rate-limited SEC HTTP client
+# Rate-limited SEC HTTP client (shared with v1)
 # ---------------------------------------------------------------------------
 
 
@@ -112,25 +59,21 @@ class _EdgarClient:
         self.s.headers.update({
             "User-Agent": settings.EDGAR_USER_AGENT,
             "Accept-Encoding": "gzip, deflate",
-            "Host": None,  # will be set per request
         })
         self._min_interval = 1.0 / max(1, settings.EDGAR_RATE_LIMIT_PER_SEC)
         self._last = 0.0
 
-    def get(self, url: str) -> "requests.Response":
+    def get(self, url: str):
         import requests
-
-        # Per-host header
         from urllib.parse import urlparse
 
         host = urlparse(url).netloc
-        # Rate limit (global, conservative).
         wait = self._min_interval - (time.time() - self._last)
         if wait > 0:
             time.sleep(wait)
 
         backoff = 1.0
-        for attempt in range(6):
+        for _ in range(6):
             self._last = time.time()
             headers = dict(self.s.headers)
             headers["Host"] = host
@@ -139,10 +82,10 @@ class _EdgarClient:
             except requests.RequestException as e:
                 log.warning("edgar GET network error on %s: %s", url, e)
                 time.sleep(min(backoff, 30))
-                backoff *= 2
+                backoff = min(backoff * 2, 30)
                 continue
             if r.status_code in (429, 503):
-                log.warning("edgar %s on %s, backing off %.1fs", r.status_code, url, backoff)
+                log.warning("edgar %s on %s; backing off %.1fs", r.status_code, url, backoff)
                 time.sleep(min(backoff, 30))
                 backoff = min(backoff * 2, 30)
                 continue
@@ -152,127 +95,16 @@ class _EdgarClient:
 
 
 # ---------------------------------------------------------------------------
-# HTML chunking
-# ---------------------------------------------------------------------------
-
-
-def _strip_html(html: str) -> str:
-    # Light strip: remove scripts/styles, collapse whitespace. Claude can cope
-    # with residual tags, but stripping keeps us under the token budget.
-    html = re.sub(r"<script[^>]*>.*?</script>", " ", html, flags=re.I | re.S)
-    html = re.sub(r"<style[^>]*>.*?</style>", " ", html, flags=re.I | re.S)
-    text = re.sub(r"<[^>]+>", " ", html)
-    text = re.sub(r"\s+", " ", text)
-    return text.strip()
-
-
-def _chunk(text: str, max_chars: int, overlap: int) -> list[str]:
-    if len(text) <= max_chars:
-        return [text]
-    chunks = []
-    start = 0
-    while start < len(text):
-        end = min(start + max_chars, len(text))
-        chunks.append(text[start:end])
-        if end == len(text):
-            break
-        start = end - overlap
-    return chunks
-
-
-# ---------------------------------------------------------------------------
-# JSON extraction with retry
-# ---------------------------------------------------------------------------
-
-
-def _strip_json_fences(s: str) -> str:
-    s = s.strip()
-    if s.startswith("```"):
-        s = re.sub(r"^```(?:json)?\s*", "", s)
-        s = re.sub(r"\s*```$", "", s)
-    return s.strip()
-
-
-def _call_claude(client, ticker: str, filing_type: str, period_end: str, chunk_text: str) -> dict:
-    import anthropic  # noqa: F401  (imported for type context)
-
-    user_msg = _build_user_prompt(ticker, filing_type, period_end, chunk_text)
-    resp = client.messages.create(
-        model=settings.ANTHROPIC_MODEL,
-        max_tokens=4096,
-        system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": user_msg}],
-    )
-    raw = resp.content[0].text if resp.content else ""
-    cleaned = _strip_json_fences(raw)
-    try:
-        return json.loads(cleaned)
-    except json.JSONDecodeError:
-        # Single corrective retry
-        log.warning("First JSON parse failed; retrying with corrective prompt")
-        retry_resp = client.messages.create(
-            model=settings.ANTHROPIC_MODEL,
-            max_tokens=4096,
-            system=SYSTEM_PROMPT,
-            messages=[
-                {"role": "user", "content": user_msg},
-                {"role": "assistant", "content": raw},
-                {
-                    "role": "user",
-                    "content": (
-                        "Your previous response was not valid JSON. Return ONLY "
-                        "the JSON object this time, no markdown fences, no prose. "
-                        "Repeat the extraction."
-                    ),
-                },
-            ],
-        )
-        raw2 = retry_resp.content[0].text if retry_resp.content else ""
-        cleaned2 = _strip_json_fences(raw2)
-        try:
-            return json.loads(cleaned2)
-        except json.JSONDecodeError:
-            log.error("PARSE_ERROR: Claude returned non-JSON twice for %s %s %s",
-                      ticker, filing_type, period_end)
-            return _null_record(extraction_error=True)
-
-
-def _null_record(extraction_error: bool = False) -> dict:
-    rec = {k: None for k in METRIC_SCHEMA}
-    rec["vintage_pools"] = []
-    rec["management_flagged_credit_concerns"] = None
-    if extraction_error:
-        rec["extraction_error"] = True
-    return rec
-
-
-def _merge_chunks(records: list[dict]) -> dict:
-    """First non-null per field across chunks."""
-    out = _null_record()
-    saw_error = False
-    for rec in records:
-        if rec.get("extraction_error"):
-            saw_error = True
-        for k in METRIC_SCHEMA:
-            if out.get(k) in (None, [], "") and rec.get(k) not in (None, [], ""):
-                out[k] = rec[k]
-    if saw_error and all(out.get(k) in (None, []) for k in METRIC_SCHEMA):
-        out["extraction_error"] = True
-    return out
-
-
-# ---------------------------------------------------------------------------
-# EDGAR filing discovery + document fetch
+# EDGAR filing discovery
 # ---------------------------------------------------------------------------
 
 
 def _list_filings(client: _EdgarClient, cik: str) -> list[dict]:
-    """Return list of (accession, filing_type, period_end, primary_doc, filed_date)."""
     url = f"https://data.sec.gov/submissions/CIK{cik}.json"
     r = client.get(url)
     data = r.json()
     recent = data.get("filings", {}).get("recent", {})
-    rows = []
+    rows: list[dict] = []
     n = len(recent.get("accessionNumber", []))
     for i in range(n):
         ftype = recent["form"][i]
@@ -290,30 +122,62 @@ def _list_filings(client: _EdgarClient, cik: str) -> list[dict]:
 
 def _primary_doc_url(cik: str, accession: str, primary_doc: str) -> str:
     acc_nodash = accession.replace("-", "")
-    cik_int = str(int(cik))  # strip leading zeros for archive URL
+    cik_int = str(int(cik))
     return f"https://www.sec.gov/Archives/edgar/data/{cik_int}/{acc_nodash}/{primary_doc}"
 
 
 # ---------------------------------------------------------------------------
-# Record I/O
+# Target lookup
 # ---------------------------------------------------------------------------
 
 
-def _raw_path(ticker: str, filing_type: str, period_end: str) -> Path:
-    safe = filing_type.replace("/", "-")
-    return settings.RAW_DIR / f"{ticker}_{safe}_{period_end}.json"
-
-
-def _write_record(path: Path, record: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    with open(tmp, "w") as f:
-        json.dump(record, f, indent=2, default=str)
-    os.replace(tmp, path)
+def _get_target(ticker: str) -> dict:
+    for t in settings.TARGETS:
+        if t["ticker"].upper() == ticker.upper():
+            return t
+    raise ValueError(f"Unknown ticker: {ticker}")
 
 
 # ---------------------------------------------------------------------------
-# Dry-run stub data
+# XBRL period matching
+# ---------------------------------------------------------------------------
+
+
+def _pick_xbrl_slice(
+    xbrl_by_period: dict[str, dict],
+    period_end: str,
+) -> dict:
+    """Return the XBRL metrics dict whose period key best matches period_end.
+
+    Exact match preferred; otherwise the nearest earlier period (instant tags
+    sometimes settle on the last business day, off by a day or two).
+    """
+    if not xbrl_by_period:
+        return {}
+    if period_end in xbrl_by_period:
+        return dict(xbrl_by_period[period_end])
+
+    # Fallback: same calendar quarter end within ±5 days, nearest earlier.
+    target = period_end
+    candidates = [p for p in xbrl_by_period.keys() if p <= target]
+    if not candidates:
+        return {}
+    closest = max(candidates)
+    # Only allow ≤ 5-day drift to avoid pulling the wrong quarter.
+    try:
+        from datetime import date
+        d_target = date.fromisoformat(target)
+        d_closest = date.fromisoformat(closest)
+        if (d_target - d_closest).days > 5:
+            return {}
+    except ValueError:
+        return {}
+    log.info("xbrl: period fuzzy-match %s -> %s", target, closest)
+    return dict(xbrl_by_period[closest])
+
+
+# ---------------------------------------------------------------------------
+# Dry-run stubs — same numbers as v1 so the dashboard snapshot is stable.
 # ---------------------------------------------------------------------------
 
 
@@ -463,9 +327,12 @@ _DRY_RUN_STUBS: dict[str, dict] = {
 }
 
 
-def _dry_run_write(ticker: str) -> Path:
+def _dry_run_process(ticker: str) -> int:
+    """Write the stub record through db.upsert_filing (no network, no Claude)."""
     stub = _DRY_RUN_STUBS[ticker]
-    rec = {
+    rec = null_record()
+    rec.update(stub["metrics"])
+    rec.update({
         "ticker": ticker,
         "filing_type": stub["filing_type"],
         "period_end": stub["period_end"],
@@ -474,62 +341,42 @@ def _dry_run_write(ticker: str) -> Path:
         "source_url": f"fixture://{ticker}_sample.html",
         "extracted_at": datetime.now(timezone.utc).isoformat(),
         "dry_run": True,
-    }
-    rec.update(stub["metrics"])
-    path = _raw_path(ticker, stub["filing_type"], stub["period_end"])
-    _write_record(path, rec)
-    log.info("dry-run: wrote stub extract for %s -> %s", ticker, path)
-    return path
-
-
-# ---------------------------------------------------------------------------
-# Main processing per ticker
-# ---------------------------------------------------------------------------
-
-
-def _get_target(ticker: str) -> dict:
-    for t in settings.TARGETS:
-        if t["ticker"].upper() == ticker.upper():
-            return t
-    raise ValueError(f"Unknown ticker: {ticker}")
-
-
-def _extract_for_filing(
-    anthropic_client,
-    ticker: str,
-    filing_type: str,
-    period_end: str,
-    source_url: str,
-    text: str,
-) -> dict:
-    if len(text) > settings.FULL_DOC_CHAR_LIMIT:
-        pieces = _chunk(text, settings.CHUNK_CHAR_LIMIT, settings.CHUNK_OVERLAP_CHARS)
-    else:
-        pieces = [text]
-
-    chunk_records = []
-    for idx, piece in enumerate(pieces):
-        log.info("claude extract %s %s %s chunk %d/%d", ticker, filing_type,
-                 period_end, idx + 1, len(pieces))
-        chunk_records.append(
-            _call_claude(anthropic_client, ticker, filing_type, period_end, piece)
-        )
-
-    merged = _merge_chunks(chunk_records)
-    merged.update({
-        "ticker": ticker,
-        "filing_type": filing_type,
-        "period_end": period_end,
-        "source_url": source_url,
-        "extracted_at": datetime.now(timezone.utc).isoformat(),
     })
-    return merged
+    pdb.init_db(settings.SQLITE_DB_PATH)
+    pdb.upsert_filing(settings.SQLITE_DB_PATH, rec)
+    log.info("dry-run: upserted stub for %s (%s %s)",
+             ticker, stub["filing_type"], stub["period_end"])
+    return 1
 
 
-def process_ticker(ticker: str, dry_run: bool = False) -> list[Path]:
-    settings.RAW_DIR.mkdir(parents=True, exist_ok=True)
+# ---------------------------------------------------------------------------
+# Main per-ticker processing
+# ---------------------------------------------------------------------------
+
+
+def _merge_xbrl_and_narrative(
+    xbrl_slice: dict,
+    narrative: dict,
+) -> dict:
+    """XBRL wins for fields it covers; narrative fills the rest."""
+    rec = null_record()
+    for k, v in narrative.items():
+        if v not in (None, [], ""):
+            rec[k] = v
+    for k, v in xbrl_slice.items():
+        if v is not None:
+            rec[k] = v
+    return rec
+
+
+def process_ticker(ticker: str, dry_run: bool = False) -> int:
+    """Process the N most recent 10-K/10-Q filings for `ticker`.
+
+    Returns the number of filings written.
+    """
+    pdb.init_db(settings.SQLITE_DB_PATH)
     if dry_run:
-        return [_dry_run_write(ticker)]
+        return _dry_run_process(ticker)
 
     import anthropic
 
@@ -540,42 +387,90 @@ def process_ticker(ticker: str, dry_run: bool = False) -> list[Path]:
     target = _get_target(ticker)
     cik = target["cik"]
 
-    filings = _list_filings(edgar, cik)
+    # 1. XBRL once per ticker.
+    try:
+        xbrl_by_period = xf.fetch_metrics(cik)
+        log.info("xbrl: %s loaded %d periods", ticker, len(xbrl_by_period))
+    except Exception as e:
+        log.error("xbrl fetch failed for %s: %s; continuing with narrative-only", ticker, e)
+        xbrl_by_period = {}
 
-    # Keep N most recent per filing type.
+    # 2. Filing list.
+    try:
+        filings = _list_filings(edgar, cik)
+    except Exception as e:
+        log.error("submissions fetch failed for %s: %s", ticker, e)
+        return 0
+
     by_type: dict[str, list[dict]] = {}
     for f in filings:
         by_type.setdefault(f["filing_type"], []).append(f)
     for k in by_type:
         by_type[k] = by_type[k][: settings.LOOKBACK_FILINGS]
 
-    written = []
+    written = 0
+    total_input_tokens = 0
+    total_output_tokens = 0
+
     for ftype, items in by_type.items():
         for f in items:
-            out_path = _raw_path(ticker, ftype, f["period_end"])
-            if out_path.exists():
-                log.info("skip (cached) %s", out_path.name)
-                continue
-            url = _primary_doc_url(cik, f["accession"], f["primary_doc"])
+            period_end = f["period_end"]
+            accession = f["accession"]
+            url = _primary_doc_url(cik, accession, f["primary_doc"])
+
+            # 3. Download filing HTML.
             try:
                 resp = edgar.get(url)
+                html = resp.text
             except Exception as e:
                 log.error("fetch failed %s: %s", url, e)
                 continue
-            text = _strip_html(resp.text)
-            rec = _extract_for_filing(
-                anthropic_client,
-                ticker=ticker,
-                filing_type=ftype,
-                period_end=f["period_end"],
-                source_url=url,
-                text=text,
-            )
-            rec["accession"] = f["accession"]
-            rec["filed_date"] = f["filed_date"]
-            _write_record(out_path, rec)
-            written.append(out_path)
-            log.info("wrote %s", out_path)
+
+            # 4. Narrative extraction (one Claude call per located section).
+            sections = nx.locate_sections(html)
+            if sections:
+                narrative, usage = nx.extract_from_sections(
+                    anthropic_client, ticker, ftype, period_end, sections,
+                )
+                total_input_tokens += usage.get("total_input_tokens", 0) or 0
+                total_output_tokens += usage.get("total_output_tokens", 0) or 0
+                log.info(
+                    "narrative %s %s %s: sections=%s input_tokens=%d output_tokens=%d",
+                    ticker, ftype, period_end,
+                    list(sections.keys()),
+                    usage.get("total_input_tokens", 0),
+                    usage.get("total_output_tokens", 0),
+                )
+            else:
+                narrative = {}
+                log.info("narrative %s %s %s: no sections located; skipping Claude",
+                         ticker, ftype, period_end)
+
+            # 5. Merge XBRL + narrative; persist.
+            xbrl_slice = _pick_xbrl_slice(xbrl_by_period, period_end)
+            rec = _merge_xbrl_and_narrative(xbrl_slice, narrative)
+            rec.update({
+                "ticker": ticker,
+                "filing_type": ftype,
+                "period_end": period_end,
+                "accession": accession,
+                "filed_date": f["filed_date"],
+                "source_url": url,
+                "extracted_at": datetime.now(timezone.utc).isoformat(),
+            })
+
+            try:
+                pdb.upsert_filing(settings.SQLITE_DB_PATH, rec)
+                written += 1
+                log.info("db: upserted %s %s %s (accession=%s)",
+                         ticker, ftype, period_end, accession)
+            except Exception as e:
+                log.error("db upsert failed for %s %s: %s", ticker, accession, e)
+
+    log.info(
+        "ticker %s complete: filings=%d input_tokens=%d output_tokens=%d",
+        ticker, written, total_input_tokens, total_output_tokens,
+    )
     return written
 
 
@@ -613,14 +508,12 @@ def main() -> int:
         ap.error("Specify --ticker TICK or --all")
 
     tickers = [t["ticker"] for t in settings.TARGETS] if args.all else [args.ticker]
-    any_written = False
     for t in tickers:
         try:
-            out = process_ticker(t, dry_run=args.dry_run)
-            any_written = any_written or bool(out)
+            process_ticker(t, dry_run=args.dry_run)
         except Exception as e:
             log.exception("ticker %s failed: %s", t, e)
-    return 0 if any_written else 0
+    return 0
 
 
 if __name__ == "__main__":
