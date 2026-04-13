@@ -1361,6 +1361,384 @@ app.get('/api/runs', (req, res) => {
   }
 });
 
+/**
+ * GET /api/compare-all?limit=50
+ * Flat, view-friendly projection of recent runs for the /compare page.
+ * Shape:
+ *   {
+ *     total_runs: <number — distinct run_ids in DB>,
+ *     runs: [
+ *       {
+ *         run_id, ran_at, vin, mileage, zip, condition,
+ *         carvana: { status, offer_usd, offer_expires } | null,
+ *         carmax:  { status, offer_usd, offer_expires } | null,
+ *         driveway:{ status, offer_usd, offer_expires } | null
+ *       }, ...
+ *     ]
+ *   }
+ */
+app.get('/api/compare-all', (req, res) => {
+  const db = getOffersDb();
+  if (!db) return res.json({ runs: [], total_runs: 0, error: 'offers DB not available' });
+  try {
+    const { getRuns } = require('./lib/offers-db');
+    const limit = Math.max(1, Math.min(200, parseInt(req.query.limit || '50', 10) || 50));
+    const grouped = getRuns(db, limit);
+
+    // Count distinct runs overall (cheap)
+    let totalRuns = 0;
+    try {
+      const row = db.prepare(`SELECT COUNT(DISTINCT run_id) AS c FROM offers`).get();
+      totalRuns = (row && row.c) || 0;
+    } catch (_) { /* table may not exist yet */ }
+
+    const siteProjection = (r) => {
+      if (!r) return null;
+      return {
+        status: r.status || null,
+        offer_usd: r.offer_usd == null ? null : Number(r.offer_usd),
+        offer_expires: r.offer_expires || null,
+      };
+    };
+
+    const runs = grouped.map((g) => {
+      // Pull meta from any available row (they all share vin/mileage/zip/condition within a run)
+      const any = g.carvana || g.carmax || g.driveway || (g.rows && g.rows[0]) || {};
+      return {
+        run_id: g.run_id,
+        ran_at: g.latest_at || any.ran_at || null,
+        vin: g.vin || any.vin || null,
+        mileage: any.mileage == null ? null : Number(any.mileage),
+        zip: any.zip || null,
+        condition: any.condition || null,
+        carvana: siteProjection(g.carvana),
+        carmax: siteProjection(g.carmax),
+        driveway: siteProjection(g.driveway),
+      };
+    });
+
+    return res.json({ total_runs: totalRuns, runs });
+  } catch (e) {
+    console.error('[compare-all] error:', e.message);
+    return res.status(500).json({ runs: [], total_runs: 0, error: e.message });
+  }
+});
+
+/**
+ * GET /compare
+ * Read-only, mobile-first side-by-side view of recent comparison runs.
+ * Single HTML page, no external JS deps. Polls /api/compare-all every 30s.
+ */
+app.get('/compare', (_req, res) => {
+  res.set('Content-Type', 'text/html; charset=utf-8');
+  res.send(`<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Car Offers &mdash; Compare</title>
+<style>
+  :root {
+    --bg: #0e1116;
+    --panel: #161b22;
+    --panel-2: #1c232c;
+    --border: #2a313a;
+    --text: #e6edf3;
+    --muted: #9aa5b1;
+    --accent: #3fb950;
+    --warn: #d29922;
+    --err: #f85149;
+    --info: #58a6ff;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    font-size: 15px; line-height: 1.4; -webkit-text-size-adjust: 100%;
+  }
+  header { display: flex; justify-content: space-between; align-items: center;
+    padding: 12px 14px; border-bottom: 1px solid var(--border); gap: 10px; flex-wrap: wrap; }
+  header h1 { margin: 0; font-size: 17px; font-weight: 600; }
+  .badges { display: flex; gap: 6px; flex-wrap: wrap; }
+  .badge { display: inline-block; padding: 3px 8px; border-radius: 999px;
+    font-size: 12px; background: var(--panel-2); border: 1px solid var(--border); color: var(--muted); }
+  .badge.live { color: var(--info); }
+  .badge.inflight { color: var(--warn); }
+  main { padding: 14px; max-width: 1200px; margin: 0 auto; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px; margin-bottom: 14px; }
+  form.card { display: grid; grid-template-columns: 1fr; gap: 10px; }
+  label { display: flex; flex-direction: column; font-size: 13px; color: var(--muted); gap: 4px; }
+  input, select, button {
+    font: inherit; color: var(--text); background: var(--panel-2);
+    border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;
+    -webkit-appearance: none; appearance: none;
+  }
+  input:focus, select:focus { outline: 2px solid var(--info); outline-offset: 0; }
+  button {
+    background: var(--info); color: #0b1220; border-color: var(--info);
+    font-weight: 600; cursor: pointer; padding: 12px 14px;
+  }
+  button[disabled] { opacity: 0.5; cursor: not-allowed; }
+  .row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  h2 { font-size: 15px; margin: 18px 0 8px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+  .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch;
+    border: 1px solid var(--border); border-radius: 10px; background: var(--panel); }
+  table { width: 100%; border-collapse: collapse; min-width: 820px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; white-space: nowrap; font-size: 14px; }
+  th { position: sticky; top: 0; background: var(--panel-2); color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+  tr:last-child td { border-bottom: none; }
+  .mono { font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace; }
+  .offer { font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px;
+    font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }
+  .pill.blocked       { background: rgba(248,81,73,.12); color: var(--err); border: 1px solid rgba(248,81,73,.3); }
+  .pill.account_required { background: rgba(210,153,34,.15); color: var(--warn); border: 1px solid rgba(210,153,34,.3); }
+  .pill.error         { background: rgba(248,81,73,.10); color: var(--err); border: 1px solid rgba(248,81,73,.25); }
+  .pill.pending       { background: rgba(88,166,255,.10); color: var(--info); border: 1px solid rgba(88,166,255,.25); }
+  .pill.ok            { background: rgba(63,185,80,.10); color: var(--accent); border: 1px solid rgba(63,185,80,.25); }
+  .pill.none          { background: var(--panel-2); color: var(--muted); border: 1px solid var(--border); }
+  .empty { padding: 24px; text-align: center; color: var(--muted); }
+  .notes { font-size: 12px; color: var(--muted); white-space: normal; max-width: 280px; }
+  footer { padding: 18px 14px 30px; color: var(--muted); font-size: 13px; line-height: 1.7; border-top: 1px solid var(--border); margin-top: 14px; }
+  footer div { word-break: break-all; }
+  @media (max-width: 520px) {
+    .row-2 { grid-template-columns: 1fr; }
+    header h1 { font-size: 15px; }
+    main { padding: 10px; }
+    th, td { padding: 8px 10px; font-size: 13px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Car Offers &mdash; Compare</h1>
+  <div class="badges">
+    <span class="badge inflight" id="inflight-badge" title="Requests in flight">0 in flight</span>
+    <span class="badge" id="total-badge" title="Total runs in DB">0 runs</span>
+    <span class="badge live" id="updated-badge">never updated</span>
+  </div>
+</header>
+
+<main>
+  <form class="card" id="run-form" autocomplete="off">
+    <label>VIN
+      <input type="text" id="vin" name="vin" maxlength="17" required placeholder="17-char VIN" style="text-transform:uppercase">
+    </label>
+    <div class="row-2">
+      <label>Mileage
+        <input type="number" id="mileage" name="mileage" min="0" max="400000" required placeholder="48000">
+      </label>
+      <label>Zip
+        <input type="text" id="zip" name="zip" maxlength="5" pattern="[0-9]{5}" required placeholder="06880">
+      </label>
+    </div>
+    <label>Condition
+      <select id="condition" name="condition">
+        <option value="excellent">Excellent</option>
+        <option value="good" selected>Good</option>
+        <option value="fair">Fair</option>
+        <option value="poor">Poor</option>
+      </select>
+    </label>
+    <button type="submit" id="submit-btn">Run on all 3</button>
+    <div id="form-note" class="notes" style="min-height:18px"></div>
+  </form>
+
+  <h2>Recent Runs</h2>
+  <div class="table-wrap" id="table-wrap">
+    <table id="runs-table">
+      <thead>
+        <tr>
+          <th>Ran At</th>
+          <th>VIN</th>
+          <th>Mileage</th>
+          <th>Zip</th>
+          <th>Condition</th>
+          <th>Carvana</th>
+          <th>CarMax</th>
+          <th>Driveway</th>
+          <th>Notes</th>
+        </tr>
+      </thead>
+      <tbody id="runs-body">
+        <tr><td colspan="9" class="empty">Loading&hellip;</td></tr>
+      </tbody>
+    </table>
+  </div>
+</main>
+
+<footer>
+  <div>Live:  http://159.223.127.125/car-offers/ </div>
+  <div>Preview:  http://159.223.127.125/car-offers/preview/compare </div>
+</footer>
+
+<script>
+(function () {
+  var API_COMPARE_ALL = '/car-offers/api/compare-all?limit=50';
+  var API_COMPARE_ALL_PREVIEW = '/car-offers/preview/api/compare-all?limit=50';
+  var API_QUOTE_ALL = '/car-offers/api/quote-all';
+  var API_QUOTE_ALL_PREVIEW = '/car-offers/preview/api/quote-all';
+
+  // Detect whether we're being served from /preview/ so relative API calls
+  // stay on the same deployment slot.
+  var isPreview = window.location.pathname.indexOf('/preview/') !== -1;
+  var apiCompareAll = isPreview ? API_COMPARE_ALL_PREVIEW : API_COMPARE_ALL;
+  var apiQuoteAll = isPreview ? API_QUOTE_ALL_PREVIEW : API_QUOTE_ALL;
+
+  var inflight = 0;
+  var inflightBadge = document.getElementById('inflight-badge');
+  var totalBadge = document.getElementById('total-badge');
+  var updatedBadge = document.getElementById('updated-badge');
+  var tbody = document.getElementById('runs-body');
+  var form = document.getElementById('run-form');
+  var btn = document.getElementById('submit-btn');
+  var note = document.getElementById('form-note');
+
+  function fmtInflight() {
+    inflightBadge.textContent = inflight + ' in flight';
+    inflightBadge.style.display = inflight > 0 ? '' : 'inline-block';
+  }
+  function fmtUsd(n) {
+    if (n == null || isNaN(n)) return null;
+    try { return '$' + Number(n).toLocaleString('en-US'); } catch (_) { return '$' + n; }
+  }
+  function fmtAt(iso) {
+    if (!iso) return '';
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    // Mobile-friendly: MM/DD HH:MM
+    var pad = function (n) { return n < 10 ? '0' + n : '' + n; };
+    return pad(d.getMonth() + 1) + '/' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+  }
+  function escapeHtml(s) {
+    if (s == null) return '';
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
+    });
+  }
+  function siteCell(site) {
+    if (!site) return '<span class="pill none">&mdash;</span>';
+    var status = (site.status || '').toLowerCase();
+    if (status === 'ok' && site.offer_usd != null) {
+      var usd = fmtUsd(site.offer_usd);
+      return '<span class="offer">' + escapeHtml(usd) + '</span>';
+    }
+    var cls = 'pill';
+    if (status === 'blocked') cls += ' blocked';
+    else if (status === 'account_required') cls += ' account_required';
+    else if (status === 'error') cls += ' error';
+    else if (status === 'pending' || status === 'running') cls += ' pending';
+    else if (status === 'ok') cls += ' ok';
+    else cls += ' none';
+    var label = status ? status.replace(/_/g, ' ') : 'unknown';
+    return '<span class="' + cls + '">' + escapeHtml(label) + '</span>';
+  }
+  function notesCell(run) {
+    // Collect any non-ok status labels as a short rollup, or show offer_expires if any.
+    var bits = [];
+    ['carvana', 'carmax', 'driveway'].forEach(function (s) {
+      var r = run[s];
+      if (!r) return;
+      if (r.status && r.status !== 'ok') {
+        bits.push(s + ': ' + r.status);
+      } else if (r.offer_expires) {
+        bits.push(s + ' exp ' + r.offer_expires);
+      }
+    });
+    return escapeHtml(bits.join(' &middot; ')).replace(/&amp;middot;/g, '&middot;');
+  }
+
+  function renderRuns(data) {
+    var runs = (data && data.runs) || [];
+    if (typeof data.total_runs === 'number') {
+      totalBadge.textContent = data.total_runs + ' runs';
+    }
+    if (!runs.length) {
+      tbody.innerHTML = '<tr><td colspan="9" class="empty">No runs yet &mdash; submit a VIN above to start.</td></tr>';
+      return;
+    }
+    var html = runs.map(function (r) {
+      return '<tr>' +
+        '<td class="mono">' + escapeHtml(fmtAt(r.ran_at)) + '</td>' +
+        '<td class="mono">' + escapeHtml(r.vin || '') + '</td>' +
+        '<td>' + (r.mileage == null ? '' : Number(r.mileage).toLocaleString('en-US')) + '</td>' +
+        '<td>' + escapeHtml(r.zip || '') + '</td>' +
+        '<td>' + escapeHtml(r.condition || '') + '</td>' +
+        '<td>' + siteCell(r.carvana) + '</td>' +
+        '<td>' + siteCell(r.carmax) + '</td>' +
+        '<td>' + siteCell(r.driveway) + '</td>' +
+        '<td class="notes">' + notesCell(r) + '</td>' +
+      '</tr>';
+    }).join('');
+    tbody.innerHTML = html;
+  }
+
+  function refresh() {
+    fetch(apiCompareAll, { headers: { 'Accept': 'application/json' }, credentials: 'same-origin' })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        renderRuns(data || {});
+        var now = new Date();
+        updatedBadge.textContent = 'updated ' + now.toLocaleTimeString();
+      })
+      .catch(function (err) {
+        tbody.innerHTML = '<tr><td colspan="9" class="empty">Could not load runs: ' + escapeHtml(err && err.message || 'error') + '</td></tr>';
+      });
+  }
+
+  form.addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    var body = {
+      vin: (document.getElementById('vin').value || '').trim().toUpperCase(),
+      mileage: document.getElementById('mileage').value,
+      zip: (document.getElementById('zip').value || '').trim(),
+      condition: document.getElementById('condition').value,
+    };
+    if (!body.vin || body.vin.length !== 17) {
+      note.textContent = 'VIN must be 17 characters.';
+      return;
+    }
+    if (!body.mileage) {
+      note.textContent = 'Mileage required.';
+      return;
+    }
+    if (!/^[0-9]{5}$/.test(body.zip)) {
+      note.textContent = 'Zip must be 5 digits.';
+      return;
+    }
+    note.textContent = 'Submitted; Carvana/CarMax/Driveway run sequentially (2-5 min total). Table auto-refreshes.';
+    btn.disabled = true;
+    inflight++; fmtInflight();
+    fetch(apiQuoteAll, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify(body),
+      credentials: 'same-origin',
+    }).then(function (r) { return r.json().catch(function () { return {}; }); })
+      .then(function (data) {
+        note.textContent = 'Run complete' + (data && data.run_id ? ' (' + data.run_id + ')' : '') + '. See table below.';
+      })
+      .catch(function (err) {
+        note.textContent = 'Run failed: ' + (err && err.message || 'error');
+      })
+      .then(function () {
+        inflight = Math.max(0, inflight - 1); fmtInflight();
+        btn.disabled = false;
+        refresh();
+      });
+    // Also refresh now so the user sees previous runs update as this runs.
+    refresh();
+  });
+
+  fmtInflight();
+  refresh();
+  setInterval(refresh, 30000);
+})();
+</script>
+</body>
+</html>`);
+});
+
 // --- Start server ---
 const port = config.PORT;
 app.listen(port, '0.0.0.0', () => {
