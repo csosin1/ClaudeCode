@@ -182,6 +182,20 @@ function profileIsWarm(ttlHours = 24) {
 async function launchBrowser(_options = {}) {
   try { fs.mkdirSync(USER_DATA_DIR, { recursive: true }); } catch { /* exists */ }
 
+  // Clear stale SingletonLock from a previous crashed Chromium. Persistent
+  // profiles leave these behind on SIGKILL / process crash and refuse to
+  // launch until removed. Safe as long as no other Chromium is actually
+  // using this profile right now (we check pgrep).
+  try {
+    const { execSync } = require('child_process');
+    const running = execSync('pgrep -f "user-data-dir=' + USER_DATA_DIR + '" || true').toString().trim();
+    if (!running) {
+      for (const name of ['SingletonLock', 'SingletonCookie', 'SingletonSocket']) {
+        try { fs.unlinkSync(path.join(USER_DATA_DIR, name)); } catch { /* not present */ }
+      }
+    }
+  } catch { /* non-fatal */ }
+
   const useHeaded = !!process.env.DISPLAY;
   const sessionId = config.PROXY_HOST && config.PROXY_PASS ? getOrCreateProxySession() : 'no-proxy';
   const profile = pickProfile(sessionId);
