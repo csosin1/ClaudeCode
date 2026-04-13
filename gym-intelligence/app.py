@@ -180,7 +180,8 @@ def api_chains_table():
 
     if country and country != "All Europe":
         rows = conn.execute("""
-            SELECT c.canonical_name, c.competitive_classification, c.location_count,
+            SELECT c.canonical_name, c.competitive_classification, c.ownership_type,
+                   c.location_count,
                    COUNT(l.id) as region_count
             FROM chains c
             JOIN locations l ON l.chain_id = c.id AND l.active = 1 AND l.country = ?
@@ -190,7 +191,8 @@ def api_chains_table():
         """, (country,)).fetchall()
     else:
         rows = conn.execute("""
-            SELECT canonical_name, competitive_classification, location_count,
+            SELECT canonical_name, competitive_classification, ownership_type,
+                   location_count,
                    location_count as region_count
             FROM chains
             WHERE location_count > 0
@@ -376,11 +378,17 @@ def api_status():
     conn = get_connection()
     loc_row = conn.execute("SELECT COUNT(*) as cnt FROM locations WHERE active = 1").fetchone()
     date_row = conn.execute("SELECT MAX(last_seen_date) as d FROM locations").fetchone()
+    muni_row = conn.execute("""
+        SELECT COUNT(*) as cnt FROM chains
+        WHERE competitive_classification = 'direct_competitor'
+          AND ownership_type = 'public'
+    """).fetchone()
     conn.close()
     api_key = _get_api_key()
     return jsonify({
         "total_locations": loc_row["cnt"] if loc_row else 0,
         "last_refresh": date_row["d"] if date_row and date_row["d"] else "Never",
+        "municipal_competitors": muni_row["cnt"] if muni_row else 0,
         "api_key_set": bool(api_key),
         "api_key_preview": f"{api_key[:8]}...{api_key[-4:]}" if len(api_key) > 12 else ("(empty)" if not api_key else "***"),
     })

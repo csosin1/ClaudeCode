@@ -1,0 +1,6 @@
+.chrome-profile/
+.proxy-session
+.profile-warmup
+.patchright_installed
+.playwright_installed
+startup-results.json

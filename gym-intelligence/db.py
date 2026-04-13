@@ -38,14 +38,19 @@ def get_db(db_path: str | Path | None = None):
 
 
 def init_db(db_path: str | Path | None = None):
-    """Create all tables if they don't exist."""
+    """Create all tables if they don't exist.
+
+    Also runs idempotent column-level migrations:
+      - adds ownership_type to chains (private/public/unknown)
+      - drops the legacy CHECK(competitive_classification IN (...)) so the new
+        'not_a_chain' label can be inserted (for OSM generic terms)
+    """
     with get_db(db_path) as conn:
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS chains (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 canonical_name TEXT UNIQUE NOT NULL,
-                competitive_classification TEXT DEFAULT 'unknown'
-                    CHECK(competitive_classification IN ('direct_competitor', 'non_competitor', 'unknown')),
+                competitive_classification TEXT DEFAULT 'unknown',
                 price_tier TEXT DEFAULT 'unknown'
                     CHECK(price_tier IN ('budget', 'mid_market', 'premium', 'unknown')),
                 pricing_notes TEXT,
@@ -104,7 +109,75 @@ def init_db(db_path: str | Path | None = None):
                 model_used TEXT NOT NULL
             );
         """)
+
+        # --- Idempotent migrations -------------------------------------
+        _migrate_add_ownership_type(conn)
+        _migrate_drop_competitive_classification_check(conn)
+
     logger.info("Database initialized at %s", db_path or DB_PATH)
+
+
+def _migrate_add_ownership_type(conn: sqlite3.Connection):
+    """Add ownership_type column to chains if missing."""
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(chains)").fetchall()}
+    if "ownership_type" not in cols:
+        conn.execute(
+            "ALTER TABLE chains ADD COLUMN ownership_type TEXT DEFAULT 'unknown'"
+        )
+        logger.info("Migration: added chains.ownership_type column")
+
+
+def _migrate_drop_competitive_classification_check(conn: sqlite3.Connection):
+    """Rebuild chains table without the legacy CHECK on competitive_classification.
+
+    The old schema allowed only ('direct_competitor','non_competitor','unknown'),
+    which rejects the new 'not_a_chain' label. Idempotent: only rebuilds when
+    the CHECK is actually present in the stored DDL.
+    """
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='chains'"
+    ).fetchone()
+    if not row or not row["sql"]:
+        return
+    ddl = row["sql"]
+    if "CHECK(competitive_classification" not in ddl and \
+       "CHECK (competitive_classification" not in ddl:
+        return  # already migrated
+
+    logger.info("Migration: rebuilding chains table to drop legacy CHECK constraint")
+
+    # Fetch current column list from the LIVE table (so a new ownership_type
+    # column added in the previous migration step is carried through).
+    cols = [r["name"] for r in conn.execute("PRAGMA table_info(chains)").fetchall()]
+    col_list = ", ".join(cols)
+
+    conn.execute("PRAGMA foreign_keys=OFF")
+    try:
+        conn.execute("""
+            CREATE TABLE chains_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                canonical_name TEXT UNIQUE NOT NULL,
+                competitive_classification TEXT DEFAULT 'unknown',
+                price_tier TEXT DEFAULT 'unknown'
+                    CHECK(price_tier IN ('budget', 'mid_market', 'premium', 'unknown')),
+                pricing_notes TEXT,
+                normalized_18mo_cost REAL,
+                membership_model TEXT DEFAULT 'unknown'
+                    CHECK(membership_model IN ('commitment', 'flexible', 'mixed', 'unknown')),
+                ai_classification_rationale TEXT,
+                manually_reviewed INTEGER DEFAULT 0,
+                location_count INTEGER DEFAULT 0,
+                last_classified_date TEXT,
+                ownership_type TEXT DEFAULT 'unknown'
+            )
+        """)
+        conn.execute(
+            f"INSERT INTO chains_new ({col_list}) SELECT {col_list} FROM chains"
+        )
+        conn.execute("DROP TABLE chains")
+        conn.execute("ALTER TABLE chains_new RENAME TO chains")
+    finally:
+        conn.execute("PRAGMA foreign_keys=ON")
 
 
 def setup_logging(name: str) -> logging.Logger:

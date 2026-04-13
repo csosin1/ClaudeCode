@@ -7,7 +7,7 @@ from datetime import date, datetime, timedelta
 import anthropic
 import httpx
 
-from db import COUNTRY_NAMES, get_db, init_db, setup_logging
+from db import COUNTRY_NAMES, get_connection, get_db, init_db, setup_logging
 
 logger = setup_logging("classify")
 
@@ -17,6 +17,20 @@ MODEL = "claude-sonnet-4-20250514"
 # tagging noise — classifying them wastes API spend and adds no competitive
 # signal. Raise/lower to widen or narrow the classified chain universe.
 MIN_LOCATIONS_FOR_CLASSIFICATION = 4
+
+# Pricing for claude-sonnet-4 (USD per million tokens).
+COST_PER_MTOK_INPUT = 3.0
+COST_PER_MTOK_OUTPUT = 15.0
+
+# Generic sports-facility words that OSM contributors use as a "name" but
+# which don't actually refer to a branded chain. Matched case-insensitively
+# on the full canonical_name (NOT substring — "The Gym" is ambiguous and
+# must still go to Claude).
+OSM_GENERIC_NAMES = {
+    "sporthalle", "turnhalle", "sporthal", "gimnasio", "poliesportiu",
+    "fitness", "gym", "sports centre", "sports center", "salle de sport",
+    "palestra", "polideportivo",
+}
 
 
 def get_chains_to_classify(conn) -> list[dict]:
@@ -254,5 +268,261 @@ def run_classification(progress_cb=None):
     log("Classification complete")
 
 
+def _extract_text_from_response(response) -> str:
+    """Walk content blocks of a web_search-enabled response and return the
+    final text block. The response shape is a list of blocks; tool_use and
+    tool_result blocks are intermixed, but the final answer is always the
+    last `text` block."""
+    final_text = ""
+    for block in response.content:
+        btype = getattr(block, "type", None)
+        if btype == "text":
+            final_text = getattr(block, "text", "") or final_text
+    return (final_text or "").strip()
+
+
+def _parse_json_body(text: str) -> dict:
+    """Parse JSON from a model response, tolerating markdown fences."""
+    s = text.strip()
+    # Strip ```json ... ``` fences if present.
+    m = re.match(r"^```(?:json)?\s*(.*?)\s*```$", s, re.DOTALL)
+    if m:
+        s = m.group(1).strip()
+    try:
+        return json.loads(s)
+    except json.JSONDecodeError:
+        m = re.search(r"\{.*\}", s, re.DOTALL)
+        if m:
+            return json.loads(m.group())
+        raise ValueError(f"Could not parse classification response: {text[:500]}")
+
+
+def classify_chain_v2(client: anthropic.Anthropic, context: dict) -> tuple[dict, int, int]:
+    """Call Claude with web_search enabled to classify a chain.
+
+    Returns (parsed_json, input_tokens, output_tokens).
+    """
+    prompt = f"""You are a fitness industry analyst. Classify this gym chain for a competitive analysis focused on Basic-Fit, the European budget gym operator (18-month all-in cost ~€300-360).
+
+Chain: {context['chain_name']}
+Countries present: {json.dumps(context['countries'])}
+Total locations: {context['total_locations']}
+Sample cities: {', '.join(context['sample_cities']) if context['sample_cities'] else 'N/A'}
+Known website: {context['website'] or 'none — you must search'}
+
+Use web_search to find the chain's actual website, pricing, and membership model. Look for: official site, pricing/tarifs/prix/precios page, news coverage that mentions it as municipal vs private.
+
+## Competitive rules (updated)
+- direct_competitor: competes with Basic-Fit for the same customer. Private OR public. Includes:
+  - Budget and mid-market private chains (multi-location, high-volume).
+  - Municipal/public facilities IF they offer an individual gym membership (not just pay-per-entry, not just pool/lane rental, not just team sports) AND the monthly price is under €50.
+- non_competitor: premium-only clubs (>€50/mo, boutique positioning), single-discipline studios (yoga/pilates/CrossFit/martial arts), hotel gyms, municipal facilities that only offer pay-per-entry / pool / team sports, personal training studios, medical/physio rehab centres.
+- not_a_chain: OSM tag noise (generic words like "Sporthalle" being treated as a chain name because many OSM entries share that label), or a set of unrelated single-owner gyms that happen to have the same generic name.
+- unknown: web search returned nothing conclusive after a genuine attempt.
+
+## Ownership rules
+- private: privately-owned / franchise / corporate chain.
+- public: municipal, state-owned, university-owned, or government-funded facility.
+- unknown: unclear after search.
+
+## Price tier (unchanged)
+- budget: under €25/mo
+- mid_market: €25-50/mo
+- premium: over €50/mo
+
+Return ONLY JSON (no markdown fences) with these fields:
+{{
+  "competitive_classification": "direct_competitor" | "non_competitor" | "not_a_chain" | "unknown",
+  "ownership_type": "private" | "public" | "unknown",
+  "price_tier": "budget" | "mid_market" | "premium" | "unknown",
+  "normalized_18mo_cost": <number or null>,
+  "membership_model": "commitment" | "flexible" | "mixed" | "unknown",
+  "pricing_notes": "<brief>",
+  "rationale": "<one paragraph — cite what web search found>"
+}}"""
+
+    response = client.messages.create(
+        model=MODEL,
+        max_tokens=1500,
+        tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 3}],
+        messages=[{"role": "user", "content": prompt}],
+    )
+
+    text = _extract_text_from_response(response)
+    parsed = _parse_json_body(text)
+
+    usage = getattr(response, "usage", None)
+    in_tok = getattr(usage, "input_tokens", 0) or 0
+    out_tok = getattr(usage, "output_tokens", 0) or 0
+    return parsed, in_tok, out_tok
+
+
+def _unknown_chains_to_reclassify(conn) -> list[dict]:
+    """All chains currently stuck at 'unknown' that are big enough to bother with."""
+    rows = conn.execute("""
+        SELECT id, canonical_name, location_count
+        FROM chains
+        WHERE competitive_classification = 'unknown'
+          AND location_count >= ?
+          AND manually_reviewed = 0
+        ORDER BY location_count DESC
+    """, (MIN_LOCATIONS_FOR_CLASSIFICATION,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def reclassify_unknown(conn, client, progress_cb=None, dry_run: bool = False) -> dict:
+    """Second-pass classification for chains still labelled 'unknown'.
+
+    Uses web_search via Claude to disambiguate real chains from OSM generic
+    terms. OSM generics (see OSM_GENERIC_NAMES) short-circuit to 'not_a_chain'
+    with no API call.
+
+    Returns a stats dict.
+    """
+    def log(msg):
+        logger.info(msg)
+        if progress_cb:
+            progress_cb(msg)
+
+    chains = _unknown_chains_to_reclassify(conn)
+    log(f"Reclassify: {len(chains)} unknown chains with >= {MIN_LOCATIONS_FOR_CLASSIFICATION} locations")
+
+    if dry_run:
+        return {
+            "dry_run": True,
+            "chains_planned": len(chains),
+            "osm_generics_would_skip": sum(
+                1 for c in chains
+                if c["canonical_name"].strip().lower() in OSM_GENERIC_NAMES
+            ),
+            "plan": [
+                {
+                    "id": c["id"],
+                    "canonical_name": c["canonical_name"],
+                    "location_count": c["location_count"],
+                    "action": (
+                        "mark_not_a_chain"
+                        if c["canonical_name"].strip().lower() in OSM_GENERIC_NAMES
+                        else "call_claude_with_websearch"
+                    ),
+                }
+                for c in chains
+            ],
+        }
+
+    stats = {
+        "chains_reclassified": 0,
+        "osm_generics_filtered": 0,
+        "tokens_input": 0,
+        "tokens_output": 0,
+        "api_calls": 0,
+        "cost_usd": 0.0,
+        "by_classification": {},
+        "failures": 0,
+    }
+    today = date.today().isoformat()
+
+    for i, chain in enumerate(chains, 1):
+        chain_id = chain["id"]
+        name = chain["canonical_name"]
+        key = name.strip().lower()
+
+        # --- 1) OSM generic short-circuit ---
+        if key in OSM_GENERIC_NAMES:
+            conn.execute("""
+                UPDATE chains SET
+                    competitive_classification = 'not_a_chain',
+                    ownership_type = 'unknown',
+                    ai_classification_rationale = ?,
+                    last_classified_date = ?
+                WHERE id = ?
+            """, ("OSM generic term, not a branded chain", today, chain_id))
+            conn.commit()
+            stats["osm_generics_filtered"] += 1
+            stats["chains_reclassified"] += 1
+            stats["by_classification"]["not_a_chain"] = \
+                stats["by_classification"].get("not_a_chain", 0) + 1
+            log(f"  ({i}/{len(chains)}) {name}: OSM generic -> not_a_chain")
+            continue
+
+        # --- 2) Claude with web_search ---
+        try:
+            context = get_chain_context(conn, chain_id, name)
+            result, in_tok, out_tok = classify_chain_v2(client, context)
+            stats["api_calls"] += 1
+            stats["tokens_input"] += in_tok
+            stats["tokens_output"] += out_tok
+
+            classification = result.get("competitive_classification", "unknown")
+            conn.execute("""
+                UPDATE chains SET
+                    competitive_classification = ?,
+                    price_tier = ?,
+                    normalized_18mo_cost = ?,
+                    membership_model = ?,
+                    pricing_notes = ?,
+                    ai_classification_rationale = ?,
+                    ownership_type = ?,
+                    last_classified_date = ?
+                WHERE id = ?
+            """, (
+                classification,
+                result.get("price_tier", "unknown"),
+                result.get("normalized_18mo_cost"),
+                result.get("membership_model", "unknown"),
+                result.get("pricing_notes"),
+                result.get("rationale"),
+                result.get("ownership_type", "unknown"),
+                today,
+                chain_id,
+            ))
+            conn.commit()
+
+            stats["chains_reclassified"] += 1
+            stats["by_classification"][classification] = \
+                stats["by_classification"].get(classification, 0) + 1
+            log(f"  ({i}/{len(chains)}) {name}: {classification} ({result.get('ownership_type', 'unknown')}, {result.get('price_tier', 'unknown')})")
+        except Exception as e:
+            stats["failures"] += 1
+            log(f"  ({i}/{len(chains)}) {name}: FAILED — {e}")
+
+    stats["cost_usd"] = round(
+        stats["tokens_input"] / 1_000_000 * COST_PER_MTOK_INPUT
+        + stats["tokens_output"] / 1_000_000 * COST_PER_MTOK_OUTPUT,
+        4,
+    )
+    log(
+        f"Reclassify done: {stats['chains_reclassified']} updated, "
+        f"{stats['osm_generics_filtered']} OSM generics, "
+        f"{stats['api_calls']} Claude calls, "
+        f"${stats['cost_usd']:.2f} spent"
+    )
+    return stats
+
+
 if __name__ == "__main__":
-    run_classification()
+    import argparse
+    parser = argparse.ArgumentParser(description="Chain classifier")
+    parser.add_argument(
+        "--reclassify-unknown",
+        action="store_true",
+        help="Re-run classification on chains stuck at 'unknown' using web_search.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="With --reclassify-unknown, print the plan instead of calling Claude.",
+    )
+    args = parser.parse_args()
+
+    if args.reclassify_unknown:
+        init_db()
+        client = anthropic.Anthropic() if not args.dry_run else None
+        conn = get_connection()
+        try:
+            stats = reclassify_unknown(conn, client, dry_run=args.dry_run)
+        finally:
+            conn.close()
+        print(json.dumps(stats, indent=2, default=str))
+    else:
+        run_classification()
