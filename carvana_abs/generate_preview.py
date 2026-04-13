@@ -37,18 +37,14 @@ def promote_to_live():
         print("ERROR: No preview to promote")
         return
     shutil.copy2(src, dst)
-
-    # Also sync the docs/ tree so SEC filing links on live resolve to PDFs
-    # (preview served docs, live did not — tapping a filing on live 404'd
-    # and fell through to the dashboard index).
-    src_docs = os.path.join(PREVIEW_DIR, "docs")
-    dst_docs = os.path.join(LIVE_DIR, "docs")
-    if os.path.isdir(src_docs):
-        subprocess.run(
-            ["rsync", "-a", "--delete", src_docs + "/", dst_docs + "/"],
-            check=True,
-        )
     print("Promoted preview to live!")
+
+    # Purge Cloudflare cache so end-users see the new build immediately.
+    # No-ops with a warning if CF_API_TOKEN/CF_ZONE_ID aren't configured.
+    purge = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                         "deploy", "cf_purge.sh")
+    if os.path.exists(purge):
+        subprocess.run(["bash", purge], check=False)
 
 
 if __name__ == "__main__":
