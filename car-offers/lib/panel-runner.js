@@ -115,6 +115,7 @@ async function runOneConsumer(consumer, opts = {}) {
       log(`[panel] consumer=${consumer.id} run=${runId} site=${site} start`);
 
       let raw;
+      let threwBeforeReturn = null;
       try {
         const handler = _loadSiteHandler(site);
         raw = await handler({
@@ -127,14 +128,34 @@ async function runOneConsumer(consumer, opts = {}) {
           fingerprintProfileId: consumer.fingerprint_profile_id,
           proxyZip: normalized.zip,
         });
+        if (!raw || typeof raw !== 'object') {
+          raw = { error: `handler returned non-object: ${typeof raw}`, wizardLog: [] };
+        }
       } catch (err) {
-        raw = { error: err.message };
+        threwBeforeReturn = err;
+        raw = { error: err.message || String(err), wizardLog: [] };
         errorsAggregate.push(`${site}:${err.message}`);
       }
 
       const offerUsd = raw.offer_usd != null ? Number(raw.offer_usd) : extractUsdInt(raw.offer);
       const status = raw.status || (offerUsd ? 'ok' : (raw.error ? 'error' : 'ok'));
       if (status === 'ok' && offerUsd) anyOk = true;
+
+      // Defense in depth: ALWAYS persist a wizard_log. If the handler returned
+      // without one, synthesize a minimal log so the DB row is never NULL.
+      // Append the error text as the final log entry — this is the diagnostic
+      // signal that was previously dropped on the floor (issue from
+      // 2026-04-13 consumer-1 carvana run).
+      let logEntries = Array.isArray(raw.wizardLog) ? raw.wizardLog.slice() : [];
+      if (logEntries.length === 0) {
+        logEntries.push(`[panel-runner] ${site} returned no wizard_log (status=${status})`);
+      }
+      if (raw.error) {
+        logEntries.push(`[panel-runner] error: ${raw.error}`);
+      }
+      if (threwBeforeReturn) {
+        logEntries.push(`[panel-runner] handler threw: ${threwBeforeReturn.stack || threwBeforeReturn.message}`);
+      }
 
       const durationMs = Date.now() - t0;
       try {
@@ -151,7 +172,7 @@ async function runOneConsumer(consumer, opts = {}) {
           proxy_ip: (raw.details && raw.details.proxy_ip) || null,
           ran_at: new Date().toISOString(),
           duration_ms: durationMs,
-          wizard_log: raw.wizardLog || null,
+          wizard_log: logEntries,
         });
       } catch (e) {
         log(`[panel] insertOffer failed for ${site}: ${e.message}`);

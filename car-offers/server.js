@@ -34,6 +34,17 @@ function persistOffer({ site, runId, normalized, result, startedAt, durationMs, 
   const db = getOffersDb();
   if (!db) return;
   const { insertOffer } = require('./lib/offers-db');
+  // Defense in depth: always emit a non-null wizard_log so DB rows always
+  // carry a diagnostic trail. If the handler returned no log, synthesize one
+  // and append the error message — the bug we're guarding against here is
+  // the 2026-04-13 consumer-1 carvana run that returned wizard_log=NULL.
+  let logEntries = Array.isArray(result.wizardLog) ? result.wizardLog.slice() : [];
+  if (logEntries.length === 0) {
+    logEntries.push(`[server] ${site} handler returned no wizard_log`);
+  }
+  if (result.error) {
+    logEntries.push(`[server] error: ${result.error}`);
+  }
   try {
     insertOffer(db, {
       run_id: runId,
@@ -48,7 +59,7 @@ function persistOffer({ site, runId, normalized, result, startedAt, durationMs, 
       proxy_ip: proxyIp || null,
       ran_at: new Date(startedAt || Date.now()).toISOString(),
       duration_ms: durationMs || null,
-      wizard_log: result.wizardLog || null,
+      wizard_log: logEntries,
     });
   } catch (e) {
     console.error(`[persist-offer] ${site} insert failed:`, e.message);
@@ -1146,6 +1157,7 @@ async function runSiteHandler({ site, handler, req, res, runId }) {
     return res.status(400).json({ error: e.message });
   }
   const started = Date.now();
+  const debug = !!(req.body && req.body.debug);
   try {
     const result = await handler({
       vin: normalized.vin,
@@ -1153,6 +1165,7 @@ async function runSiteHandler({ site, handler, req, res, runId }) {
       zip: normalized.zip,
       condition: normalized.condition,
       email: config.PROJECT_EMAIL,
+      debug,
     });
     // Normalize: carvana.js returns { offer: '$...', details, wizardLog }.
     // carmax/driveway return { status, offer_usd, offer_expires, ... }.
