@@ -1,9 +1,18 @@
-const { launchBrowser, humanDelay, humanType, randomMouseMove, closeBrowser, simulateHumanBehavior, startMouseDrift } = require('./browser');
+const {
+  launchBrowser, humanDelay, microDelay, humanType, randomMouseMove, bezierMouseMove,
+  closeBrowser, simulateHumanBehavior, simulateBlurFocus, startMouseDrift,
+  markProfileWarmed, profileIsWarm,
+} = require('./browser');
+const { fullWarmup, miniBrowse } = require('./shopper-warmup');
 const config = require('./config');
 const path = require('path');
+const fs = require('fs');
 
 const CARVANA_URL = 'https://www.carvana.com/sell-my-car';
-const TOTAL_TIMEOUT = 300_000; // 5 minutes total (IP hunt + proxy latency)
+// Longer timeout — shopper warmup + sell flow + Turnstile can reach 12+ min.
+const TOTAL_TIMEOUT = 900_000;
+// How long a profile stays "warm" before we re-run the full shopper warmup.
+const WARMUP_TTL_HOURS = 24;
 
 // Persistent user-data-dir means only one Carvana flow can run at a time —
 // Chromium enforces a singleton lock on the profile. Serialize runs.
@@ -106,30 +115,28 @@ async function _getCarvanaOfferImpl({ vin, mileage, zip, email }) {
     launchMethod = result.launchMethod || 'unknown';
     log(`[carvana] Browser: ${launchMethod} | headed: ${!!process.env.DISPLAY}`);
 
-    // --- Step 1: Warm up like a real user — Google → scroll → navigate ---
-    // Goals: build realistic history/cookies in the persistent profile, and
-    // land on Carvana with a Google referrer (no referrer = suspicious).
-    log('[carvana] Step 1: Warming up browser session via Google...');
+    // --- Step 1: Shopper warmup — act like a real used-car shopper BEFORE
+    // the sell flow. Cloudflare Turnstile's interactive score grades
+    // pre-submission behavior; a cold jump to /sell-my-car looks robotic.
+    // If profile was warmed within WARMUP_TTL_HOURS, do a short mini-browse;
+    // otherwise run the full 10-15 min warmup once and mark it.
+    const isWarm = profileIsWarm(WARMUP_TTL_HOURS);
+    log(`[carvana] Profile warm state: ${isWarm ? 'fresh (mini browse)' : 'cold (full warmup)'}`);
     try {
-      await page.goto('https://www.google.com/search?q=sell+my+car+online', {
-        timeout: 30000,
-        waitUntil: 'domcontentloaded',
-      });
-      await humanDelay(2500, 4500);
-      await simulateHumanBehavior(page);
-      // Scroll around like a person reading results
-      try {
-        await page.mouse.wheel(0, 400 + Math.random() * 300);
-        await humanDelay(800, 1500);
-        await page.mouse.wheel(0, 200 + Math.random() * 200);
-      } catch { /* ignore */ }
-      await humanDelay(1500, 3000);
-      log('[carvana] Warmup: Google search page browsed');
-    } catch (e) { log(`[carvana] Warmup: Google failed (non-fatal): ${e.message}`); }
-    await humanDelay(2000, 4000);
+      if (isWarm) {
+        await miniBrowse(page, log);
+      } else {
+        await fullWarmup(page, log);
+        markProfileWarmed();
+      }
+    } catch (warmErr) {
+      log(`[carvana] Warmup error (non-fatal): ${warmErr.message}`);
+    }
+    await humanDelay(2000, 5000);
 
-    // --- Navigate to Carvana with Google as referrer ---
-    log('[carvana] Navigating to Carvana sell page (referer=google)...');
+    // --- Navigate to Carvana sell page. Referer is naturally carvana.com
+    // because the warmup just browsed there. ---
+    log('[carvana] Navigating to Carvana sell page...');
 
     let carvanaLoaded = false;
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -137,7 +144,6 @@ async function _getCarvanaOfferImpl({ vin, mileage, zip, email }) {
         await page.goto(CARVANA_URL, {
           waitUntil: 'domcontentloaded',
           timeout: 60000,
-          referer: 'https://www.google.com/',
         });
       } catch (navErr) {
         log(`[carvana] Navigation attempt ${attempt} failed: ${navErr.message}`);

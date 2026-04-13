@@ -47,6 +47,9 @@ rsync -a --delete \
     --exclude='startup-results.json' \
     --exclude='.patchright_installed' \
     --exclude='.playwright_installed' \
+    --exclude='.chrome-profile' \
+    --exclude='.proxy-session' \
+    --exclude='.profile-warmup' \
     "$REPO_DIR/$PROJECT/" "$PREVIEW_DIR/"
 
 # --- npm install in preview (if package.json changed or deps missing) ---
@@ -67,8 +70,23 @@ if [ ! -f "$PREVIEW_DIR/.playwright_installed" ]; then
     "$NPX_BIN" playwright --version > /dev/null 2>&1 && touch "$PREVIEW_DIR/.playwright_installed"
 fi
 
-# --- Xvfb (shared between live and preview) — managed by systemd so it
-# survives reboots and isn't reaped when the deploy shell exits. ---
+# --- System fonts: install Microsoft core fonts + Liberation + Noto so
+# the font-enumeration fingerprint looks like a consumer Windows machine,
+# not a bare DejaVu-only Linux server. One-time; non-interactive EULA. ---
+if [ ! -f /opt/.car_offers_fonts_installed ]; then
+    echo "$(date): [car-offers] Installing consumer fonts (mscorefonts + liberation + noto)..." >> "$LOG"
+    echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true" | debconf-set-selections >> "$LOG" 2>&1 || true
+    DEBIAN_FRONTEND=noninteractive apt-get install -y \
+        ttf-mscorefonts-installer fonts-liberation fonts-noto-core fontconfig \
+        >> "$LOG" 2>&1 || true
+    fc-cache -f >> "$LOG" 2>&1 || true
+    touch /opt/.car_offers_fonts_installed
+fi
+
+# --- Xvfb as a managed systemd unit so it survives reboots and isn't
+# reaped when the deploy shell exits. 1920x1080 matches our fingerprint
+# baseline; browser.js still reports the per-session window size via
+# window.screen.* patches. ---
 if ! command -v Xvfb >/dev/null 2>&1; then
     apt-get install -y xvfb >> "$LOG" 2>&1 || true
 fi
@@ -100,6 +118,9 @@ if [ ! -d "$LIVE_DIR/node_modules" ]; then
 fi
 
 # --- systemd units (always rewrite to pick up changes) ---
+# NOTE: TZ=America/New_York is critical — Decodo sticky session returns
+# Norwalk CT IPs; if Chromium's host clock is UTC, Intl.DateTimeFormat
+# reports a TZ that contradicts the proxy IP and fails CF's timezone check.
 write_unit() {
     local name="$1" dir="$2" port="$3" desc="$4"
     cat > /etc/systemd/system/$name.service <<EOF
@@ -115,6 +136,7 @@ ExecStart=$NODE_BIN server.js
 Restart=always
 RestartSec=5
 Environment=NODE_ENV=production
+Environment=TZ=America/New_York
 $DISPLAY_LINE
 StandardOutput=append:$LOG_DIR/$name.log
 StandardError=append:$LOG_DIR/$name.log
