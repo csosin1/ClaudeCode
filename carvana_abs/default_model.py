@@ -472,6 +472,205 @@ def train_models(df, feature_cols):
     return results
 
 
+# ── Empirical Markov absorption + per-deal loss-buildup forecast ──
+
+PRIME_DEALS  = ["2020-P1", "2021-P1", "2021-P2", "2022-P1", "2022-P2",
+                "2022-P3", "2024-P2", "2024-P3", "2024-P4",
+                "2025-P2", "2025-P3", "2025-P4"]
+NONPRIME_DEALS = ["2021-N1", "2021-N2", "2021-N3", "2021-N4"]
+_SORT_KEY = ("substr(reporting_period_end,7,4)||"
+             "substr(reporting_period_end,1,2)||"
+             "substr(reporting_period_end,4,2)")
+
+
+def _build_markov_absorption(conn, deals):
+    """Compute the 6-state absorbing Markov chain's lifetime default
+    probability per starting state, fit from this tier's loan_performance
+    transition history. Returns a list of length 6: P(default | state s).
+    """
+    qm = ",".join(["?"] * len(deals))
+    defaulted = {(d, a) for d, a in conn.execute(
+        f"SELECT deal, asset_number FROM loan_loss_summary "
+        f"WHERE total_chargeoff > 0 AND deal IN ({qm})", deals)}
+    paidoff = set()
+    for d, a in conn.execute(
+        f"SELECT DISTINCT deal, asset_number FROM loan_performance "
+        f"WHERE deal IN ({qm}) AND zero_balance_code IS NOT NULL", deals):
+        if (d, a) not in defaulted:
+            paidoff.add((d, a))
+
+    cnt = {s: {**{t: 0 for t in range(6)}, "Default": 0, "Payoff": 0} for s in range(6)}
+    cur = conn.execute(
+        f"""SELECT deal, asset_number, current_delinquency_status,
+                   zero_balance_code, charged_off_amount
+            FROM loan_performance WHERE deal IN ({qm})
+            ORDER BY deal, asset_number, {_SORT_KEY}""", deals)
+    prev_key = None; prev_state = None
+    for deal, asset, cds, zbc, coa in cur:
+        key = (deal, asset)
+        if key != prev_key:
+            if prev_key is not None and prev_state is not None:
+                if prev_key in defaulted: cnt[prev_state]["Default"] += 1
+                elif prev_key in paidoff: cnt[prev_state]["Payoff"] += 1
+            prev_key = key; prev_state = None
+        if (zbc and str(zbc) in ("1", "2", "3", "4")) or (coa is not None and coa > 0):
+            continue
+        if cds is None: continue
+        try: s = min(int(cds), 5)
+        except (ValueError, TypeError): continue
+        if prev_state is not None: cnt[prev_state][s] += 1
+        prev_state = s
+    if prev_key is not None and prev_state is not None:
+        if prev_key in defaulted: cnt[prev_state]["Default"] += 1
+        elif prev_key in paidoff: cnt[prev_state]["Payoff"] += 1
+
+    Q = np.zeros((6, 6)); R = np.zeros((6, 2))
+    for i in range(6):
+        total = sum(cnt[i].values())
+        if total == 0: continue
+        for j in range(6): Q[i, j] = cnt[i][j] / total
+        R[i, 0] = cnt[i]["Default"] / total
+        R[i, 1] = cnt[i]["Payoff"] / total
+    B = np.linalg.inv(np.eye(6) - Q) @ R
+    return [round(float(B[i, 0]), 6) for i in range(6)]
+
+
+def _per_deal_loss_buildup(conn, deals, p_default_by_state, db_for_cert):
+    """For each deal, compute loss buildup using empirical Markov probabilities.
+
+    Forecast components per deal:
+      realized      = cum_net_losses from latest cert (authoritative)
+      dq_pending    = sum over loans currently in state ≥ 1 of
+                      P(default|state) × ending_balance × severity
+      performing    = sum over loans currently in state 0 of
+                      P(default|state=0) × ending_balance × severity
+      total         = realized + dq_pending + performing
+
+    Severity per deal = 1 − cum_liquidation_proceeds / cum_gross_losses
+    from the cert; falls back to 60% (industry baseline) for deals without
+    a cum_gross history yet.
+    """
+    out = {}
+    for deal in deals:
+        cert = _cert_totals_lookup(deal, db_for_cert)
+        cum_gross = cert.get("cum_gross_losses") or 0
+        cum_liq = cert.get("cum_liquidation_proceeds") or 0
+        cum_net = cert.get("cum_net_losses") or max(0, cum_gross - cum_liq)
+        severity = (1 - cum_liq / cum_gross) if cum_gross > 0 else 0.60
+
+        # Active loans = loans whose CHRONOLOGICALLY-LATEST observation has
+        # zero_balance_code IS NULL (still on the books, not terminated).
+        # Then pull THAT row's status + ending balance.
+        rows = conn.execute(f"""
+            WITH latest AS (
+                SELECT asset_number, MAX({_SORT_KEY}) AS k
+                FROM loan_performance WHERE deal=?
+                GROUP BY asset_number
+            )
+            SELECT lp.current_delinquency_status, lp.ending_balance
+            FROM loan_performance lp
+            INNER JOIN latest ON lp.asset_number = latest.asset_number
+              AND {_SORT_KEY} = latest.k
+            WHERE lp.deal = ?
+              AND lp.zero_balance_code IS NULL
+              AND lp.ending_balance > 0
+        """, (deal, deal)).fetchall()
+
+        dq_pending = 0.0; performing = 0.0
+        for cds, bal in rows:
+            try: s = min(int(cds or 0), 5)
+            except (ValueError, TypeError): s = 0
+            p = p_default_by_state[s]
+            loss = p * float(bal) * severity
+            if s == 0: performing += loss
+            else: dq_pending += loss
+
+        total = cum_net + dq_pending + performing
+        out[deal] = {
+            "active_loans": len(rows),
+            "severity": round(severity, 4),
+            "realized": round(cum_net, 2),
+            "dq_pending": round(dq_pending, 2),
+            "performing_future": round(performing, 2),
+            "total_expected": round(total, 2),
+        }
+    return out
+
+
+def _cert_totals_lookup(deal, db_path):
+    """Parse cum gross/liq/net from this deal's latest cached servicer cert.
+    Mirrors generate_dashboard._cert_totals (kept here so default_model has
+    no dashboard dependency)."""
+    import re
+    from urllib.parse import urlparse
+    cache_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "filing_cache")
+    conn = sqlite3.connect(db_path)
+    row = conn.execute(
+        "SELECT servicer_cert_url FROM filings WHERE deal=? "
+        "AND servicer_cert_url IS NOT NULL ORDER BY filing_date DESC LIMIT 1",
+        (deal,)).fetchone()
+    conn.close()
+    if not row: return {}
+    p = urlparse(row[0])
+    path = os.path.join(cache_dir, p.path.strip("/").replace("/", "_"))
+    if not os.path.exists(path): return {}
+    try:
+        with open(path, "r", errors="replace") as f: txt = f.read()
+    except OSError: return {}
+    body = re.sub(r"<[^>]+>", " ", re.sub(r"&nbsp;", " ", txt))
+    body = re.sub(r"\s+", " ", body)
+    def grab(label):
+        pat = rf"{re.escape(label)}\s*\(?\s*\d+\s*\)?[^0-9]{{0,30}}([\d,]+(?:\.\d+)?)"
+        m = re.search(pat, body)
+        return float(m.group(1).replace(",", "")) if m else None
+    # Label must run all the way through "Collection Period" so the regex's
+    # `\(?\s*\d+\s*\)?` group lines up with the (NN) line marker that
+    # immediately precedes the dollar amount.
+    return {
+        "cum_gross_losses": grab("Gross Charged-Off Receivables losses as of the last day of the current Collection Period"),
+        "cum_liquidation_proceeds": grab("Liquidation Proceeds as of the last day of the current Collection Period"),
+        "cum_net_losses": grab("Net Charged-Off Receivables losses as of the last day of the current Collection Period"),
+    }
+
+
+def compute_empirical_forecast(db_path):
+    """Build the Markov-based per-deal loss buildup. Returns a dict suitable
+    to attach under results["segments"]["empirical_loss_buildup"].
+
+    The dashboard.db export drops loan_performance for size; this routine
+    needs the full DB. Auto-fallback to /opt/abs-dashboard/carvana_abs/db
+    /carvana_abs.db when the passed db_path lacks the loan_performance table.
+    """
+    full_db = "/opt/abs-dashboard/carvana_abs/db/carvana_abs.db"
+    use_db = db_path
+    try:
+        sqlite3.connect(db_path).execute("SELECT 1 FROM loan_performance LIMIT 1")
+    except sqlite3.OperationalError:
+        if os.path.exists(full_db):
+            use_db = full_db
+            logger.info(f"loan_performance not in {db_path}; using full DB at {full_db}")
+        else:
+            logger.warning("loan_performance table not available; skipping empirical forecast")
+            return {}
+    conn = sqlite3.connect(use_db)
+    logger.info("Building Prime Markov absorption matrix...")
+    p_prime = _build_markov_absorption(conn, PRIME_DEALS)
+    logger.info(f"  Prime P(default|state): {p_prime}")
+    logger.info("Building Non-Prime Markov absorption matrix...")
+    p_nonp = _build_markov_absorption(conn, NONPRIME_DEALS)
+    logger.info(f"  Non-Prime P(default|state): {p_nonp}")
+    logger.info("Per-deal loss buildup...")
+    prime_out = _per_deal_loss_buildup(conn, PRIME_DEALS, p_prime, use_db)
+    nonp_out  = _per_deal_loss_buildup(conn, NONPRIME_DEALS, p_nonp, use_db)
+    conn.close()
+    return {
+        "markov_absorption": {"prime": p_prime, "nonprime": p_nonp},
+        "by_deal": {**prime_out, **nonp_out},
+        "tier_of_deal": {**{d: "Prime" for d in PRIME_DEALS},
+                         **{d: "Non-Prime" for d in NONPRIME_DEALS}},
+    }
+
+
 def save_results(results, db_path, json_path):
     """Save model results to JSON file and dashboard DB."""
     # JSON output
@@ -508,6 +707,12 @@ def main():
     if results is None:
         logger.error("Model training failed")
         return
+
+    logger.info("Computing empirical Markov loss forecast (per-deal build-up)...")
+    try:
+        results["segments"]["empirical_loss_buildup"] = compute_empirical_forecast(db)
+    except Exception as e:
+        logger.warning(f"Empirical loss buildup failed: {e}")
 
     logger.info("Saving results...")
     save_results(results, db, OUTPUT_JSON)

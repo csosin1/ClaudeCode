@@ -1356,79 +1356,49 @@ def generate_comparison_content(deals, title):
 
 
 def _loss_forecast_buildup_tables(model_results):
-    """Build the vintage loss-forecast build-up tables (one for Prime, one
-    for Non-Prime). For each deal we show:
+    """Per-deal lifetime loss-forecast build-up using the empirical Markov
+    absorption model (see default_model._build_markov_absorption).
 
-        Realized (net)     = cert's cumulative net charge-offs
-        31-60 DQ expected  = 31-60 balance × 20% roll × severity
-        61-90 DQ expected  = 61-90 balance × 50% roll × severity
-        91-120 DQ expected = 91-120 balance × 85% roll × severity
-        Future (model)     = max(0, model's lifetime net-loss forecast
-                             minus what's already realized or in DQ pipeline)
-        Total expected     = realized + dq_pending + future
+    For each deal:
+        Realized (net)    = cert's cumulative net charge-offs
+        DQ pipeline       = sum over loans currently in state ≥ 1 of
+                            P(default | state, tier) × ending_balance × severity
+        Performing future = sum over loans currently in state 0 of
+                            P(default | state=0, tier) × ending_balance × severity
+        Total expected    = realized + DQ pipeline + performing future
 
-    Severity is per-deal: 1 − cum_liq / cum_gross, with a 60% fallback when
-    the cert doesn't have loss data yet (very new deals).
-    Roll-to-loss multipliers are industry-standard auto-ABS levels; they're
-    approximations, not modelled per deal — call that out in the table note.
+    Per-state P(default) comes from a 6-state absorbing Markov chain
+    (Curr / 1pmt / 2pmt / 3pmt / 4pmt / 5+pmt → Default | Payoff) fit on
+    the tier's full loan_performance transition history. No heuristic
+    multipliers — the probability of eventual default given current
+    delinquency status is read directly from observed transitions.
     """
-    forecast = model_results.get("segments", {}).get("lifetime_forecast_by_deal", {})
+    bu = model_results.get("segments", {}).get("empirical_loss_buildup", {})
+    by_deal = bu.get("by_deal", {})
+    absorption = bu.get("markov_absorption", {})
 
     def build_for(deals, title):
         rows = []
         for deal in deals:
+            d = by_deal.get(deal)
+            if not d:
+                continue
             orig = get_orig_bal(deal)
             if not orig or orig <= 0:
                 continue
-            t = _cert_totals(deal)
-            cum_gross = t.get("cum_gross_losses") or 0
-            cum_liq = t.get("cum_liquidation_proceeds") or 0
-            cum_net = t.get("cum_net_losses") or max(0, cum_gross - cum_liq)
-            severity = (1 - cum_liq / cum_gross) if cum_gross > 0 else 0.60
-
-            # Latest DQ from cert — _cert_dq_series returns
-            # [(dt, dq_31_120_sum, ending_pool_balance)], but we need the split.
-            # Parse from the latest cert directly.
-            dq31 = dq61 = dq91 = 0.0
-            rowq = q("SELECT servicer_cert_url FROM filings WHERE deal=? "
-                     "AND servicer_cert_url IS NOT NULL ORDER BY filing_date DESC LIMIT 1", (deal,))
-            if not rowq.empty:
-                url = rowq.iloc[0]["servicer_cert_url"]
-                p = urlparse(url)
-                path = os.path.join(_CACHE_DIR, p.path.strip("/").replace("/", "_"))
-                if os.path.exists(path):
-                    with open(path, "r", errors="replace") as f:
-                        txt = f.read()
-                    body = re.sub(r"<[^>]+>", " ", re.sub(r"&nbsp;", " ", txt))
-                    body = re.sub(r"\s+", " ", body)
-                    def _b(tag):
-                        m = re.search(rf"{tag}\s+[\d,]+\s+([\d,]+\.\d+)", body)
-                        return float(m.group(1).replace(",", "")) if m else 0.0
-                    dq31, dq61, dq91 = _b("31-60"), _b("61-90"), _b("91-120")
-
-            # In-flight DQ losses (net) with industry roll-to-loss multipliers
-            dq_loss_31 = dq31 * 0.20 * severity
-            dq_loss_61 = dq61 * 0.50 * severity
-            dq_loss_91 = dq91 * 0.85 * severity
-            dq_total = dq_loss_31 + dq_loss_61 + dq_loss_91
-
-            # Model's lifetime forecast (net of recoveries via same deal-level severity)
-            fdata = forecast.get(deal, {})
-            model_lifetime_net = (fdata.get("predicted_default_amount", 0) or 0) * severity
-            remaining = max(0.0, model_lifetime_net - cum_net - dq_total)
-            total_exp = cum_net + dq_total + remaining
-
+            realized = d["realized"]; dq_pending = d["dq_pending"]
+            performing = d["performing_future"]; total = d["total_expected"]
             def pct(x): return f"{x/orig:.2%}" if orig else "-"
             rows.append({
                 "Deal": deal,
-                "Realized $": fm(cum_net),
-                "Realized %": pct(cum_net),
-                "31-60 DQ": fm(dq_loss_31),
-                "61-90 DQ": fm(dq_loss_61),
-                "91-120 DQ": fm(dq_loss_91),
-                "Model Future": fm(remaining),
-                "Total Expected $": fm(total_exp),
-                "Total Expected %": pct(total_exp),
+                "Active Loans": f"{d['active_loans']:,}",
+                "Severity": f"{d['severity']:.0%}",
+                "Realized $": fm(realized),
+                "Realized %": pct(realized),
+                "DQ Pipeline $": fm(dq_pending),
+                "Performing Future $": fm(performing),
+                "Total Expected $": fm(total),
+                "Total Expected %": pct(total),
             })
         if not rows:
             return ""
@@ -1436,18 +1406,34 @@ def _loss_forecast_buildup_tables(model_results):
                 + table_html(pd.DataFrame(rows), cls="compare"))
 
     h = ""
-    h += build_for([d for d in PRIME_DEALS], "Prime")
-    h += build_for([d for d in NONPRIME_DEALS], "Non-Prime")
+    h += build_for(PRIME_DEALS, "Prime")
+    h += build_for(NONPRIME_DEALS, "Non-Prime")
+
+    # Per-state P(default) reference table — shows the actual probabilities
+    # the buildup is using.
+    if absorption:
+        labels = ["Curr (0)", "1 pmt", "2 pmt", "3 pmt", "4 pmt", "5+ pmt"]
+        ref = pd.DataFrame([
+            {"State": labels[i],
+             "Prime P(default)": f"{absorption['prime'][i]:.2%}" if absorption.get("prime") else "-",
+             "Non-Prime P(default)": f"{absorption['nonprime'][i]:.2%}" if absorption.get("nonprime") else "-"}
+            for i in range(6)
+        ])
+        h += "<h3>Empirical P(eventual default | current state)</h3>"
+        h += table_html(ref, cls="compare")
+
     if h:
         h = ("<div class=\"tc\">" + h
              + "<p style=\"font-size:.75rem;color:#666;margin-top:8px;\">"
-             "Build-up: <b>Realized</b> from the servicer cert's cumulative net "
-             "charge-off line. <b>DQ pipeline</b> = current 31-60/61-90/91-120 "
-             "balance × roll-to-loss (20/50/85%) × per-deal severity (1 − "
-             "cum&nbsp;recoveries / cum&nbsp;gross&nbsp;losses). <b>Model future</b> is the "
-             "default-model's dollar-weighted lifetime net-loss forecast for "
-             "this pool, minus what's already in realized and DQ to avoid "
-             "double-counting.</p></div>")
+             "<b>Realized</b> from the servicer cert's cumulative net charge-off "
+             "line. <b>DQ pipeline</b> = sum over each loan currently 1+ payment "
+             "behind of P(default | current state, tier) × current balance × "
+             "per-deal severity. <b>Performing future</b> = same calculation "
+             "for loans currently up-to-date. P(default) is fit by inverting the "
+             "tier's 6-state absorbing Markov chain on its full loan_performance "
+             "transition history — no heuristic multipliers. Severity per deal = "
+             "1 − cum&nbsp;recoveries / cum&nbsp;gross&nbsp;losses (60% baseline if no loss "
+             "history yet).</p></div>")
     return h
 
 
