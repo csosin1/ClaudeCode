@@ -39,7 +39,47 @@ CREATE TABLE IF NOT EXISTS offers (
 CREATE INDEX IF NOT EXISTS idx_offers_vin ON offers(vin);
 CREATE INDEX IF NOT EXISTS idx_offers_run ON offers(run_id);
 CREATE INDEX IF NOT EXISTS idx_offers_site_vin_ran ON offers(site, vin, ran_at DESC);
+
+CREATE TABLE IF NOT EXISTS consumers (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  vin TEXT NOT NULL UNIQUE,
+  year INTEGER,
+  make TEXT,
+  model TEXT,
+  trim TEXT,
+  mileage INTEGER NOT NULL,
+  home_zip TEXT NOT NULL,
+  condition TEXT NOT NULL DEFAULT 'Good',
+  proxy_session_id TEXT NOT NULL UNIQUE,
+  fingerprint_profile_id INTEGER NOT NULL,
+  biweekly_slot INTEGER NOT NULL,
+  shop_hour_local INTEGER NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  active INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_consumers_slot ON consumers(biweekly_slot, shop_hour_local);
+
+CREATE TABLE IF NOT EXISTS panel_runs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  consumer_id INTEGER NOT NULL REFERENCES consumers(id),
+  run_id TEXT NOT NULL,
+  scheduled_for TEXT NOT NULL,
+  started_at TEXT,
+  finished_at TEXT,
+  status TEXT,
+  notes TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_panel_runs_consumer ON panel_runs(consumer_id);
+CREATE INDEX IF NOT EXISTS idx_panel_runs_scheduled ON panel_runs(scheduled_for);
 `;
+
+// Consumer panel biweekly epoch. day-of-fortnight = 0..13 computed against
+// this anchor so the schedule is deterministic across service restarts.
+// 2026-01-05 is a Monday (UTC) — week 1 of the panel.
+const PANEL_EPOCH_MS = Date.UTC(2026, 0, 5);
+const BIWEEKLY_MS = 14 * 24 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Open the offers DB. Pass ':memory:' for tests. Creates schema if missing.
@@ -198,6 +238,203 @@ function getRuns(db, limit = 20) {
   });
 }
 
+// =========================================================================
+// Consumer panel helpers
+// =========================================================================
+
+const CONSUMER_REQUIRED = [
+  'id', 'name', 'vin', 'mileage', 'home_zip', 'proxy_session_id',
+  'fingerprint_profile_id', 'biweekly_slot', 'shop_hour_local',
+];
+
+/**
+ * Insert one consumer row. Throws on missing required fields or VIN/session
+ * collision. Returns the consumer id.
+ */
+function insertConsumer(db, row) {
+  if (!row || typeof row !== 'object') throw new Error('row required');
+  for (const k of CONSUMER_REQUIRED) {
+    if (row[k] === undefined || row[k] === null || row[k] === '') {
+      throw new Error(`insertConsumer: missing required field: ${k}`);
+    }
+  }
+  const stmt = db.prepare(`
+    INSERT INTO consumers (
+      id, name, vin, year, make, model, trim, mileage, home_zip, condition,
+      proxy_session_id, fingerprint_profile_id, biweekly_slot, shop_hour_local,
+      active
+    ) VALUES (
+      @id, @name, @vin, @year, @make, @model, @trim, @mileage, @home_zip, @condition,
+      @proxy_session_id, @fingerprint_profile_id, @biweekly_slot, @shop_hour_local,
+      @active
+    )
+  `);
+  stmt.run({
+    id: Number(row.id),
+    name: String(row.name),
+    vin: String(row.vin).toUpperCase(),
+    year: row.year == null ? null : Number(row.year),
+    make: row.make || null,
+    model: row.model || null,
+    trim: row.trim || null,
+    mileage: Number(row.mileage),
+    home_zip: String(row.home_zip),
+    condition: String(row.condition || 'Good'),
+    proxy_session_id: String(row.proxy_session_id),
+    fingerprint_profile_id: Number(row.fingerprint_profile_id),
+    biweekly_slot: Number(row.biweekly_slot),
+    shop_hour_local: Number(row.shop_hour_local),
+    active: row.active == null ? 1 : (row.active ? 1 : 0),
+  });
+  return Number(row.id);
+}
+
+/**
+ * List consumers. Pass {active:true} to filter to only active rows.
+ */
+function listConsumers(db, opts = {}) {
+  const sql = opts && opts.active
+    ? `SELECT * FROM consumers WHERE active = 1 ORDER BY id ASC`
+    : `SELECT * FROM consumers ORDER BY id ASC`;
+  return db.prepare(sql).all();
+}
+
+/** Get one consumer by id. Returns null if not found. */
+function getConsumer(db, id) {
+  const row = db.prepare(`SELECT * FROM consumers WHERE id = ?`).get(Number(id));
+  return row || null;
+}
+
+/**
+ * Compute the day-of-fortnight (0..13) for a given Date in UTC.
+ * Stable across DST because we anchor on UTC midnight.
+ */
+function dayOfFortnight(now) {
+  const nowMs = (now instanceof Date) ? now.getTime() : new Date(now).getTime();
+  const diff = nowMs - PANEL_EPOCH_MS;
+  if (!Number.isFinite(diff)) return 0;
+  const within = ((diff % BIWEEKLY_MS) + BIWEEKLY_MS) % BIWEEKLY_MS;
+  return Math.floor(within / DAY_MS);
+}
+
+/**
+ * List consumers whose biweekly_slot matches today's day-of-fortnight AND
+ * whose shop_hour_local matches the current UTC hour. Called hourly by the
+ * cron; returns 0..N consumers depending on how many are scheduled for
+ * this hour.
+ *
+ * Currently shop_hour_local is interpreted as UTC hour for simplicity.
+ * A proper zip->tz mapping would be nicer but adds a dependency; for a
+ * first-cut biweekly cadence the zip-level time accuracy is fine.
+ */
+function listDueConsumers(db, now) {
+  const ts = now instanceof Date ? now : new Date(now || Date.now());
+  const dof = dayOfFortnight(ts);
+  const hour = ts.getUTCHours();
+  return db.prepare(`
+    SELECT * FROM consumers
+    WHERE active = 1 AND biweekly_slot = ? AND shop_hour_local = ?
+    ORDER BY id ASC
+  `).all(dof, hour);
+}
+
+/** Insert a panel_runs row; returns the inserted id. */
+function insertPanelRun(db, row) {
+  if (!row || typeof row !== 'object') throw new Error('row required');
+  if (!row.consumer_id || !row.run_id || !row.scheduled_for) {
+    throw new Error('insertPanelRun: consumer_id, run_id, scheduled_for required');
+  }
+  const res = db.prepare(`
+    INSERT INTO panel_runs (consumer_id, run_id, scheduled_for, started_at, finished_at, status, notes)
+    VALUES (@consumer_id, @run_id, @scheduled_for, @started_at, @finished_at, @status, @notes)
+  `).run({
+    consumer_id: Number(row.consumer_id),
+    run_id: String(row.run_id),
+    scheduled_for: String(row.scheduled_for),
+    started_at: row.started_at || null,
+    finished_at: row.finished_at || null,
+    status: row.status || 'queued',
+    notes: row.notes || null,
+  });
+  return res.lastInsertRowid;
+}
+
+/** Patch a panel_runs row. Only keys in allowed set are honored. */
+function updatePanelRun(db, id, patch) {
+  if (!id || !patch || typeof patch !== 'object') return;
+  const allowed = ['started_at', 'finished_at', 'status', 'notes'];
+  const sets = [];
+  const params = { id: Number(id) };
+  for (const k of allowed) {
+    if (patch[k] !== undefined) {
+      sets.push(`${k} = @${k}`);
+      params[k] = patch[k] == null ? null : String(patch[k]);
+    }
+  }
+  if (sets.length === 0) return;
+  db.prepare(`UPDATE panel_runs SET ${sets.join(', ')} WHERE id = @id`).run(params);
+}
+
+/**
+ * Panel status summary for the /panel UI. Returns one record per active
+ * consumer: their latest offer per site, their last run timestamp, and
+ * their next scheduled timestamp (best-effort — biweekly-slot based).
+ */
+function getPanelStatus(db) {
+  const consumers = listConsumers(db, { active: true });
+  const latestStmt = db.prepare(`
+    SELECT * FROM offers
+    WHERE vin = ? AND site = ?
+    ORDER BY ran_at DESC LIMIT 1
+  `);
+  const lastRunStmt = db.prepare(`
+    SELECT MAX(ran_at) AS last_ran FROM offers WHERE vin = ?
+  `);
+  const runRowStmt = db.prepare(`
+    SELECT * FROM panel_runs WHERE consumer_id = ? ORDER BY id DESC LIMIT 1
+  `);
+
+  const nowMs = Date.now();
+  const nowDof = dayOfFortnight(new Date(nowMs));
+  const nowHour = new Date(nowMs).getUTCHours();
+
+  const rows = consumers.map((c) => {
+    const carvana  = hydrate(latestStmt.get(c.vin, 'carvana'));
+    const carmax   = hydrate(latestStmt.get(c.vin, 'carmax'));
+    const driveway = hydrate(latestStmt.get(c.vin, 'driveway'));
+    const last = lastRunStmt.get(c.vin);
+    const latestRun = runRowStmt.get(c.id) || null;
+
+    // Compute next scheduled: the next UTC timestamp where dof == biweekly_slot
+    // AND utc-hour == shop_hour_local. Simple math, assumes hour==UTC.
+    let daysAhead = (c.biweekly_slot - nowDof + 14) % 14;
+    if (daysAhead === 0 && nowHour >= c.shop_hour_local) daysAhead = 14;
+    const nextDate = new Date(nowMs);
+    nextDate.setUTCDate(nextDate.getUTCDate() + daysAhead);
+    nextDate.setUTCHours(c.shop_hour_local, 0, 0, 0);
+
+    return {
+      consumer: c,
+      latest: { carvana, carmax, driveway },
+      last_ran_at: (last && last.last_ran) || null,
+      next_scheduled_at: nextDate.toISOString(),
+      latest_panel_run: latestRun,
+    };
+  });
+
+  const inFlight = rows.filter((r) => r.latest_panel_run && r.latest_panel_run.status === 'running').length;
+  const lastRunAt = rows.map((r) => r.last_ran_at).filter(Boolean).sort().pop() || null;
+  const nextAt = rows.map((r) => r.next_scheduled_at).filter(Boolean).sort()[0] || null;
+
+  return {
+    active_count: consumers.length,
+    in_flight: inFlight,
+    last_ran_at: lastRunAt,
+    next_scheduled_at: nextAt,
+    rows,
+  };
+}
+
 module.exports = {
   openDb,
   insertOffer,
@@ -206,4 +443,15 @@ module.exports = {
   SITES,
   DEFAULT_DB_PATH,
   SCHEMA_SQL,
+  // Panel
+  insertConsumer,
+  listConsumers,
+  getConsumer,
+  listDueConsumers,
+  insertPanelRun,
+  updatePanelRun,
+  getPanelStatus,
+  dayOfFortnight,
+  PANEL_EPOCH_MS,
+  BIWEEKLY_MS,
 };

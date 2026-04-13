@@ -43,7 +43,7 @@ const WARMUP_TTL_HOURS = 24;
 // Serialize — persistent profile is a Chromium singleton.
 let activeRun = null;
 
-async function _getCarmaxOfferImpl({ vin, mileage, zip, condition, email }) {
+async function _getCarmaxOfferImpl({ vin, mileage, zip, condition, email, consumerId, fingerprintProfileId, proxyZip }) {
   const offerEmail = email || config.PROJECT_EMAIL || 'caroffers.tool@gmail.com';
   const conditionLabel = siteConditionLabel('carmax', condition);
   const wizardLog = [];
@@ -64,7 +64,7 @@ async function _getCarmaxOfferImpl({ vin, mileage, zip, condition, email }) {
     log(`[carmax] Starting offer flow VIN=${vin} mi=${mileage} zip=${zip} cond=${condition}->${conditionLabel}`);
 
     // --- Launch ---
-    const result = await launchBrowser();
+    const result = await launchBrowser({ consumerId, fingerprintProfileId, proxyZip: proxyZip || zip });
     browser = result.browser;
     const page = result.page;
     launchMethod = result.launchMethod || 'unknown';
@@ -75,12 +75,12 @@ async function _getCarmaxOfferImpl({ vin, mileage, zip, condition, email }) {
     // If the Chrome profile is warm (from shopper-warmup's full browse on
     // carvana.com), that's still valuable — signals a returning machine —
     // but we need carmax-domain-specific cookies too.
-    const isWarm = profileIsWarm(WARMUP_TTL_HOURS);
+    const isWarm = profileIsWarm(consumerId, WARMUP_TTL_HOURS);
     log(`[carmax] Profile warm state: ${isWarm ? 'fresh' : 'cold'}`);
     if (!isWarm) {
       // One-time deep warm on carvana.com (builds generic "returning consumer"
       // signal) then light warm on carmax. miniBrowse is carvana-flavored.
-      try { await miniBrowse(page, log); markProfileWarmed(); } catch (e) { log(`[carmax] carvana warm fail: ${e.message}`); }
+      try { await miniBrowse(page, log); markProfileWarmed(consumerId); } catch (e) { log(`[carmax] carvana warm fail: ${e.message}`); }
     }
     try {
       await siteWarmup(page, { homepage: CARMAX_HOMEPAGE, inventory: CARMAX_INVENTORY }, log);
