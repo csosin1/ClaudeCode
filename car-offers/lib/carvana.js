@@ -1,9 +1,22 @@
-const { launchBrowser, humanDelay, humanType, randomMouseMove, closeBrowser, simulateHumanBehavior } = require('./browser');
+const {
+  launchBrowser, humanDelay, microDelay, humanType, randomMouseMove, bezierMouseMove,
+  closeBrowser, simulateHumanBehavior, simulateBlurFocus, startMouseDrift,
+  markProfileWarmed, profileIsWarm,
+} = require('./browser');
+const { fullWarmup, miniBrowse } = require('./shopper-warmup');
 const config = require('./config');
 const path = require('path');
+const fs = require('fs');
 
 const CARVANA_URL = 'https://www.carvana.com/sell-my-car';
-const TOTAL_TIMEOUT = 300_000; // 5 minutes total (IP hunt + proxy latency)
+// Longer timeout — shopper warmup + sell flow + Turnstile can reach 12+ min.
+const TOTAL_TIMEOUT = 900_000;
+// How long a profile stays "warm" before we re-run the full shopper warmup.
+const WARMUP_TTL_HOURS = 24;
+
+// Persistent user-data-dir means only one Carvana flow can run at a time —
+// Chromium enforces a singleton lock on the profile. Serialize runs.
+let activeRun = null;
 
 /**
  * Take a timestamped screenshot for debugging.
@@ -58,7 +71,7 @@ async function isBlocked(page) {
  * @param {string} [params.email] - Email for the offer (falls back to config)
  * @returns {{ offer?: string, details?: object, error?: string }}
  */
-async function getCarvanaOffer({ vin, mileage, zip, email }) {
+async function _getCarvanaOfferImpl({ vin, mileage, zip, email }) {
   const offerEmail = email || config.PROJECT_EMAIL || 'caroffers.tool@gmail.com';
   if (!offerEmail) {
     return { error: 'No email configured. Set PROJECT_EMAIL in .env' };
@@ -102,35 +115,36 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
     launchMethod = result.launchMethod || 'unknown';
     log(`[carvana] Browser: ${launchMethod} | headed: ${!!process.env.DISPLAY}`);
 
-    // --- Step 1: Warm up browser session with non-Carvana sites ---
-    // Visiting a few benign sites first builds a more realistic browser fingerprint
-    // and lets Cloudflare see normal navigation patterns before hitting the target
-    log('[carvana] Step 1: Warming up browser session...');
+    // --- Step 1: Shopper warmup — act like a real used-car shopper BEFORE
+    // the sell flow. Cloudflare Turnstile's interactive score grades
+    // pre-submission behavior; a cold jump to /sell-my-car looks robotic.
+    // If profile was warmed within WARMUP_TTL_HOURS, do a short mini-browse;
+    // otherwise run the full 10-15 min warmup once and mark it.
+    const isWarm = profileIsWarm(WARMUP_TTL_HOURS);
+    log(`[carvana] Profile warm state: ${isWarm ? 'fresh (mini browse)' : 'cold (full warmup)'}`);
     try {
-      await page.goto('https://www.google.com', { timeout: 20000, waitUntil: 'domcontentloaded' });
-      await humanDelay(2000, 4000);
-      await simulateHumanBehavior(page);
-      log('[carvana] Warmup: visited Google');
-    } catch { log('[carvana] Warmup: Google failed (non-fatal)'); }
-    await humanDelay(3000, 5000);
-
-    // Verify US IP via ip.decodo.com (optional — curl already confirmed)
-    try {
-      await page.goto('https://ip.decodo.com/json', { timeout: 20000 });
-      const ipInfo = await page.textContent('body');
-      log(`[carvana] Proxy IP info: ${ipInfo.substring(0, 200)}`);
-    } catch (proxyErr) {
-      log(`[carvana] Proxy verification skipped: ${proxyErr.message}`);
+      if (isWarm) {
+        await miniBrowse(page, log);
+      } else {
+        await fullWarmup(page, log);
+        markProfileWarmed();
+      }
+    } catch (warmErr) {
+      log(`[carvana] Warmup error (non-fatal): ${warmErr.message}`);
     }
-    await humanDelay(3000, 5000);
+    await humanDelay(2000, 5000);
 
-    // --- Navigate to Carvana with retry logic for Cloudflare challenges ---
+    // --- Navigate to Carvana sell page. Referer is naturally carvana.com
+    // because the warmup just browsed there. ---
     log('[carvana] Navigating to Carvana sell page...');
 
     let carvanaLoaded = false;
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        await page.goto(CARVANA_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+        await page.goto(CARVANA_URL, {
+          waitUntil: 'domcontentloaded',
+          timeout: 60000,
+        });
       } catch (navErr) {
         log(`[carvana] Navigation attempt ${attempt} failed: ${navErr.message}`);
         if (attempt === 2) {
@@ -347,10 +361,16 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
     await randomMouseMove(page, vinSelectors[0]).catch(() => {});
     await humanDelay(1000, 2000);
     await vinInput.click();
-    // Type VIN character by character
-    for (const char of vin) {
-      await vinInput.type(char, { delay: 0 });
-      await new Promise((r) => setTimeout(r, Math.floor(Math.random() * 100) + 50));
+    // Type VIN character by character with background mouse drift — typing
+    // while the mouse is frozen is a strong robot signal.
+    const stopDrift = startMouseDrift(page);
+    try {
+      for (const char of vin) {
+        await vinInput.type(char, { delay: 0 });
+        await new Promise((r) => setTimeout(r, Math.floor(Math.random() * 100) + 50));
+      }
+    } finally {
+      stopDrift();
     }
     await humanDelay(1000, 2000);
     await screenshot(page, '02-vin-entered');
@@ -391,9 +411,104 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
     await screenshot(page, '03-after-vin-submit');
     checkTimeout();
 
+    // Cloudflare commonly re-challenges after form POST with an interactive
+    // Turnstile ("Verify you are human"). Click the checkbox via real pixel
+    // coordinates on the main page — cross-origin iframe DOM access is blocked,
+    // but a mouse event at the iframe's bounding box still lands inside it.
     if (await isBlocked(page)) {
       await screenshot(page, 'blocked-after-vin');
-      return { error: 'blocked', wizardLog };
+      log('[carvana] Cloudflare challenge after VIN submit — attempting click + wait up to 90s...');
+      let postVinResolved = false;
+      let clickAttempts = 0;
+      for (let waited = 0; waited < 90; waited += 5) {
+        await humanDelay(4500, 5500);
+        if (waited % 15 === 0) {
+          await simulateHumanBehavior(page);
+        }
+
+        // On first iteration, dump iframe diagnostics so we know what we're
+        // dealing with — CF full-page managed challenges proxy the iframe
+        // via the target domain (e.g. carvana.com/cdn-cgi/...), not the
+        // challenges.cloudflare.com domain.
+        if (waited === 0) {
+          try {
+            const iframeInfo = await page.$$eval('iframe', (els) =>
+              els.map((el) => ({
+                src: (el.src || '').substring(0, 120),
+                title: (el.title || '').substring(0, 60),
+                id: el.id || '',
+                name: el.name || '',
+                w: el.getBoundingClientRect().width,
+                h: el.getBoundingClientRect().height,
+                x: el.getBoundingClientRect().x,
+                y: el.getBoundingClientRect().y,
+              }))
+            );
+            log(`[carvana] Post-VIN iframe dump: ${JSON.stringify(iframeInfo)}`);
+          } catch (diagErr) { log(`[carvana] iframe dump failed: ${diagErr.message}`); }
+        }
+
+        // Try pixel-coordinate click on the challenge iframe (max 3 attempts,
+        // spaced out — clicking repeatedly can trigger "too many attempts").
+        // Broadened detection: CF managed-challenge iframes are often served
+        // via the target domain (same-origin), not challenges.cloudflare.com.
+        if (clickAttempts < 3) {
+          try {
+            let iframeHandle = await page.$(
+              'iframe[src*="challenges.cloudflare.com"], iframe[src*="turnstile"], iframe[src*="cdn-cgi/challenge"], iframe[title*="Widget containing"], iframe[title*="challenge"]'
+            );
+            // Fallback: any visible iframe small enough to be a widget (not
+            // a full-page tracking iframe — those are 0x0 or very large).
+            if (!iframeHandle) {
+              const candidates = await page.$$('iframe');
+              for (const cand of candidates) {
+                const box = await cand.boundingBox().catch(() => null);
+                if (box && box.width > 200 && box.width < 500 && box.height > 40 && box.height < 150) {
+                  iframeHandle = cand;
+                  log(`[carvana] Fallback iframe candidate: ${Math.round(box.width)}x${Math.round(box.height)} at (${Math.round(box.x)},${Math.round(box.y)})`);
+                  break;
+                }
+              }
+            }
+            if (iframeHandle) {
+              const box = await iframeHandle.boundingBox();
+              if (box && box.width > 50 && box.height > 20) {
+                // Checkbox sits ~30px from left, vertically centered in the widget
+                const clickX = box.x + 30 + Math.random() * 6;
+                const clickY = box.y + box.height / 2 + (Math.random() * 4 - 2);
+                log(`[carvana] Turnstile iframe at (${Math.round(box.x)},${Math.round(box.y)}) ${Math.round(box.width)}x${Math.round(box.height)} — clicking checkbox at (${Math.round(clickX)},${Math.round(clickY)})`);
+                await page.mouse.move(clickX - 200, clickY - 80, { steps: 8 });
+                await humanDelay(400, 900);
+                await page.mouse.move(clickX - 40, clickY - 10, { steps: 6 });
+                await humanDelay(200, 500);
+                await page.mouse.move(clickX, clickY, { steps: 4 });
+                await humanDelay(150, 350);
+                await page.mouse.down();
+                await humanDelay(60, 140);
+                await page.mouse.up();
+                clickAttempts++;
+                await screenshot(page, `turnstile-click-${clickAttempts}`);
+                // Give Cloudflare ~6s to verify after the click before next check
+                await humanDelay(5500, 6500);
+              }
+            }
+          } catch (clickErr) {
+            log(`[carvana] Turnstile click attempt failed: ${clickErr.message}`);
+          }
+        }
+
+        if (!(await isBlocked(page))) {
+          postVinResolved = true;
+          log(`[carvana] Post-VIN challenge cleared after ~${waited + 5}s (${clickAttempts} click attempt(s))`);
+          break;
+        }
+        log(`[carvana] Post-VIN still blocked after ${waited + 5}s (clicks=${clickAttempts})...`);
+      }
+      if (!postVinResolved) {
+        await screenshot(page, 'blocked-after-vin-final');
+        return { error: 'blocked', details: { at: 'post-vin', clickAttempts }, wizardLog };
+      }
+      await screenshot(page, '03b-after-vin-unblocked');
     }
 
     // --- Steps 3-7: Navigate through Carvana's multi-step wizard ---
@@ -839,6 +954,19 @@ async function getCarvanaOffer({ vin, mileage, zip, email }) {
     await closeBrowser(browser);
     console.log(`[carvana] Flow completed in ${Math.round(elapsed() / 1000)}s`);
   }
+}
+
+async function getCarvanaOffer(params) {
+  if (activeRun) {
+    console.log('[carvana] Another run in progress — queuing (waiting up to 5 min)...');
+    try { await Promise.race([activeRun, new Promise((_, rej) => setTimeout(() => rej(new Error('queue timeout')), 300_000))]); }
+    catch (e) { console.log(`[carvana] Queue wait ended: ${e.message}`); }
+  }
+  activeRun = (async () => {
+    try { return await _getCarvanaOfferImpl(params); }
+    finally { activeRun = null; }
+  })();
+  return activeRun;
 }
 
 module.exports = { getCarvanaOffer };
