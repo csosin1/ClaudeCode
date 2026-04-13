@@ -28,8 +28,9 @@ const {
 const { miniBrowse } = require('./shopper-warmup');
 const { siteWarmup } = require('./site-warmup');
 const {
-  screenshot, isBlocked, waitForBlockResolve, humanInput, scanForOffer,
-  firstVisible, clickFirstByText, detectAccountWall,
+  screenshot, debugDump, isBlocked, waitForBlockResolve, humanInput, scanForOffer,
+  firstVisible, findInputByLabelOrSelectors, expandSectionByText, pickDropdownOption,
+  clickFirstByText, detectAccountWall,
 } = require('./wizard-common');
 const { siteConditionLabel, EXTRA_ANSWERS } = require('./offer-input');
 const config = require('./config');
@@ -43,7 +44,7 @@ const WARMUP_TTL_HOURS = 24;
 // Serialize — persistent profile is a Chromium singleton.
 let activeRun = null;
 
-async function _getCarmaxOfferImpl({ vin, mileage, zip, condition, email, consumerId, fingerprintProfileId, proxyZip }) {
+async function _getCarmaxOfferImpl({ vin, mileage, zip, condition, email, consumerId, fingerprintProfileId, proxyZip, debug }) {
   const offerEmail = email || config.PROJECT_EMAIL || 'caroffers.tool@gmail.com';
   const conditionLabel = siteConditionLabel('carmax', condition);
   const wizardLog = [];
@@ -176,17 +177,23 @@ async function _getCarmaxOfferImpl({ vin, mileage, zip, condition, email, consum
     }
 
     // --- Adaptive wizard loop: mileage / zip / condition / contact ---
+    // CarMax's vehicle-confirmation page has the GET MY OFFER button DISABLED
+    // until you expand "Mileage and condition" and fill it in. Track expansion
+    // attempts so we don't loop forever clicking a disabled CTA.
     let filledMileage = false;
     let filledZip = false;
     let selectedCondition = false;
     let filledEmail = false;
+    let expandedMileageSection = false;
     let stuckCount = 0;
+    let lastUrl = page.url();
 
-    for (let step = 0; step < 20; step++) {
+    for (let step = 0; step < 25; step++) {
       checkTimeout();
       const url = page.url();
       log(`[carmax] wizard step ${step}: ${url}`);
       await screenshot(page, 'carmax', `wizard-${step}`);
+      if (debug) await debugDump(page, 'carmax', `wizard-${step}`);
 
       // Account / SMS wall?
       const wall = await detectAccountWall(page);
@@ -232,16 +239,33 @@ async function _getCarmaxOfferImpl({ vin, mileage, zip, condition, email, consum
 
       let interacted = false;
 
+      // Expand collapsed "Mileage and condition" section first — on the
+      // vehicle-confirmation page CarMax HIDES the mileage input behind an
+      // accordion and the GET MY OFFER button stays disabled until it's
+      // expanded + filled. This was the root cause of the consumer-1 timeout
+      // (clicked Get My Offer 4× without ever filling mileage).
+      if (!filledMileage && !expandedMileageSection) {
+        const exp = await expandSectionByText(page, [
+          'Mileage and condition', 'Mileage & condition', 'Mileage', 'Condition',
+        ], 1500);
+        if (exp.clicked) {
+          log(`[carmax] expanded section: "${exp.heading}"`);
+          expandedMileageSection = true;
+          interacted = true;
+          await humanDelay(700, 1300);
+        }
+      }
+
       // Mileage
       if (!filledMileage) {
-        const mileageSel = [
+        const m = await findInputByLabelOrSelectors(page, [
           'input[name="mileage"]', 'input[name="odometer"]',
-          'input[placeholder*="ileage"]', 'input[placeholder*="iles"]',
-          'input[data-testid*="mileage"]', 'input[aria-label*="ileage"]',
-        ];
-        const m = await firstVisible(page, mileageSel, 2000);
+          'input[placeholder*="ileage" i]', 'input[placeholder*="iles" i]',
+          'input[data-testid*="mileage" i]', 'input[aria-label*="ileage" i]',
+          'input[type="number"]', 'input[inputmode="numeric"]',
+        ], ['Mileage', 'Odometer', 'Miles', 'Current mileage'], 2000);
         if (m) {
-          log(`[carmax] mileage: ${mileage}`);
+          log(`[carmax] mileage: ${mileage} (sel=${m.sel})`);
           await humanInput(page, m.el, String(mileage));
           filledMileage = true;
           interacted = true;
@@ -251,15 +275,14 @@ async function _getCarmaxOfferImpl({ vin, mileage, zip, condition, email, consum
 
       // Zip
       if (!filledZip) {
-        const zipSel = [
+        const z = await findInputByLabelOrSelectors(page, [
           'input[name="zip"]', 'input[name="zipCode"]', 'input[name="postalCode"]',
-          'input[placeholder*="ip code"]', 'input[placeholder*="ostal"]',
+          'input[placeholder*="ip code" i]', 'input[placeholder*="ostal" i]',
           'input[maxlength="5"][inputmode="numeric"]',
-          'input[data-testid*="zip"]',
-        ];
-        const z = await firstVisible(page, zipSel, 2000);
+          'input[data-testid*="zip" i]',
+        ], ['Zip', 'ZIP', 'Postal'], 2000);
         if (z) {
-          log(`[carmax] zip: ${zip}`);
+          log(`[carmax] zip: ${zip} (sel=${z.sel})`);
           await humanInput(page, z.el, String(zip));
           filledZip = true;
           interacted = true;
@@ -269,12 +292,9 @@ async function _getCarmaxOfferImpl({ vin, mileage, zip, condition, email, consum
 
       // Email (usually late in flow, before offer)
       if (!filledEmail) {
-        const emailSel = [
-          'input[type="email"]',
-          'input[name="email"]',
-          'input[placeholder*="mail"]',
-        ];
-        const e = await firstVisible(page, emailSel, 2000);
+        const e = await findInputByLabelOrSelectors(page, [
+          'input[type="email"]', 'input[name="email"]', 'input[placeholder*="mail" i]',
+        ], ['Email'], 2000);
         if (e) {
           log(`[carmax] email: ${offerEmail}`);
           await humanInput(page, e.el, offerEmail);
@@ -328,13 +348,35 @@ async function _getCarmaxOfferImpl({ vin, mileage, zip, condition, email, consum
         }
       }
 
-      // Next / Continue / Get offer
-      const next = await clickFirstByText(page,
-        ['Get Your Offer', 'Get My Offer', 'See My Offer', 'View Offer',
-         'Continue', 'Next', 'Submit', 'Confirm'], 2000);
-      if (next.clicked) {
-        log(`[carmax] clicked: ${next.label}`);
-        interacted = true;
+      // Next / Continue / Get offer — but only if NOT disabled. CarMax's
+      // disabled "GET MY OFFER" button still matches has-text but clicking it
+      // has no effect; the wizard would loop forever. Probe the disabled
+      // attribute first.
+      const ctaTexts = ['Get Your Offer', 'Get My Offer', 'See My Offer', 'View Offer',
+         'Continue', 'Next', 'Submit', 'Confirm'];
+      let clickedNext = false;
+      for (const ctaText of ctaTexts) {
+        try {
+          const btn = await page.$(`button:has-text("${ctaText}"):not([disabled]):not([aria-disabled="true"])`);
+          if (btn && await btn.isVisible()) {
+            await humanDelay(700, 1300);
+            await btn.click();
+            log(`[carmax] clicked CTA: ${ctaText}`);
+            clickedNext = true;
+            interacted = true;
+            break;
+          }
+        } catch { /* next */ }
+      }
+      // If no enabled CTA found, log it (helps diagnose accordion-blocked
+      // forms) but don't error — maybe a page change is in flight.
+      if (!clickedNext) {
+        const disabledBtns = await page.$$eval('button[disabled], button[aria-disabled="true"]', els =>
+          els.slice(0, 5).map(e => e.textContent.trim().slice(0, 40))
+        ).catch(() => []);
+        if (disabledBtns.length > 0) {
+          log(`[carmax] no enabled CTA found. Disabled buttons present: ${JSON.stringify(disabledBtns)}`);
+        }
       }
 
       await humanDelay(3000, 6000);

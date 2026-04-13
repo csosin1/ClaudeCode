@@ -10,6 +10,20 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
+// --- Wizard debug captures (screenshots + HTML dumps written by debugDump()) ---
+// Served at /debug/<site>/step-NN-<slug>.{png,html}. Behind nginx the public
+// URL becomes /car-offers/preview/debug/... which the gallery below links to.
+const DEBUG_DUMP_DIR = path.join(__dirname, 'public-debug');
+try { fs.mkdirSync(DEBUG_DUMP_DIR, { recursive: true }); } catch { /* ok */ }
+app.use('/debug', express.static(DEBUG_DUMP_DIR, {
+  // HTML dumps are not trusted content — don't let the browser infer a weird type
+  setHeaders(res, filePath) {
+    if (filePath.endsWith('.html')) {
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    }
+  },
+}));
+
 // --- SQLite offers DB (shared by /api/carvana, /api/carmax, /api/driveway, /api/quote-all) ---
 // Lazy-initialized so the server can boot even if better-sqlite3 is briefly
 // missing (deploy race); subsequent requests just try again.
@@ -34,6 +48,17 @@ function persistOffer({ site, runId, normalized, result, startedAt, durationMs, 
   const db = getOffersDb();
   if (!db) return;
   const { insertOffer } = require('./lib/offers-db');
+  // Defense in depth: always emit a non-null wizard_log so DB rows always
+  // carry a diagnostic trail. If the handler returned no log, synthesize one
+  // and append the error message — the bug we're guarding against here is
+  // the 2026-04-13 consumer-1 carvana run that returned wizard_log=NULL.
+  let logEntries = Array.isArray(result.wizardLog) ? result.wizardLog.slice() : [];
+  if (logEntries.length === 0) {
+    logEntries.push(`[server] ${site} handler returned no wizard_log`);
+  }
+  if (result.error) {
+    logEntries.push(`[server] error: ${result.error}`);
+  }
   try {
     insertOffer(db, {
       run_id: runId,
@@ -48,7 +73,7 @@ function persistOffer({ site, runId, normalized, result, startedAt, durationMs, 
       proxy_ip: proxyIp || null,
       ran_at: new Date(startedAt || Date.now()).toISOString(),
       duration_ms: durationMs || null,
-      wizard_log: result.wizardLog || null,
+      wizard_log: logEntries,
     });
   } catch (e) {
     console.error(`[persist-offer] ${site} insert failed:`, e.message);
@@ -574,6 +599,117 @@ app.get('/', (_req, res) => {
       return '<div class="detail-row"><span class="detail-label">' + escapeHtml(label) + '</span><span class="detail-value">' + escapeHtml(String(value)) + '</span></div>';
     }
   </script>
+</body>
+</html>`);
+});
+
+// --- Wizard debug gallery (mobile-friendly thumbnails + HTML-dump links) ---
+// Scans public-debug/ and renders per-site, newest-first listings. Exists so
+// the user can watch the wizard's view as fixes land, without SSH.
+app.get('/debug', (_req, res) => {
+  const escapeHtml = (s) => String(s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+  let sites = [];
+  try {
+    sites = fs.readdirSync(DEBUG_DUMP_DIR, { withFileTypes: true })
+      .filter((d) => d.isDirectory())
+      .map((d) => d.name)
+      .sort();
+  } catch { sites = []; }
+
+  const sections = sites.map((site) => {
+    const siteDir = path.join(DEBUG_DUMP_DIR, site);
+    let files = [];
+    try {
+      files = fs.readdirSync(siteDir)
+        .filter((f) => f.endsWith('.png') || f.endsWith('.html'));
+    } catch { files = []; }
+
+    // Group by base name (without extension) so PNG + HTML of same capture
+    // appear together.
+    const byBase = new Map();
+    for (const f of files) {
+      const base = f.replace(/\.(png|html)$/, '');
+      const ext = f.endsWith('.png') ? 'png' : 'html';
+      let stat = null;
+      try { stat = fs.statSync(path.join(siteDir, f)); } catch { /* ok */ }
+      if (!byBase.has(base)) byBase.set(base, { base, png: null, html: null, mtime: 0 });
+      const entry = byBase.get(base);
+      entry[ext] = f;
+      if (stat && stat.mtimeMs > entry.mtime) entry.mtime = stat.mtimeMs;
+    }
+
+    const entries = Array.from(byBase.values())
+      .sort((a, b) => b.mtime - a.mtime);
+
+    if (entries.length === 0) {
+      return `<section><h2>${escapeHtml(site)}</h2><p class="muted">No captures yet.</p></section>`;
+    }
+
+    const rows = entries.map((e) => {
+      const when = e.mtime ? new Date(e.mtime).toISOString().replace('T', ' ').replace(/\..*$/, '') + ' UTC' : '';
+      const pngHref = e.png ? `debug/${encodeURIComponent(site)}/${encodeURIComponent(e.png)}` : null;
+      const htmlHref = e.html ? `debug/${encodeURIComponent(site)}/${encodeURIComponent(e.html)}` : null;
+      const thumb = pngHref
+        ? `<a href="${pngHref}" class="thumb"><img loading="lazy" src="${pngHref}" alt="${escapeHtml(e.base)}"></a>`
+        : `<div class="thumb placeholder">no&nbsp;png</div>`;
+      const links = [
+        pngHref ? `<a href="${pngHref}">png</a>` : null,
+        htmlHref ? `<a href="${htmlHref}">html</a>` : null,
+      ].filter(Boolean).join(' &middot; ');
+      return `<li>
+        ${thumb}
+        <div class="meta">
+          <div class="name">${escapeHtml(e.base)}</div>
+          <div class="when">${escapeHtml(when)}</div>
+          <div class="links">${links}</div>
+        </div>
+      </li>`;
+    }).join('\n');
+
+    return `<section><h2>${escapeHtml(site)} <span class="count">${entries.length}</span></h2><ul class="captures">${rows}</ul></section>`;
+  }).join('\n');
+
+  const body = sites.length === 0
+    ? '<p class="muted">No sites have captured debug output yet. Run a wizard with <code>debug: true</code>.</p>'
+    : sections;
+
+  res.set('Cache-Control', 'no-store');
+  res.send(`<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>car-offers &middot; wizard debug captures</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body { font: 15px/1.45 -apple-system, system-ui, Segoe UI, Roboto, sans-serif; margin: 0; padding: 16px; background: #0b0d10; color: #e7edf3; }
+  h1 { margin: 0 0 4px; font-size: 18px; }
+  h2 { margin: 20px 0 10px; font-size: 16px; text-transform: uppercase; letter-spacing: .05em; color: #9fb3c8; }
+  h2 .count { display: inline-block; margin-left: 8px; padding: 2px 8px; border-radius: 10px; background: #1f2a36; color: #9fb3c8; font-size: 12px; letter-spacing: 0; text-transform: none; }
+  .muted { color: #7a8a9a; }
+  p.hint { margin: 0 0 16px; color: #7a8a9a; font-size: 13px; }
+  ul.captures { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: 1fr; gap: 10px; }
+  @media (min-width: 640px) { ul.captures { grid-template-columns: repeat(2, 1fr); } }
+  @media (min-width: 960px) { ul.captures { grid-template-columns: repeat(3, 1fr); } }
+  li { display: flex; gap: 10px; padding: 10px; background: #131821; border: 1px solid #1f2a36; border-radius: 8px; }
+  a.thumb, .thumb.placeholder { flex: 0 0 96px; width: 96px; height: 96px; border-radius: 6px; overflow: hidden; background: #0b0d10; display: flex; align-items: center; justify-content: center; color: #536877; font-size: 12px; }
+  a.thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .meta { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+  .name { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; word-break: break-all; }
+  .when { color: #7a8a9a; font-size: 12px; }
+  .links a { color: #76a8ff; text-decoration: none; margin-right: 6px; }
+  .links a:hover { text-decoration: underline; }
+  code { background: #1f2a36; padding: 1px 5px; border-radius: 3px; }
+</style>
+</head>
+<body>
+  <h1>wizard debug captures</h1>
+  <p class="hint">Newest first. Tap a thumbnail for full-size screenshot; tap <code>html</code> for the raw page dump.</p>
+  ${body}
 </body>
 </html>`);
 });
@@ -1146,6 +1282,7 @@ async function runSiteHandler({ site, handler, req, res, runId }) {
     return res.status(400).json({ error: e.message });
   }
   const started = Date.now();
+  const debug = !!(req.body && req.body.debug);
   try {
     const result = await handler({
       vin: normalized.vin,
@@ -1153,6 +1290,7 @@ async function runSiteHandler({ site, handler, req, res, runId }) {
       zip: normalized.zip,
       condition: normalized.condition,
       email: config.PROJECT_EMAIL,
+      debug,
     });
     // Normalize: carvana.js returns { offer: '$...', details, wizardLog }.
     // carmax/driveway return { status, offer_usd, offer_expires, ... }.

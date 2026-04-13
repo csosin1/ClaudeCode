@@ -35,7 +35,7 @@ promote_service() {
 
 promote_car_offers() {
     promote_service car-offers /opt/car-offers-preview /opt/car-offers car-offers.service \
-        node_modules .env data startup-results.json .patchright_installed .playwright_installed '*.db'
+        node_modules .env data startup-results.json .patchright_installed .playwright_installed '*.db' public-debug
 }
 
 promote_gym_intelligence() {

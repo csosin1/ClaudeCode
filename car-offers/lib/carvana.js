@@ -4,6 +4,7 @@ const {
   markProfileWarmed, profileIsWarm,
 } = require('./browser');
 const { fullWarmup, miniBrowse } = require('./shopper-warmup');
+const { debugDump, pickDropdownOption } = require('./wizard-common');
 const config = require('./config');
 const path = require('path');
 const fs = require('fs');
@@ -120,16 +121,15 @@ function zipToState(zip) {
   return p1 === '0' ? 'MA' : 'NY'; // generic fallback, rarely hit
 }
 
-async function _getCarvanaOfferImpl({ vin, mileage, zip, email, consumerId, fingerprintProfileId, proxyZip }) {
+async function _getCarvanaOfferImpl({ vin, mileage, zip, email, consumerId, fingerprintProfileId, proxyZip, debug }) {
   const offerEmail = email || config.PROJECT_EMAIL || 'caroffers.tool@gmail.com';
   const stateCode = zipToState(zip);
-  if (!offerEmail) {
-    return { error: 'No email configured. Set PROJECT_EMAIL in .env' };
-  }
-
   let browser = null;
   const startTime = Date.now();
   const wizardLog = []; // Capture wizard diagnostics for return value
+  if (!offerEmail) {
+    return { error: 'No email configured. Set PROJECT_EMAIL in .env', wizardLog };
+  }
 
   function log(msg) {
     console.log(msg);
@@ -518,7 +518,8 @@ async function _getCarvanaOfferImpl({ vin, mileage, zip, email, consumerId, fing
 
     if (!vinInput) {
       await screenshot(page, 'no-vin-input');
-      return { error: 'Could not find VIN input field. Selectors may need updating.' };
+      log('[carvana] FAIL: no VIN input element found at /getoffer/entry');
+      return { error: 'Could not find VIN input field. Selectors may need updating.', wizardLog };
     }
 
     await randomMouseMove(page, vinSelectors[0]).catch(() => {});
@@ -693,13 +694,19 @@ async function _getCarvanaOfferImpl({ vin, mileage, zip, email, consumerId, fing
       'button:has-text("View Offer")',
     ];
 
-    // Generic "click through the wizard" loop — handles up to 15 pages
+    // Generic "click through the wizard" loop — handles up to 18 pages.
+    // Track per-build-page "did we satisfy required fields" so we don't loop
+    // clicking a disabled Continue button (Carvana's /getoffer/build flow has
+    // 4 sub-pages: color → features → modifications → keys/title — each
+    // requires its own answers before Continue enables).
     let stuckCount = 0;
-    for (let step = 0; step < 15; step++) {
+    const buildPagesAnswered = new Set();
+    for (let step = 0; step < 18; step++) {
       checkTimeout();
       const currentUrl = page.url();
       log(`[carvana] Wizard step ${step}: URL = ${currentUrl}`);
       await screenshot(page, `wizard-${step}`);
+      if (debug) await debugDump(page, 'carvana', `wizard-${step}`);
 
       // Log all visible buttons and inputs for diagnostics
       try {
@@ -811,6 +818,113 @@ async function _getCarvanaOfferImpl({ vin, mileage, zip, email, consumerId, fing
         // Continue
       }
 
+      // Carvana /getoffer/build sub-pages — they ALL render Exit/Back/Continue
+      // buttons + various widgets per step. Detect by URL + heading.
+      // Step A: "Vehicle build" → color dropdown (custom widget) +
+      //         "No modifications" button. Pick gray/silver as a safe default.
+      // Step B: "Vehicle features" → checkboxes (leave unchecked = stock).
+      // Step C: "Vehicle condition" → mileage, accident, key count, title.
+      // Step D: "Mileage / Final touches" → mileage input + zip if missing.
+      if (currentUrl.includes('/getoffer/build') && !buildPagesAnswered.has(currentUrl + '|' + step)) {
+        try {
+          const headingText = await page.textContent('h1, h2, [class*="title"], [class*="heading"]')
+            .then(t => (t || '').trim().slice(0, 80))
+            .catch(() => '');
+          log(`  /getoffer/build heading: "${headingText}"`);
+
+          // Color picker: look for a custom dropdown trigger
+          const pageText = (await page.textContent('body').catch(() => '') || '').toLowerCase();
+          if (pageText.includes('color') || pageText.includes('exterior color')) {
+            const colorPicked = await pickDropdownOption(page, [
+              'select[name*="color" i]',
+              'select[id*="color" i]',
+              'select[aria-label*="color" i]',
+              '[role="combobox"][aria-label*="color" i]',
+              'button[aria-label*="color" i]',
+              'button:has-text("Exterior color")',
+              'button:has-text("Select color")',
+              'div[role="button"]:has-text("Exterior color")',
+              // generic combobox/select on the page
+              '[role="combobox"]',
+              'select:visible',
+            ], ['Gray', 'Silver', 'White', 'Black', 'Blue', 'Red'], 1500);
+            if (colorPicked.selected) {
+              log(`  Carvana color picked: ${colorPicked.label}`);
+              interacted = true;
+              buildPagesAnswered.add(currentUrl + '|color');
+              await humanDelay(500, 1000);
+            }
+          }
+
+          // Modifications question — pick "No modifications".
+          if (pageText.includes('modifications') || pageText.includes('modified')) {
+            const modBtn = await page.$('button:has-text("No modifications"), button:has-text("No Modifications"), button:has-text("No"), label:has-text("No modifications")');
+            if (modBtn && await modBtn.isVisible()) {
+              await humanDelay(400, 900);
+              await modBtn.click();
+              log('  Carvana: clicked "No modifications"');
+              interacted = true;
+              buildPagesAnswered.add(currentUrl + '|mods');
+              await humanDelay(500, 1000);
+            }
+          }
+
+          // Keys question — pick "2 keys" (most common stock answer).
+          if (pageText.includes('how many keys') || pageText.includes('number of keys')) {
+            const keysBtn = await page.$('button:has-text("2"), button:has-text("Two")');
+            if (keysBtn && await keysBtn.isVisible()) {
+              await humanDelay(400, 900);
+              await keysBtn.click();
+              log('  Carvana: keys = 2');
+              interacted = true;
+              buildPagesAnswered.add(currentUrl + '|keys');
+              await humanDelay(500, 1000);
+            }
+          }
+
+          // Title status — pick clean
+          if (pageText.includes('title') && (pageText.includes('clean') || pageText.includes('salvage'))) {
+            const titleBtn = await page.$('button:has-text("Clean"), label:has-text("Clean")');
+            if (titleBtn && await titleBtn.isVisible()) {
+              await humanDelay(400, 900);
+              await titleBtn.click();
+              log('  Carvana: title = clean');
+              interacted = true;
+              buildPagesAnswered.add(currentUrl + '|title');
+              await humanDelay(500, 1000);
+            }
+          }
+
+          // Accident history — pick None / no accidents
+          if (pageText.includes('accident') || pageText.includes('been in')) {
+            const noAccBtn = await page.$('button:has-text("No accidents"), button:has-text("None"), button:has-text("No, no accidents"), label:has-text("No accidents")');
+            if (noAccBtn && await noAccBtn.isVisible()) {
+              await humanDelay(400, 900);
+              await noAccBtn.click();
+              log('  Carvana: accidents = none');
+              interacted = true;
+              buildPagesAnswered.add(currentUrl + '|accidents');
+              await humanDelay(500, 1000);
+            }
+          }
+
+          // Loan / payoff — pick "Own outright" / "No loan"
+          if (pageText.includes('loan') || pageText.includes('payoff')) {
+            const ownBtn = await page.$('button:has-text("Own outright"), button:has-text("Own it"), button:has-text("No loan"), button:has-text("Paid off")');
+            if (ownBtn && await ownBtn.isVisible()) {
+              await humanDelay(400, 900);
+              await ownBtn.click();
+              log('  Carvana: ownership = own outright');
+              interacted = true;
+              buildPagesAnswered.add(currentUrl + '|own');
+              await humanDelay(500, 1000);
+            }
+          }
+        } catch (buildErr) {
+          log(`  /getoffer/build interaction error: ${buildErr.message}`);
+        }
+      }
+
       // Look for vehicle confirmation buttons (after VIN submit, Carvana shows vehicle details)
       // Must come before generic condition buttons to avoid false matches
       const confirmSelectors = [
@@ -918,22 +1032,36 @@ async function _getCarvanaOfferImpl({ vin, mileage, zip, email, consumerId, fing
         }
       }
 
-      // Try to click a submit/next/continue button
+      // Try to click a submit/next/continue button — but skip disabled ones
+      // (the build flow disables Continue until required fields are answered).
       let clickedSubmit = false;
       for (const sel of submitSelectors) {
         try {
-          const btn = await page.waitForSelector(sel, { timeout: 2000 });
+          // Use :not([disabled]) and aria-disabled exclusion to dodge greyed-out CTAs
+          const enabledSel = `${sel}:not([disabled]):not([aria-disabled="true"])`;
+          const btn = await page.waitForSelector(enabledSel, { timeout: 2000 });
           if (btn && await btn.isVisible()) {
-            await randomMouseMove(page, sel).catch(() => {});
+            await randomMouseMove(page, enabledSel).catch(() => {});
             await humanDelay(800, 1500);
             await btn.click();
             clickedSubmit = true;
-            log(`  Clicked submit: ${sel}`);
+            log(`  Clicked submit: ${enabledSel}`);
             break;
           }
         } catch {
           continue;
         }
+      }
+      if (!clickedSubmit) {
+        // Diagnostic: report disabled buttons so we know what we're stuck on
+        try {
+          const disabledBtns = await page.$$eval('button[disabled], button[aria-disabled="true"]', els =>
+            els.slice(0, 5).map(e => e.textContent.trim().slice(0, 40))
+          );
+          if (disabledBtns.length > 0) {
+            log(`  No enabled submit. Disabled buttons present: ${JSON.stringify(disabledBtns)}`);
+          }
+        } catch { /* ok */ }
       }
 
       // If we didn't interact at all, try pressing Enter as last resort
