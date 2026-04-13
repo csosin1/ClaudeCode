@@ -39,6 +39,13 @@ rsync -a --delete \
     --include='data/raw/.gitkeep' \
     --exclude='data/sec_cache/*' \
     --include='data/sec_cache/.gitkeep' \
+    --exclude='data/surveillance.db' \
+    --exclude='data/surveillance.db-wal' \
+    --exclude='data/surveillance.db-shm' \
+    --exclude='data/combined.json' \
+    --exclude='data/seen_accessions.json' \
+    --exclude='data/flag_state.json' \
+    --exclude='dashboard/data/combined.json' \
     "$SOURCE_DIR/" "$PREVIEW_DIR/"
 
 # Ensure raw/ and sec_cache/ dirs exist after rsync exclude
