@@ -4,3 +4,8 @@
 .patchright_installed
 .playwright_installed
 startup-results.json
+# SQLite WAL sidecars — the .db itself is also covered by root .gitignore
+offers.db
+offers.db-wal
+offers.db-shm
+offers.db-journal

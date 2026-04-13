@@ -89,6 +89,72 @@ test.describe('Car-offers API contract', () => {
   });
 });
 
+test.describe('Car-offers comparison (CarMax + Driveway + /api/compare + /api/quote-all)', () => {
+  test('GET /api/compare/:vin with unknown VIN returns well-formed empty (never 500)', async ({ request }) => {
+    const resp = await request.get('/car-offers/api/compare/NONEXISTENTVIN123');
+    expect(resp.status(), 'compare endpoint must not 500 on missing VIN').toBe(200);
+    const body = await resp.json();
+    expect(typeof body).toBe('object');
+    // Shape: { vin, carvana, carmax, driveway, run_id, ran_at }
+    expect(body).toHaveProperty('vin');
+    expect(body).toHaveProperty('carvana');
+    expect(body).toHaveProperty('carmax');
+    expect(body).toHaveProperty('driveway');
+    expect(body).toHaveProperty('run_id');
+    expect(body).toHaveProperty('ran_at');
+    // All three site rows should be null (no data yet)
+    expect(body.carvana === null || typeof body.carvana === 'object').toBeTruthy();
+    expect(body.carmax === null || typeof body.carmax === 'object').toBeTruthy();
+    expect(body.driveway === null || typeof body.driveway === 'object').toBeTruthy();
+  });
+
+  test('GET /api/runs returns a runs array', async ({ request }) => {
+    const resp = await request.get('/car-offers/api/runs');
+    // This endpoint is new — tolerate a 404 on older instances.
+    if (resp.status() === 404) test.skip(true, '/api/runs not on this build');
+    expect(resp.ok()).toBeTruthy();
+    const body = await resp.json();
+    expect(Array.isArray(body.runs)).toBeTruthy();
+  });
+
+  test('POST /api/quote-all with bad VIN returns 400 with error message', async ({ request }) => {
+    const resp = await request.post('/car-offers/api/quote-all', {
+      data: { vin: 'bad', mileage: '48000', zip: '06880' },
+    });
+    // 400 (validation) or 404 (old build) — not 500
+    if (resp.status() === 404) test.skip(true, '/api/quote-all not on this build');
+    expect(resp.status()).toBe(400);
+    const body = await resp.json();
+    expect(typeof body.error).toBe('string');
+  });
+
+  test('POST /api/carmax with bad input returns 400, not 500', async ({ request }) => {
+    const resp = await request.post('/car-offers/api/carmax', {
+      data: { vin: 'bad', mileage: 'x', zip: 'y' },
+    });
+    if (resp.status() === 404) test.skip(true, '/api/carmax not on this build');
+    expect(resp.status()).toBe(400);
+  });
+
+  test('POST /api/driveway with bad input returns 400, not 500', async ({ request }) => {
+    const resp = await request.post('/car-offers/api/driveway', {
+      data: { vin: 'bad', mileage: 'x', zip: 'y' },
+    });
+    if (resp.status() === 404) test.skip(true, '/api/driveway not on this build');
+    expect(resp.status()).toBe(400);
+  });
+
+  test('dashboard renders the "Compare all 3 buyers" card', async ({ page }) => {
+    await page.goto('/car-offers/dashboard');
+    const heading = page.locator('h2', { hasText: 'Compare all 3 buyers' });
+    if (await heading.count() === 0) test.skip(true, 'compare card not on this build');
+    await expect(heading).toBeVisible();
+    await expect(page.locator('#cmpVin')).toBeVisible();
+    await expect(page.locator('#cmpCondition')).toBeVisible();
+    await expect(page.locator('#cmpBtn')).toBeVisible();
+  });
+});
+
 test.describe('Car-offers security', () => {
   test('.env is not served', async ({ request }) => {
     const resp = await request.get('/car-offers/.env');
