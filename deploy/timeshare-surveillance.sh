@@ -27,6 +27,8 @@ fi
 mkdir -p "$LIVE_DIR" "$PREVIEW_DIR" "$LOG_DIR"
 
 # --- Sync source to PREVIEW only ---
+# sec_cache/ is excluded so the persistent raw-SEC cache survives redeploys —
+# a full 5-year re-extraction would otherwise re-download 75+ filings.
 rsync -a --delete \
     --exclude='venv' \
     --exclude='.env' \
@@ -35,11 +37,15 @@ rsync -a --delete \
     --exclude='*.log' \
     --exclude='data/raw/*' \
     --include='data/raw/.gitkeep' \
+    --exclude='data/sec_cache/*' \
+    --include='data/sec_cache/.gitkeep' \
     "$SOURCE_DIR/" "$PREVIEW_DIR/"
 
-# Ensure raw/ dir exists after rsync exclude
-mkdir -p "$PREVIEW_DIR/data/raw" "$LIVE_DIR/data/raw"
-touch "$PREVIEW_DIR/data/raw/.gitkeep" "$LIVE_DIR/data/raw/.gitkeep"
+# Ensure raw/ and sec_cache/ dirs exist after rsync exclude
+mkdir -p "$PREVIEW_DIR/data/raw" "$LIVE_DIR/data/raw" \
+         "$PREVIEW_DIR/data/sec_cache" "$LIVE_DIR/data/sec_cache"
+touch "$PREVIEW_DIR/data/raw/.gitkeep" "$LIVE_DIR/data/raw/.gitkeep" \
+      "$PREVIEW_DIR/data/sec_cache/.gitkeep" "$LIVE_DIR/data/sec_cache/.gitkeep"
 
 # Ensure dashboard/data/combined.json exists so first page load doesn't 404.
 # Dashboard fetches ./data/combined.json relative to nginx alias = $dir/dashboard/.

@@ -6,7 +6,6 @@
 <title>Timeshare Receivable Surveillance</title>
 <link rel="preconnect" href="https://unpkg.com" />
 <link rel="preconnect" href="https://cdn.tailwindcss.com" />
-<!-- Favicon inline to avoid 404s -->
 <link rel="icon" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' fill='%230A0E1A'/><text x='16' y='22' font-family='monospace' font-size='18' fill='%2300A3FF' text-anchor='middle' font-weight='700'>T</text></svg>" />
 <script src="https://cdn.tailwindcss.com"></script>
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -37,19 +36,15 @@
     font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     letter-spacing: -0.01em;
   }
-  .skel {
-    background: linear-gradient(90deg, #111827 0%, #1F2937 50%, #111827 100%);
-    background-size: 200% 100%;
-    animation: shimmer 1.6s linear infinite;
-    border-radius: 4px;
+  .spinner {
+    width: 28px; height: 28px;
+    border: 3px solid #1F2937;
+    border-top-color: #00A3FF;
+    border-radius: 50%;
+    animation: spin 0.9s linear infinite;
   }
-  @keyframes shimmer {
-    0% { background-position: 200% 0; }
-    100% { background-position: -200% 0; }
-  }
-  .sortable:hover { color: #fff; cursor: pointer; }
-  .chart-wrap { width: 100%; height: 260px; }
-  @media (max-width: 640px) { .chart-wrap { height: 220px; } }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .chart-wrap { width: 100%; height: 220px; }
   .recharts-tooltip-wrapper .recharts-default-tooltip {
     background: #0A0E1A !important;
     border: 1px solid #1F2937 !important;
@@ -58,16 +53,34 @@
   a { color: var(--hgv); }
   a:hover { color: #5bd0ff; }
   .scroll-x { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .pill {
+    display: inline-flex; align-items: center; justify-content: center;
+    padding: 4px 10px; border-radius: 9999px; font-size: 11px;
+    cursor: pointer; user-select: none;
+    border: 1px solid #1F2937; background: transparent; color: #94A3B8;
+  }
+  .pill.active { background: #00A3FF22; border-color: #00A3FF; color: #5bd0ff; }
+  .switch {
+    position: relative; width: 36px; height: 20px;
+    background: #1F2937; border-radius: 9999px; cursor: pointer;
+    transition: background 0.15s;
+  }
+  .switch.on { background: #00A3FF; }
+  .switch::after {
+    content: ""; position: absolute; left: 2px; top: 2px;
+    width: 16px; height: 16px; border-radius: 9999px; background: #fff;
+    transition: left 0.15s;
+  }
+  .switch.on::after { left: 18px; }
 </style>
 </head>
 <body>
 <div id="root"></div>
 
 <script type="text/babel" data-presets="react">
-const { useEffect, useMemo, useState, useRef } = React;
+const { useEffect, useMemo, useState } = React;
 const {
-  LineChart, Line, XAxis, YAxis, Tooltip, Legend, ReferenceLine,
-  BarChart, Bar, ResponsiveContainer, CartesianGrid
+  LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid
 } = Recharts;
 
 // -------------------------------------------------------------
@@ -77,20 +90,38 @@ const TICKERS = ["HGV", "VAC", "TNL"];
 const COLORS = { HGV: "#00A3FF", VAC: "#FF6B35", TNL: "#00D48A" };
 const SEV = { CRITICAL: "#FF3B3B", WARNING: "#FFB800", CLEAN: "#00D48A" };
 
+// HGV brand-segment palette, used when the HGV breakdown toggle is on.
+const HGV_SEG_COLORS = {
+  legacy_hgv: "#00A3FF",
+  diamond:    "#7DD3FC",
+  bluegreen:  "#A78BFA",
+  consolidated: "#00A3FF",
+  originated:   "#00A3FF",
+  acquired_at_fv: "#FFB800",
+};
+const HGV_SEG_DASH = {
+  legacy_hgv: "0",
+  diamond: "5 3",
+  bluegreen: "2 4",
+  consolidated: "0",
+  originated: "0",
+  acquired_at_fv: "4 4",
+};
+
 const EDGAR_URLS = {
   HGV: "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0001674168&type=10-Q&dateb=&owner=include&count=40",
   VAC: "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0001524358&type=10-Q&dateb=&owner=include&count=40",
   TNL: "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0001361658&type=10-Q&dateb=&owner=include&count=40"
 };
 
+// Threshold logic kept in sync with red_flag_diff.py — drives the
+// latest-snapshot strip per ticker.
 const THRESHOLDS = {
   CRITICAL: {
     delinquent_90_plus_days_pct:           ["gt", 0.07],
     delinquent_total_pct:                  ["gt", 0.15],
     allowance_coverage_pct:                ["lt", 0.10],
-    allowance_coverage_pct_qoq_delta:      ["gt", 0.02],
     gain_on_sale_margin_pct:               ["lt", 0.05],
-    new_securitization_advance_rate_qoq:   ["lt", -0.03],
     management_flagged_credit_concerns:    ["eq", true]
   },
   WARNING: {
@@ -99,99 +130,21 @@ const THRESHOLDS = {
     allowance_coverage_pct:                ["lt", 0.12],
     fico_below_600_pct:                    ["gt", 0.15],
     weighted_avg_fico_origination:         ["lt", 680],
-    originations_mm_yoy_change_pct:        ["lt", -0.15],
-    contract_rescission_rate_pct:          ["gt", 0.15],
-    provision_yoy_change_pct:              ["gt", 0.25]
   }
 };
 
-// Plain-English consequences for each metric/severity
-const CONSEQUENCES = {
-  delinquent_90_plus_days_pct: {
-    CRITICAL: "Elevated 90+ DPD accelerates charge-offs; securitization cash flows at risk.",
-    WARNING:  "Late-stage delinquency is trending up; expect higher charge-offs next 1-2 quarters."
-  },
-  delinquent_total_pct: {
-    CRITICAL: "Total DPD above 15% signals a book-wide credit problem, not an isolated cohort.",
-    WARNING:  "Total delinquency creeping above 10%; watch for migration to 90+ bucket."
-  },
-  allowance_coverage_pct: {
-    CRITICAL: "Thin reserves mean future losses flow straight to earnings.",
-    WARNING:  "Reserve cushion is shrinking vs. the delinquency pipeline."
-  },
-  allowance_coverage_pct_qoq_delta: {
-    CRITICAL: "A sharp jump in reserve ratio implies management sees worse losses coming.",
-    WARNING:  "Reserve build is accelerating; credit outlook deteriorating."
-  },
-  gain_on_sale_margin_pct: {
-    CRITICAL: "Securitization economics are compressing; originations may stop being profitable.",
-    WARNING:  "Gain-on-sale margin softening; ABS buyers demanding wider spreads."
-  },
-  new_securitization_advance_rate_qoq: {
-    CRITICAL: "ABS buyers accepting less collateral per dollar raised - a credit-quality signal from the bond market.",
-    WARNING:  "Advance rates slipping; rating agencies getting cautious."
-  },
-  management_flagged_credit_concerns: {
-    CRITICAL: "Management explicitly called out credit deterioration - take them at their word.",
-    WARNING:  "Management commentary hedging on credit; read carefully."
-  },
-  fico_below_600_pct: {
-    CRITICAL: "Subprime mix elevated; loss severity climbs non-linearly below 600.",
-    WARNING:  "Subprime share of originations exceeds 15% - credit mix drifting weaker."
-  },
-  weighted_avg_fico_origination: {
-    CRITICAL: "New originations at sub-680 weighted FICO - credit standards falling.",
-    WARNING:  "Weighted FICO softening below 680 at origination."
-  },
-  originations_mm_yoy_change_pct: {
-    CRITICAL: "Origination volume collapsing; fixed-cost sales infrastructure pressures earnings.",
-    WARNING:  "Originations down >15% YoY - demand or underwriting tightening."
-  },
-  contract_rescission_rate_pct: {
-    CRITICAL: "Buyer's-remorse rescissions above 15% - sales practices or product fit under strain.",
-    WARNING:  "Rescission rate elevated; refund drag on reported originations."
-  },
-  provision_yoy_change_pct: {
-    CRITICAL: "Provision up sharply YoY - loss forecasts materially worse.",
-    WARNING:  "Provision trending up >25% YoY; credit costs rising."
-  }
-};
-
-const METRIC_LABEL = {
-  net_receivables_mm: "Net receivables ($mm)",
-  delinquent_total_pct: "Total DPD %",
-  delinquent_90_plus_days_pct: "90+ DPD %",
-  allowance_coverage_pct: "Allowance coverage %",
-  allowance_coverage_pct_qoq_delta: "Allowance coverage Δ QoQ",
-  provision_mm: "Provision ($mm)",
-  originations_mm: "Originations ($mm)",
-  gain_on_sale_margin_pct: "Gain-on-sale margin %",
-  weighted_avg_fico_origination: "Wtd avg FICO",
-  fico_below_600_pct: "FICO <600 %",
-  fico_700_plus_pct: "FICO 700+ %",
-  originations_mm_yoy_change_pct: "Originations YoY %",
-  contract_rescission_rate_pct: "Rescission rate %",
-  provision_yoy_change_pct: "Provision YoY %",
-  new_securitization_advance_rate_qoq: "ABS advance rate Δ QoQ",
-  management_flagged_credit_concerns: "Mgmt flagged credit"
-};
-
-// For the KPI rows, direction of "good". 1 means higher is better, -1 lower is better.
-const GOOD_DIR = {
-  net_receivables_mm: 0,
-  delinquent_total_pct: -1,
-  delinquent_90_plus_days_pct: -1,
-  allowance_coverage_pct: 1,
-  provision_mm: -1,
-  originations_mm: 1,
-  gain_on_sale_margin_pct: 1,
-  weighted_avg_fico_origination: 1,
-  fico_below_600_pct: -1,
-  fico_700_plus_pct: 1,
-  originations_mm_yoy_change_pct: 1,
-  contract_rescission_rate_pct: -1,
-  provision_yoy_change_pct: -1
-};
+// Ordered list of metrics shown in the time-series grid.
+const TS_METRICS = [
+  { key: "delinquent_90_plus_days_pct",         label: "90+ DPD %",                 fmt: "pct" },
+  { key: "delinquent_total_pct",                label: "Total DPD %",               fmt: "pct" },
+  { key: "allowance_coverage_pct",              label: "Allowance coverage %",      fmt: "pct" },
+  { key: "provision_for_loan_losses_mm",        label: "Provision ($mm)",           fmt: "money" },
+  { key: "weighted_avg_fico_origination",       label: "Weighted-avg FICO",         fmt: "fico" },
+  { key: "fico_below_600_pct",                  label: "FICO <600 %",               fmt: "pct" },
+  { key: "gain_on_sale_margin_pct",             label: "Gain-on-sale margin %",     fmt: "pct" },
+  { key: "new_securitization_advance_rate_pct", label: "ABS advance rate %",        fmt: "pct" },
+  { key: "originations_mm",                     label: "Originations ($mm)",        fmt: "money" },
+];
 
 // -------------------------------------------------------------
 // Helpers
@@ -203,7 +156,6 @@ function cmp(op, val, target) {
   if (op === "eq") return val === target;
   return false;
 }
-
 function classifyMetric(metric, val) {
   const c = THRESHOLDS.CRITICAL[metric];
   if (c && cmp(c[0], val, c[1])) return "CRITICAL";
@@ -211,76 +163,35 @@ function classifyMetric(metric, val) {
   if (w && cmp(w[0], val, w[1])) return "WARNING";
   return "CLEAN";
 }
-
-function computeFlags(records) {
-  // records: array of latest record per ticker
-  const flags = [];
-  for (const rec of records) {
-    if (!rec) continue;
-    const checked = new Set();
-    // CRITICAL first
-    for (const [metric, rule] of Object.entries(THRESHOLDS.CRITICAL)) {
-      const val = rec[metric];
-      if (cmp(rule[0], val, rule[1])) {
-        flags.push({
-          severity: "CRITICAL", ticker: rec.ticker, metric, value: val,
-          threshold: `${rule[0] === "gt" ? ">" : rule[0] === "lt" ? "<" : "="} ${fmtThresh(metric, rule[1])}`,
-          consequence: (CONSEQUENCES[metric] && CONSEQUENCES[metric].CRITICAL) || ""
-        });
-        checked.add(metric);
-      }
-    }
-    for (const [metric, rule] of Object.entries(THRESHOLDS.WARNING)) {
-      if (checked.has(metric)) continue;
-      const val = rec[metric];
-      if (cmp(rule[0], val, rule[1])) {
-        flags.push({
-          severity: "WARNING", ticker: rec.ticker, metric, value: val,
-          threshold: `${rule[0] === "gt" ? ">" : rule[0] === "lt" ? "<" : "="} ${fmtThresh(metric, rule[1])}`,
-          consequence: (CONSEQUENCES[metric] && CONSEQUENCES[metric].WARNING) || ""
-        });
-      }
-    }
+function tickerSeverity(rec) {
+  if (!rec) return "CLEAN";
+  let worst = "CLEAN";
+  for (const m of [
+    "delinquent_90_plus_days_pct",
+    "delinquent_total_pct",
+    "allowance_coverage_pct",
+    "fico_below_600_pct",
+    "weighted_avg_fico_origination",
+    "management_flagged_credit_concerns",
+  ]) {
+    const sev = classifyMetric(m, rec[m]);
+    if (sev === "CRITICAL") return "CRITICAL";
+    if (sev === "WARNING") worst = "WARNING";
   }
-  // CRITICAL first, then by ticker
-  flags.sort((a, b) => {
-    if (a.severity !== b.severity) return a.severity === "CRITICAL" ? -1 : 1;
-    return a.ticker.localeCompare(b.ticker);
-  });
-  return flags;
+  return worst;
 }
-
-function fmtThresh(metric, v) {
-  if (typeof v === "boolean") return String(v);
-  if (metric.endsWith("_pct") || metric.endsWith("_qoq_delta") || metric.endsWith("_qoq")) return fmtPct(v);
-  if (metric === "weighted_avg_fico_origination") return Math.round(v);
-  return v;
-}
-
 function fmtPct(v, digits = 2) {
   if (v === null || v === undefined || Number.isNaN(v)) return "—";
   return (v * 100).toFixed(digits) + "%";
 }
-
 function fmtMoney(v) {
   if (v === null || v === undefined || Number.isNaN(v)) return "—";
-  return "$" + v.toLocaleString(undefined, { maximumFractionDigits: 0 });
+  return "$" + Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 });
 }
-
-function fmtNum(v) {
+function fmtFico(v) {
   if (v === null || v === undefined || Number.isNaN(v)) return "—";
-  return Number(v).toLocaleString();
+  return Math.round(v);
 }
-
-function fmtValue(metric, v) {
-  if (v === null || v === undefined) return "—";
-  if (typeof v === "boolean") return v ? "Yes" : "No";
-  if (metric.endsWith("_pct") || metric.endsWith("_qoq_delta") || metric.endsWith("_qoq") || metric.endsWith("_change_pct")) return fmtPct(v);
-  if (metric === "weighted_avg_fico_origination") return Math.round(v);
-  if (metric.endsWith("_mm")) return fmtMoney(v);
-  return String(v);
-}
-
 function fmtQuarter(periodEnd) {
   if (!periodEnd) return "—";
   const d = new Date(periodEnd);
@@ -289,85 +200,102 @@ function fmtQuarter(periodEnd) {
   const q = m <= 3 ? 1 : m <= 6 ? 2 : m <= 9 ? 3 : 4;
   return `Q${q} ${d.getUTCFullYear()}`;
 }
-
 function sortByPeriod(arr) {
-  return [...arr].sort((a, b) => {
-    const da = new Date(a.period_end).getTime();
-    const db = new Date(b.period_end).getTime();
-    return da - db;
-  });
+  return [...arr].sort((a, b) => new Date(a.period_end) - new Date(b.period_end));
 }
-
 function latestPerTicker(all) {
   const out = {};
   for (const t of TICKERS) {
-    const rows = all.filter(r => r.ticker === t);
-    const sorted = sortByPeriod(rows);
-    out[t] = sorted.length ? sorted[sorted.length - 1] : null;
+    const rows = sortByPeriod(all.filter(r => r.ticker === t));
+    out[t] = rows.length ? rows[rows.length - 1] : null;
   }
   return out;
 }
+function withinRange(periodEnd, rangeYears, latestDate) {
+  if (!periodEnd) return false;
+  if (rangeYears === "all") return true;
+  const d = new Date(periodEnd);
+  const cutoff = new Date(latestDate);
+  cutoff.setUTCFullYear(cutoff.getUTCFullYear() - rangeYears);
+  return d >= cutoff;
+}
 
-function priorPerTicker(all) {
-  const out = {};
-  for (const t of TICKERS) {
-    const rows = all.filter(r => r.ticker === t);
-    const sorted = sortByPeriod(rows);
-    out[t] = sorted.length >= 2 ? sorted[sorted.length - 2] : null;
+// -------------------------------------------------------------
+// Series builders
+// -------------------------------------------------------------
+function buildBaseSeries(records, metric) {
+  const buckets = {};
+  for (const r of records) {
+    const key = r.period_end;
+    if (!key) continue;
+    if (!buckets[key]) buckets[key] = { period_end: key, label: fmtQuarter(key) };
+    const v = r[metric];
+    buckets[key][r.ticker] = (v === undefined ? null : v);
   }
-  return out;
+  return Object.values(buckets).sort((a, b) => new Date(a.period_end) - new Date(b.period_end));
+}
+
+// brandKeys = ["legacy_hgv","diamond","bluegreen"] (default brand mode) or
+// ["originated","acquired_at_fv"] (cohort mode).
+function buildHgvSegmentSeries(records, metric, brandKeys) {
+  const buckets = {};
+  for (const r of records) {
+    const key = r.period_end;
+    if (!key) continue;
+    if (!buckets[key]) buckets[key] = { period_end: key, label: fmtQuarter(key) };
+    if (r.ticker === "HGV") continue;
+    const v = r[metric];
+    buckets[key][r.ticker] = (v === undefined ? null : v);
+  }
+  for (const r of records) {
+    if (r.ticker !== "HGV") continue;
+    const key = r.period_end;
+    if (!key) continue;
+    if (!buckets[key]) buckets[key] = { period_end: key, label: fmtQuarter(key) };
+    const segs = Array.isArray(r.segments) ? r.segments : [];
+    for (const sk of brandKeys) {
+      const seg = segs.find(s => s && s.segment_key === sk);
+      const v = seg ? seg[metric] : null;
+      buckets[key]["HGV_" + sk] = (v === undefined || v === null) ? null : v;
+    }
+  }
+  return Object.values(buckets).sort((a, b) => new Date(a.period_end) - new Date(b.period_end));
+}
+
+function pickYFmt(metricFmt) {
+  if (metricFmt === "pct") return (v) => `${(v * 100).toFixed(1)}%`;
+  if (metricFmt === "money") return (v) => `$${Math.round(v)}`;
+  if (metricFmt === "fico") return (v) => Math.round(v);
+  return (v) => v;
+}
+
+// True if any HGV record has at least one segment row carrying this metric.
+function hgvHasSegmentMetric(records, metric, brandKeys) {
+  for (const r of records) {
+    if (r.ticker !== "HGV") continue;
+    const segs = Array.isArray(r.segments) ? r.segments : [];
+    for (const sk of brandKeys) {
+      const seg = segs.find(s => s && s.segment_key === sk);
+      if (seg && seg[metric] !== null && seg[metric] !== undefined) return true;
+    }
+  }
+  return false;
 }
 
 // -------------------------------------------------------------
 // UI bits
 // -------------------------------------------------------------
-function Badge({ severity, children }) {
-  const color = SEV[severity] || SEV.CLEAN;
-  const bg = severity === "CRITICAL" ? "bg-[#FF3B3B]/15"
-           : severity === "WARNING"  ? "bg-[#FFB800]/15"
-           :                            "bg-[#00D48A]/15";
-  return (
-    <span className={`inline-block px-2 py-0.5 rounded text-[11px] mono font-semibold ${bg}`} style={{ color, border: `1px solid ${color}55` }}>
-      {children}
-    </span>
-  );
-}
-
-function Skeleton({ h = 120 }) {
-  return <div className="skel w-full" style={{ height: h }} />;
-}
-
-function SectionTitle({ children, right }) {
-  return (
-    <div className="flex items-baseline justify-between mb-3">
-      <h2 className="mono uppercase tracking-widest text-xs text-slate-400">{children}</h2>
-      {right && <div className="text-[11px] text-slate-500 mono">{right}</div>}
-    </div>
-  );
-}
-
 function Card({ children, className = "", style = {}, ...rest }) {
   return (
     <div
       className={`rounded-lg p-4 ${className}`}
       style={{ background: "var(--card)", border: "1px solid var(--border)", ...style }}
       {...rest}
-    >
-      {children}
-    </div>
+    >{children}</div>
   );
 }
 
-// -------------------------------------------------------------
-// Header
-// -------------------------------------------------------------
-function Header({ latest, flagCount }) {
-  const periodEnds = Object.values(latest).filter(Boolean).map(r => r.period_end).filter(Boolean).sort();
-  const latestPeriod = periodEnds.length ? periodEnds[periodEnds.length - 1] : null;
-  const parsedAt = (() => {
-    const ts = Object.values(latest).filter(Boolean).map(r => r.extracted_at).filter(Boolean).sort();
-    return ts.length ? ts[ts.length - 1] : null;
-  })();
+function Header({ latestPeriod, parsedAt }) {
   return (
     <div data-testid="hdr" className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-6">
       <div>
@@ -380,580 +308,171 @@ function Header({ latest, flagCount }) {
           <span style={{ color: COLORS.TNL }}>TNL</span>
         </div>
       </div>
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="text-[11px] mono text-slate-400">
-          <div>Latest period: <span className="text-slate-200">{latestPeriod ? fmtQuarter(latestPeriod) : "—"}</span></div>
-          <div>Parsed: <span className="text-slate-200">{parsedAt || "never"}</span></div>
-        </div>
-        <span
-          data-testid="active-flags-count"
-          className="mono text-xs font-semibold px-3 py-1 rounded-full"
-          style={{
-            background: flagCount > 0 ? "#FF3B3B22" : "#00D48A22",
-            border: `1px solid ${flagCount > 0 ? "#FF3B3B" : "#00D48A"}55`,
-            color: flagCount > 0 ? "#FF3B3B" : "#00D48A"
-          }}
-        >
-          {flagCount} active flag{flagCount === 1 ? "" : "s"}
-        </span>
+      <div className="text-[11px] mono text-slate-400">
+        <div>As of: <span className="text-slate-200">{latestPeriod ? fmtQuarter(latestPeriod) : "—"}</span></div>
+        <div>Parsed: <span className="text-slate-200">{parsedAt || "never"}</span></div>
       </div>
     </div>
   );
 }
 
-// -------------------------------------------------------------
-// Flag panel
-// -------------------------------------------------------------
-function FlagPanel({ flags, loading }) {
-  const panelRef = useRef(null);
-  const hasCritical = flags.some(f => f.severity === "CRITICAL");
-  useEffect(() => {
-    if (hasCritical && panelRef.current) {
-      try { panelRef.current.scrollIntoView({ behavior: "smooth", block: "start" }); } catch (_) {}
-    }
-  }, [hasCritical]);
-
+function Cell({ label, value, sev }) {
+  const color = sev === "CRITICAL" ? SEV.CRITICAL : sev === "WARNING" ? SEV.WARNING : "#E5E7EB";
   return (
-    <div data-testid="flag-panel" ref={panelRef} className="mb-6">
-      <SectionTitle right={flags.length ? `${flags.filter(f=>f.severity==="CRITICAL").length} critical · ${flags.filter(f=>f.severity==="WARNING").length} warning` : null}>
-        Red-flag panel
-      </SectionTitle>
-      <Card style={{ borderColor: hasCritical ? "#FF3B3B" : "var(--border)", boxShadow: hasCritical ? "0 0 0 1px #FF3B3B inset" : "none" }}>
-        {loading ? <Skeleton h={100} /> : flags.length === 0 ? (
-          <div className="text-sm text-slate-400">
-            No thresholds tripped. All three issuers are within tolerance based on the most recent filing.
-          </div>
-        ) : (
-          <div className="scroll-x">
-            <table className="w-full text-xs mono">
-              <thead className="text-slate-500 uppercase text-[10px] tracking-widest">
-                <tr>
-                  <th className="text-left py-2 pr-3">Sev</th>
-                  <th className="text-left py-2 pr-3">Ticker</th>
-                  <th className="text-left py-2 pr-3">Metric</th>
-                  <th className="text-right py-2 pr-3">Value</th>
-                  <th className="text-right py-2 pr-3">Threshold</th>
-                  <th className="text-left py-2">Consequence</th>
-                </tr>
-              </thead>
-              <tbody>
-                {flags.map((f, i) => (
-                  <tr key={i} className="border-t" style={{ borderColor: "var(--border)" }}>
-                    <td className="py-2 pr-3"><Badge severity={f.severity}>{f.severity}</Badge></td>
-                    <td className="py-2 pr-3" style={{ color: COLORS[f.ticker] }}>{f.ticker}</td>
-                    <td className="py-2 pr-3 text-slate-300">{METRIC_LABEL[f.metric] || f.metric}</td>
-                    <td className="py-2 pr-3 text-right text-slate-100">{fmtValue(f.metric, f.value)}</td>
-                    <td className="py-2 pr-3 text-right text-slate-400">{f.threshold}</td>
-                    <td className="py-2 text-slate-300 min-w-[220px]">{f.consequence}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
-    </div>
+    <>
+      <div className="text-slate-500">{label}</div>
+      <div className="mono text-right" style={{ color }}>{value}</div>
+    </>
   );
 }
 
-// -------------------------------------------------------------
-// KPI scorecard
-// -------------------------------------------------------------
-const KPI_ROWS = [
-  "net_receivables_mm",
-  "delinquent_total_pct",
-  "delinquent_90_plus_days_pct",
-  "allowance_coverage_pct",
-  "provision_mm",
-  "originations_mm",
-  "gain_on_sale_margin_pct",
-  "weighted_avg_fico_origination"
-];
-
-function Delta({ metric, cur, prev }) {
-  if (cur === null || cur === undefined || prev === null || prev === undefined) {
-    return <span className="text-slate-600 mono text-[10px]">—</span>;
-  }
-  const d = cur - prev;
-  if (d === 0) return <span className="text-slate-500 mono text-[10px]">0</span>;
-  const up = d > 0;
-  const good = GOOD_DIR[metric] || 0;
-  const isGood = good === 0 ? null : (good === 1 ? up : !up);
-  const color = isGood === null ? "#94A3B8" : isGood ? "#00D48A" : "#FF6B6B";
-  const arrow = up ? "▲" : "▼";
-  const show = metric.endsWith("_pct") || metric.endsWith("_change_pct")
-    ? (Math.abs(d) * 100).toFixed(2) + " pp"
-    : Math.abs(d).toLocaleString(undefined, { maximumFractionDigits: metric === "weighted_avg_fico_origination" ? 0 : 2 });
-  return <span className="mono text-[10px]" style={{ color }}>{arrow} {show}</span>;
-}
-
-function KpiRow({ metric, rec, prev }) {
-  const val = rec ? rec[metric] : null;
-  const sev = rec ? classifyMetric(metric, val) : "CLEAN";
-  const bg = sev === "CRITICAL" ? "#FF3B3B22" : sev === "WARNING" ? "#FFB80022" : "transparent";
-  const border = sev === "CRITICAL" ? "#FF3B3B55" : sev === "WARNING" ? "#FFB80055" : "var(--border)";
+function SnapshotStrip({ latest }) {
   return (
-    <div className="flex items-center justify-between py-2 border-b" style={{ borderColor: "var(--border)" }}>
-      <div className="text-[11px] text-slate-400">{METRIC_LABEL[metric]}</div>
-      <div className="flex items-center gap-2">
-        <Delta metric={metric} cur={val} prev={prev ? prev[metric] : null} />
-        <span
-          className="mono text-xs font-semibold px-2 py-0.5 rounded"
-          style={{ background: bg, border: `1px solid ${border}`, color: sev === "CLEAN" ? "#E5E7EB" : (sev === "CRITICAL" ? "#FF3B3B" : "#FFB800") }}
-        >
-          {fmtValue(metric, val)}
-        </span>
-      </div>
-    </div>
-  );
-}
-
-function Scorecard({ latest, prior, loading }) {
-  return (
-    <div className="mb-6">
-      <SectionTitle right="Current vs. prior quarter">KPI scorecard</SectionTitle>
-      <div data-testid="kpi-scorecard" className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {TICKERS.map(t => (
+    <div data-testid="snapshot-strip" className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+      {TICKERS.map(t => {
+        const r = latest[t];
+        const sev = tickerSeverity(r);
+        const sevColor = sev === "CRITICAL" ? SEV.CRITICAL : sev === "WARNING" ? SEV.WARNING : SEV.CLEAN;
+        const flagged = !!(r && r.management_flagged_credit_concerns);
+        return (
           <div
             key={t}
             data-ticker={t}
-            className="rounded-lg"
+            className="rounded-lg p-4"
             style={{ background: "var(--card)", border: "1px solid var(--border)", borderTop: `3px solid ${COLORS[t]}` }}
           >
-            <div className="px-4 pt-3 pb-2 flex items-baseline justify-between">
+            <div className="flex items-baseline justify-between mb-3">
               <div className="mono font-bold text-lg" style={{ color: COLORS[t] }}>{t}</div>
-              <div className="mono text-[10px] text-slate-500">
-                {latest[t] ? fmtQuarter(latest[t].period_end) : "no data"}
+              <div className="flex items-center gap-2">
+                {flagged && (
+                  <span className="mono text-[10px] font-semibold px-2 py-0.5 rounded"
+                        style={{ background: "#FF3B3B22", border: "1px solid #FF3B3B55", color: "#FF3B3B" }}>
+                    Mgmt flagged
+                  </span>
+                )}
+                <span className="mono text-[10px] font-semibold px-2 py-0.5 rounded"
+                      style={{ background: `${sevColor}22`, border: `1px solid ${sevColor}55`, color: sevColor }}>
+                  {sev}
+                </span>
               </div>
             </div>
-            <div className="px-4 pb-3">
-              {loading ? <Skeleton h={220} /> : KPI_ROWS.map(m => (
-                <KpiRow key={m} metric={m} rec={latest[t]} prev={prior[t]} />
-              ))}
-            </div>
+            {!r ? (
+              <div className="text-[12px] text-slate-500">No filings yet.</div>
+            ) : (
+              <div className="grid grid-cols-2 gap-y-2 gap-x-3 text-[11px]">
+                <Cell label="90+ DPD"      value={fmtPct(r.delinquent_90_plus_days_pct)}
+                      sev={classifyMetric("delinquent_90_plus_days_pct", r.delinquent_90_plus_days_pct)} />
+                <Cell label="Total DPD"    value={fmtPct(r.delinquent_total_pct)}
+                      sev={classifyMetric("delinquent_total_pct", r.delinquent_total_pct)} />
+                <Cell label="Coverage"     value={fmtPct(r.allowance_coverage_pct)}
+                      sev={classifyMetric("allowance_coverage_pct", r.allowance_coverage_pct)} />
+                <Cell label="Wtd FICO"     value={fmtFico(r.weighted_avg_fico_origination)}
+                      sev={classifyMetric("weighted_avg_fico_origination", r.weighted_avg_fico_origination)} />
+                <Cell label="FICO <600"    value={fmtPct(r.fico_below_600_pct)}
+                      sev={classifyMetric("fico_below_600_pct", r.fico_below_600_pct)} />
+                <Cell label="Period"       value={fmtQuarter(r.period_end)} />
+              </div>
+            )}
           </div>
-        ))}
-      </div>
+        );
+      })}
     </div>
   );
 }
 
-// -------------------------------------------------------------
-// Charts grid
-// -------------------------------------------------------------
-function buildTimeSeries(records, metric) {
-  // one row per period_end; columns per ticker
-  const buckets = {};
-  for (const r of records) {
-    const key = r.period_end;
-    if (!key) continue;
-    if (!buckets[key]) buckets[key] = { period_end: key, label: fmtQuarter(key) };
-    buckets[key][r.ticker] = r[metric];
-  }
-  return Object.values(buckets).sort((a, b) => new Date(a.period_end) - new Date(b.period_end));
-}
+function MetricChart({ metric, records, range, latestDate, hgvBreakdown, cohortMode }) {
+  const filtered = useMemo(
+    () => records.filter(r => withinRange(r.period_end, range, latestDate)),
+    [records, range, latestDate]
+  );
 
-function ChartCard({ title, children, testAttr = "1", placeholder }) {
+  const brandKeys = cohortMode === "cohort"
+    ? ["originated", "acquired_at_fv"]
+    : ["legacy_hgv", "diamond", "bluegreen"];
+
+  const hasHgvSegment = useMemo(
+    () => hgvBreakdown && hgvHasSegmentMetric(filtered, metric.key, brandKeys),
+    [filtered, metric.key, hgvBreakdown, brandKeys.join(",")]
+  );
+
+  const data = useMemo(() => (
+    hasHgvSegment
+      ? buildHgvSegmentSeries(filtered, metric.key, brandKeys)
+      : buildBaseSeries(filtered, metric.key)
+  ), [filtered, metric.key, hasHgvSegment, brandKeys.join(",")]);
+
+  const yFmt = pickYFmt(metric.fmt);
+  const axisProps = {
+    stroke: "#475569",
+    tick: { fill: "#94A3B8", fontSize: 10, fontFamily: "ui-monospace, monospace" },
+    tickLine: { stroke: "#475569" },
+    axisLine: { stroke: "#1F2937" }
+  };
+
+  const empty = data.length === 0;
+  const noHgvSeg = hgvBreakdown && !hasHgvSegment;
+
   return (
-    <div data-chart={testAttr} className="rounded-lg p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-      <div className="mono text-[11px] uppercase tracking-widest text-slate-400 mb-2 px-1">{title}</div>
+    <div data-chart={metric.key} data-testid="chart-card" className="rounded-lg p-3"
+         style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+      <div className="flex items-baseline justify-between mb-2 px-1">
+        <div className="mono text-[11px] uppercase tracking-widest text-slate-400">{metric.label}</div>
+        {noHgvSeg && (
+          <div className="mono text-[10px] text-slate-500">HGV: n/a</div>
+        )}
+      </div>
       <div className="chart-wrap">
-        {placeholder ? (
-          <div className="h-full w-full flex items-center justify-center text-[11px] text-slate-500 text-center px-4">
-            {placeholder}
-          </div>
-        ) : children}
-      </div>
-    </div>
-  );
-}
-
-const axisProps = {
-  stroke: "#475569",
-  tick: { fill: "#94A3B8", fontSize: 11, fontFamily: "ui-monospace, monospace" },
-  tickLine: { stroke: "#475569" },
-  axisLine: { stroke: "#1F2937" }
-};
-
-function TSChart({ data, refLines = [], yFmt = (v) => v, yDomain }) {
-  if (!data.length) return null;
-  return (
-    <ResponsiveContainer width="100%" height="100%">
-      <LineChart data={data} margin={{ top: 5, right: 12, left: 0, bottom: 0 }}>
-        <CartesianGrid stroke="#1F2937" vertical={false} />
-        <XAxis dataKey="label" {...axisProps} />
-        <YAxis {...axisProps} domain={yDomain} tickFormatter={yFmt} width={56} />
-        <Tooltip
-          contentStyle={{ background: "#0A0E1A", border: "1px solid #1F2937", fontFamily: "ui-monospace, monospace", fontSize: 12 }}
-          labelStyle={{ color: "#94A3B8" }}
-          formatter={(v, name) => [v === null || v === undefined ? "—" : yFmt(v), name]}
-        />
-        <Legend wrapperStyle={{ fontSize: 11, fontFamily: "ui-monospace, monospace", color: "#94A3B8" }} />
-        {refLines.map((r, i) => (
-          <ReferenceLine key={i} y={r.y} stroke={r.color} strokeDasharray="3 3" label={{ value: r.label, fill: r.color, fontSize: 10, position: "insideTopRight" }} />
-        ))}
-        {TICKERS.map(t => (
-          <Line key={t} type="monotone" dataKey={t} name={t} stroke={COLORS[t]} strokeWidth={2} dot={{ r: 2 }} activeDot={{ r: 4 }} connectNulls />
-        ))}
-      </LineChart>
-    </ResponsiveContainer>
-  );
-}
-
-function OriginationsChart({ data }) {
-  if (!data.length) return null;
-  return (
-    <ResponsiveContainer width="100%" height="100%">
-      <BarChart data={data} margin={{ top: 5, right: 12, left: 0, bottom: 0 }}>
-        <CartesianGrid stroke="#1F2937" vertical={false} />
-        <XAxis dataKey="label" {...axisProps} />
-        <YAxis {...axisProps} width={56} tickFormatter={(v) => `$${v}`} />
-        <Tooltip
-          contentStyle={{ background: "#0A0E1A", border: "1px solid #1F2937", fontFamily: "ui-monospace, monospace", fontSize: 12 }}
-          formatter={(v, name) => [fmtMoney(v), name]}
-        />
-        <Legend wrapperStyle={{ fontSize: 11, fontFamily: "ui-monospace, monospace", color: "#94A3B8" }} />
-        {TICKERS.map(t => (
-          <Bar key={t} dataKey={t} fill={COLORS[t]} />
-        ))}
-      </BarChart>
-    </ResponsiveContainer>
-  );
-}
-
-function FicoMixChart({ latest }) {
-  // stacked bar per ticker: below_600 / 600-700 (inferred) / 700+
-  const data = TICKERS.map(t => {
-    const r = latest[t];
-    if (!r) return { ticker: t, below_600: null, mid: null, plus_700: null };
-    const lo = r.fico_below_600_pct;
-    const hi = r.fico_700_plus_pct;
-    const mid = (lo !== null && lo !== undefined && hi !== null && hi !== undefined) ? Math.max(0, 1 - lo - hi) : null;
-    return {
-      ticker: t,
-      below_600: (lo !== null && lo !== undefined) ? lo * 100 : null,
-      mid: (mid !== null) ? mid * 100 : null,
-      plus_700: (hi !== null && hi !== undefined) ? hi * 100 : null
-    };
-  });
-  const anyData = data.some(d => d.below_600 !== null || d.mid !== null || d.plus_700 !== null);
-  if (!anyData) return null;
-  return (
-    <ResponsiveContainer width="100%" height="100%">
-      <BarChart data={data} layout="vertical" margin={{ top: 5, right: 12, left: 0, bottom: 0 }}>
-        <CartesianGrid stroke="#1F2937" horizontal={false} />
-        <XAxis type="number" {...axisProps} tickFormatter={(v) => `${v}%`} domain={[0, 100]} />
-        <YAxis type="category" dataKey="ticker" {...axisProps} width={46} />
-        <Tooltip
-          contentStyle={{ background: "#0A0E1A", border: "1px solid #1F2937", fontFamily: "ui-monospace, monospace", fontSize: 12 }}
-          formatter={(v, name) => [v === null ? "—" : `${v.toFixed(1)}%`, name]}
-        />
-        <Legend wrapperStyle={{ fontSize: 11, fontFamily: "ui-monospace, monospace", color: "#94A3B8" }} />
-        <Bar dataKey="below_600" stackId="a" name="<600" fill="#FF3B3B" />
-        <Bar dataKey="mid"        stackId="a" name="600-700" fill="#FFB800" />
-        <Bar dataKey="plus_700"   stackId="a" name="700+" fill="#00D48A" />
-      </BarChart>
-    </ResponsiveContainer>
-  );
-}
-
-function ChartsGrid({ all, latest, loading }) {
-  const hasData = all.length > 0;
-  const tsDPD = useMemo(() => buildTimeSeries(all, "delinquent_total_pct"), [all]);
-  const ts90  = useMemo(() => buildTimeSeries(all, "delinquent_90_plus_days_pct"), [all]);
-  const tsCov = useMemo(() => buildTimeSeries(all, "allowance_coverage_pct"), [all]);
-  const tsOri = useMemo(() => buildTimeSeries(all, "originations_mm"), [all]);
-  const tsGoS = useMemo(() => buildTimeSeries(all, "gain_on_sale_margin_pct"), [all]);
-
-  const pctFmt = (v) => `${(v * 100).toFixed(1)}%`;
-  const placeholder = !hasData ? "Awaiting first filing." : null;
-
-  return (
-    <div className="mb-6">
-      <SectionTitle>Charts</SectionTitle>
-      <div data-testid="charts-grid" className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <ChartCard title="Total Delinquency %" testAttr="dpd-total" placeholder={loading ? null : placeholder}>
-          {loading ? <Skeleton h={220} /> : (
-            <TSChart data={tsDPD} yFmt={pctFmt}
-              refLines={[{ y: 0.10, color: SEV.WARNING, label: "10% warn" }, { y: 0.15, color: SEV.CRITICAL, label: "15% crit" }]}
-            />
-          )}
-        </ChartCard>
-        <ChartCard title="90+ DPD %" testAttr="dpd-90" placeholder={loading ? null : placeholder}>
-          {loading ? <Skeleton h={220} /> : (
-            <TSChart data={ts90} yFmt={pctFmt}
-              refLines={[{ y: 0.05, color: SEV.WARNING, label: "5% warn" }, { y: 0.07, color: SEV.CRITICAL, label: "7% crit" }]}
-            />
-          )}
-        </ChartCard>
-        <ChartCard title="Allowance Coverage %" testAttr="cov" placeholder={loading ? null : placeholder}>
-          {loading ? <Skeleton h={220} /> : (
-            <TSChart data={tsCov} yFmt={pctFmt}
-              refLines={[{ y: 0.12, color: SEV.WARNING, label: "12% warn" }, { y: 0.10, color: SEV.CRITICAL, label: "10% crit" }]}
-            />
-          )}
-        </ChartCard>
-        <ChartCard title="Origination Volume ($mm)" testAttr="ori" placeholder={loading ? null : placeholder}>
-          {loading ? <Skeleton h={220} /> : <OriginationsChart data={tsOri} />}
-        </ChartCard>
-        <ChartCard title="Gain-on-Sale Margin %" testAttr="gos" placeholder={loading ? null : placeholder}>
-          {loading ? <Skeleton h={220} /> : (
-            <TSChart data={tsGoS} yFmt={pctFmt}
-              refLines={[{ y: 0.05, color: SEV.CRITICAL, label: "5% crit" }]}
-            />
-          )}
-        </ChartCard>
-        <ChartCard title="FICO Mix (most recent)" testAttr="fico" placeholder={loading ? null : placeholder}>
-          {loading ? <Skeleton h={220} /> : <FicoMixChart latest={latest} />}
-        </ChartCard>
-      </div>
-    </div>
-  );
-}
-
-// -------------------------------------------------------------
-// Vintage loss curves
-// -------------------------------------------------------------
-function inferQuarterDate(asOf) {
-  // fallback if as_of_period missing: treat as Q4
-  const d = new Date(asOf);
-  if (Number.isNaN(d.getTime())) return null;
-  return d;
-}
-
-function monthsBetween(dateA, yearB) {
-  // months from Q4 yearB (assumed Dec 31) to dateA
-  if (!dateA) return null;
-  const q4 = new Date(Date.UTC(yearB, 11, 31));
-  const months = (dateA.getUTCFullYear() - q4.getUTCFullYear()) * 12 + (dateA.getUTCMonth() - q4.getUTCMonth());
-  return months;
-}
-
-function VintagePanel({ all, loading }) {
-  const hasVintages = all.some(r => r.vintage_pools && Array.isArray(r.vintage_pools) && r.vintage_pools.length);
-  // Build: for each vintage year, list of { monthsSinceOrig, cumDefaultPct } across records
-  const { series, warnYear } = useMemo(() => {
-    if (!hasVintages) return { series: [], warnYear: null };
-    const byYear = {};
-    for (const rec of all) {
-      const asOf = inferQuarterDate(rec.period_end || rec.as_of_period);
-      if (!asOf) continue;
-      if (!rec.vintage_pools) continue;
-      for (const v of rec.vintage_pools) {
-        if (v.vintage_year === null || v.vintage_year === undefined) continue;
-        const months = monthsBetween(asOf, v.vintage_year);
-        if (months === null || months < 0) continue;
-        const val = v.cumulative_default_rate_pct;
-        if (val === null || val === undefined) continue;
-        if (!byYear[v.vintage_year]) byYear[v.vintage_year] = [];
-        byYear[v.vintage_year].push({ months, value: val * 100 });
-      }
-    }
-    const years = Object.keys(byYear).map(y => Number(y)).sort((a, b) => a - b);
-    // merge into shared x-axis points
-    const allMonths = Array.from(new Set(Object.values(byYear).flat().map(p => p.months))).sort((a, b) => a - b);
-    const rows = allMonths.map(m => {
-      const row = { months: m, label: `${m}m` };
-      for (const y of years) {
-        const match = byYear[y].find(p => p.months === m);
-        row[y] = match ? match.value : null;
-      }
-      return row;
-    });
-    // Warn if latest vintage tracks above older vintages at equal age
-    let warnYear = null;
-    if (years.length >= 2) {
-      const newest = years[years.length - 1];
-      const newestPts = byYear[newest];
-      for (const pt of newestPts) {
-        for (const oldY of years.slice(0, -1)) {
-          const oldMatch = byYear[oldY].find(p => p.months === pt.months);
-          if (oldMatch && pt.value > oldMatch.value) { warnYear = newest; break; }
-        }
-        if (warnYear) break;
-      }
-    }
-    return { series: rows, warnYear };
-  }, [all, hasVintages]);
-
-  return (
-    <div data-testid="vintages" className="mb-6">
-      <SectionTitle>Vintage loss curves</SectionTitle>
-      <Card>
-        {loading ? <Skeleton h={240} /> : !hasVintages ? (
-          <div className="text-sm text-slate-400">
-            Vintage data not disclosed. Lack of static pool transparency is itself a monitoring concern.
+        {empty ? (
+          <div className="h-full w-full flex items-center justify-center text-[11px] text-slate-500">
+            No data in range.
           </div>
         ) : (
-          <>
-            {warnYear && (
-              <div className="text-[#FF3B3B] text-xs mono mb-2">⚠ {warnYear} vintage tracking above prior curves</div>
-            )}
-            <div className="chart-wrap" style={{ height: 300 }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={series} margin={{ top: 5, right: 12, left: 0, bottom: 0 }}>
-                  <CartesianGrid stroke="#1F2937" vertical={false} />
-                  <XAxis dataKey="label" {...axisProps} />
-                  <YAxis {...axisProps} tickFormatter={(v) => `${v.toFixed(1)}%`} width={56} />
-                  <Tooltip
-                    contentStyle={{ background: "#0A0E1A", border: "1px solid #1F2937", fontSize: 12, fontFamily: "ui-monospace, monospace" }}
-                    formatter={(v) => v === null ? "—" : `${Number(v).toFixed(2)}%`}
-                  />
-                  <Legend wrapperStyle={{ fontSize: 11, fontFamily: "ui-monospace, monospace", color: "#94A3B8" }} />
-                  {Object.keys(series[0] || {}).filter(k => k !== "months" && k !== "label").map((year, i) => {
-                    const palette = ["#00A3FF", "#FF6B35", "#00D48A", "#FFB800", "#B27DFF", "#FF3B3B"];
-                    return <Line key={year} type="monotone" dataKey={year} name={`${year} vintage`} stroke={palette[i % palette.length]} strokeWidth={2} connectNulls dot={{ r: 2 }} />;
-                  })}
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          </>
-        )}
-      </Card>
-    </div>
-  );
-}
-
-// -------------------------------------------------------------
-// Peer comparison table
-// -------------------------------------------------------------
-const PEER_COLS = [
-  { key: "ticker", label: "Ticker", fmt: (r) => r.ticker, align: "left" },
-  { key: "period_end", label: "Period", fmt: (r) => fmtQuarter(r.period_end), align: "left" },
-  { key: "net_receivables_mm", label: "Net recv ($mm)", fmt: (r) => fmtMoney(r.net_receivables_mm), align: "right" },
-  { key: "delinquent_total_pct", label: "Total DPD", fmt: (r) => fmtPct(r.delinquent_total_pct), align: "right", classify: true },
-  { key: "delinquent_90_plus_days_pct", label: "90+ DPD", fmt: (r) => fmtPct(r.delinquent_90_plus_days_pct), align: "right", classify: true },
-  { key: "allowance_coverage_pct", label: "Coverage", fmt: (r) => fmtPct(r.allowance_coverage_pct), align: "right", classify: true },
-  { key: "gain_on_sale_margin_pct", label: "GoS margin", fmt: (r) => fmtPct(r.gain_on_sale_margin_pct), align: "right", classify: true },
-  { key: "weighted_avg_fico_origination", label: "Wtd FICO", fmt: (r) => fmtNum(Math.round(r.weighted_avg_fico_origination)), align: "right", classify: true }
-];
-
-function PeerTable({ latest, loading }) {
-  const [sortKey, setSortKey] = useState("ticker");
-  const [sortDir, setSortDir] = useState("asc");
-  const baseTicker = "HGV";
-
-  const rows = useMemo(() => {
-    const list = TICKERS.map(t => latest[t]).filter(Boolean);
-    return [...list].sort((a, b) => {
-      const av = a[sortKey]; const bv = b[sortKey];
-      if (av === undefined && bv === undefined) return 0;
-      if (av === undefined || av === null) return 1;
-      if (bv === undefined || bv === null) return -1;
-      if (av < bv) return sortDir === "asc" ? -1 : 1;
-      if (av > bv) return sortDir === "asc" ? 1 : -1;
-      return 0;
-    });
-  }, [latest, sortKey, sortDir]);
-
-  function toggle(k) {
-    if (sortKey === k) setSortDir(d => d === "asc" ? "desc" : "asc");
-    else { setSortKey(k); setSortDir("asc"); }
-  }
-
-  const base = latest[baseTicker];
-
-  return (
-    <div className="mb-6">
-      <SectionTitle right={base ? `Δ columns vs. ${baseTicker}` : null}>Peer comparison</SectionTitle>
-      <Card>
-        {loading ? <Skeleton h={180} /> : (
-          <div className="scroll-x" data-testid="peer-table">
-            <table className="w-full text-xs mono">
-              <thead className="text-slate-500 uppercase text-[10px] tracking-widest">
-                <tr>
-                  {PEER_COLS.map(c => (
-                    <th
-                      key={c.key}
-                      className={`sortable py-2 pr-3 text-${c.align === "right" ? "right" : "left"}`}
-                      onClick={() => toggle(c.key)}
-                    >
-                      {c.label}{sortKey === c.key ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
-                    </th>
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={data} margin={{ top: 5, right: 12, left: 0, bottom: 0 }}>
+              <CartesianGrid stroke="#1F2937" vertical={false} />
+              <XAxis dataKey="label" {...axisProps} minTickGap={20} />
+              <YAxis {...axisProps} tickFormatter={yFmt} width={56} />
+              <Tooltip
+                contentStyle={{ background: "#0A0E1A", border: "1px solid #1F2937", fontFamily: "ui-monospace, monospace", fontSize: 12 }}
+                labelStyle={{ color: "#94A3B8" }}
+                formatter={(v, name) => [v === null || v === undefined ? "—" : yFmt(v), name]}
+              />
+              <Legend wrapperStyle={{ fontSize: 10, fontFamily: "ui-monospace, monospace", color: "#94A3B8" }} />
+              {hasHgvSegment ? (
+                <>
+                  {brandKeys.map(sk => (
+                    <Line
+                      key={"HGV_" + sk}
+                      data-line={"HGV_" + sk}
+                      type="monotone"
+                      dataKey={"HGV_" + sk}
+                      name={"HGV " + sk.replace(/_/g, " ")}
+                      stroke={HGV_SEG_COLORS[sk] || COLORS.HGV}
+                      strokeDasharray={HGV_SEG_DASH[sk] || "0"}
+                      strokeWidth={2}
+                      dot={{ r: 1.5 }}
+                      connectNulls
+                    />
                   ))}
-                  <th className="py-2 pr-3 text-right">Δ vs HGV</th>
-                  <th className="py-2 text-right">Δ vs HGV (90+)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.length === 0 ? (
-                  <tr><td colSpan={PEER_COLS.length + 2} className="py-6 text-center text-slate-500">No records yet.</td></tr>
-                ) : rows.map(r => (
-                  <tr key={r.ticker} className="border-t" style={{ borderColor: "var(--border)" }}>
-                    {PEER_COLS.map(c => {
-                      let color = "#E5E7EB";
-                      if (c.classify && r[c.key] !== null && r[c.key] !== undefined) {
-                        const sev = classifyMetric(c.key, r[c.key]);
-                        color = sev === "CRITICAL" ? "#FF3B3B" : sev === "WARNING" ? "#FFB800" : "#E5E7EB";
-                      }
-                      if (c.key === "ticker") color = COLORS[r.ticker] || "#E5E7EB";
-                      return (
-                        <td key={c.key} className={`py-2 pr-3 text-${c.align === "right" ? "right" : "left"}`} style={{ color }}>
-                          {c.fmt(r)}
-                        </td>
-                      );
-                    })}
-                    <td className="py-2 pr-3 text-right text-slate-300">
-                      {base && r.delinquent_total_pct !== null && base.delinquent_total_pct !== null
-                        ? ((r.delinquent_total_pct - base.delinquent_total_pct) * 100).toFixed(2) + " pp"
-                        : "—"}
-                    </td>
-                    <td className="py-2 text-right text-slate-300">
-                      {base && r.delinquent_90_plus_days_pct !== null && base.delinquent_90_plus_days_pct !== null
-                        ? ((r.delinquent_90_plus_days_pct - base.delinquent_90_plus_days_pct) * 100).toFixed(2) + " pp"
-                        : "—"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
-    </div>
-  );
-}
-
-// -------------------------------------------------------------
-// Management commentary
-// -------------------------------------------------------------
-function Commentary({ latest, loading }) {
-  return (
-    <div className="mb-6">
-      <SectionTitle>Management commentary</SectionTitle>
-      <div data-testid="commentary" className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {loading ? TICKERS.map(t => <Skeleton key={t} h={140} />) : TICKERS.map(t => {
-          const r = latest[t];
-          const text = r && r.management_credit_commentary;
-          const flagged = !!(r && r.management_flagged_credit_concerns);
-          const style = flagged
-            ? { background: "#FF3B3B1A", border: "1px solid #FF3B3B55", borderLeft: "3px solid #FF3B3B" }
-            : { background: "var(--card)", border: "1px solid var(--border)", borderLeft: `3px solid ${COLORS[t]}` };
-          return (
-            <div key={t} className="rounded-lg p-4" style={style}>
-              <div className="flex items-center justify-between mb-2">
-                <div className="mono font-bold" style={{ color: COLORS[t] }}>{t}</div>
-                {flagged && <Badge severity="CRITICAL">Mgmt flagged</Badge>}
-              </div>
-              {text ? (
-                <div className="text-[12px] text-slate-300 leading-relaxed">{text}</div>
+                  {["VAC", "TNL"].map(t => (
+                    <Line key={t} type="monotone" dataKey={t} name={t}
+                      stroke={COLORS[t]} strokeWidth={2} dot={{ r: 1.5 }} connectNulls />
+                  ))}
+                </>
               ) : (
-                <div className="text-[12px] text-slate-500 italic">No commentary extracted yet.</div>
+                TICKERS.map(t => (
+                  <Line key={t} type="monotone" dataKey={t} name={t}
+                    stroke={COLORS[t]} strokeWidth={2} dot={{ r: 1.5 }} connectNulls />
+                ))
               )}
-              {r && r.period_end && (
-                <div className="mt-3 mono text-[10px] text-slate-500">{fmtQuarter(r.period_end)}</div>
-              )}
-            </div>
-          );
-        })}
+            </LineChart>
+          </ResponsiveContainer>
+        )}
       </div>
     </div>
   );
 }
 
-// -------------------------------------------------------------
-// Footer
-// -------------------------------------------------------------
 function Footer() {
   return (
     <div data-testid="footer" className="mt-10 pb-10 text-[11px] mono text-slate-500 leading-relaxed">
@@ -975,10 +494,20 @@ function Footer() {
 // -------------------------------------------------------------
 // App
 // -------------------------------------------------------------
+const RANGE_OPTIONS = [
+  { key: 1,     label: "1y" },
+  { key: 3,     label: "3y" },
+  { key: 5,     label: "5y" },
+  { key: "all", label: "all" },
+];
+
 function App() {
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState(null);
+  const [range, setRange] = useState(5);
+  const [hgvBreakdown, setHgvBreakdown] = useState(false);
+  const [cohortMode, setCohortMode] = useState("brand"); // "brand" | "cohort"
 
   useEffect(() => {
     let cancelled = false;
@@ -1003,32 +532,97 @@ function App() {
   }, []);
 
   const latest = useMemo(() => latestPerTicker(records), [records]);
-  const prior  = useMemo(() => priorPerTicker(records), [records]);
-  const flags  = useMemo(() => computeFlags(Object.values(latest).filter(Boolean)), [latest]);
+  const latestDate = useMemo(() => {
+    const ds = Object.values(latest).filter(Boolean).map(r => r.period_end).filter(Boolean).sort();
+    return ds.length ? ds[ds.length - 1] : null;
+  }, [latest]);
+  const parsedAt = useMemo(() => {
+    const ts = Object.values(latest).filter(Boolean).map(r => r.extracted_at).filter(Boolean).sort();
+    return ts.length ? ts[ts.length - 1] : null;
+  }, [latest]);
 
   const isEmpty = !loading && records.length === 0;
 
   return (
     <div className="max-w-[1400px] mx-auto px-4 py-5">
-      <Header latest={latest} flagCount={flags.length} />
+      <Header latestPeriod={latestDate} parsedAt={parsedAt} />
 
-      {isEmpty && (
-        <Card className="mb-6" style={{ borderColor: "#FFB80055" }}>
-          <div className="text-sm text-slate-300">
-            Data pipeline has not run yet. Paste credentials at{" "}
-            <a href="./admin/" className="underline">/timeshare-surveillance/admin/</a>{" "}
-            and wait for the next filing.
-            {err && <span className="block mt-2 text-[11px] text-slate-500">fetch status: {err}</span>}
+      {loading && (
+        <Card className="mb-6">
+          <div className="flex items-center gap-3 text-slate-300 text-sm">
+            <div className="spinner" />
+            <div>Loading filings…</div>
           </div>
         </Card>
       )}
 
-      <FlagPanel flags={flags} loading={loading} />
-      <Scorecard latest={latest} prior={prior} loading={loading} />
-      <ChartsGrid all={records} latest={latest} loading={loading} />
-      <VintagePanel all={records} loading={loading} />
-      <PeerTable latest={latest} loading={loading} />
-      <Commentary latest={latest} loading={loading} />
+      {isEmpty && (
+        <Card data-testid="empty-state" className="mb-6" style={{ borderColor: "#FFB80055" }}>
+          <div className="flex items-center gap-3">
+            <div className="spinner" />
+            <div className="text-sm text-slate-300">
+              Pipeline warming up — no filings ingested yet. The dashboard will populate as soon as
+              the first quarter lands.
+              {err && <span className="block mt-1 text-[11px] text-slate-500">fetch status: {err}</span>}
+            </div>
+          </div>
+        </Card>
+      )}
+
+      {!isEmpty && !loading && (
+        <>
+          <SnapshotStrip latest={latest} />
+
+          <div data-testid="ts-controls" className="flex flex-wrap items-center gap-3 mb-4">
+            <div className="flex items-center gap-1" data-testid="range-pills">
+              {RANGE_OPTIONS.map(o => (
+                <button
+                  key={o.label}
+                  data-range={o.label}
+                  className={`pill ${range === o.key ? "active" : ""}`}
+                  onClick={() => setRange(o.key)}
+                >{o.label}</button>
+              ))}
+            </div>
+            <div className="flex items-center gap-2 ml-2" data-testid="hgv-toggle">
+              <span className="text-[11px] text-slate-400 mono">HGV breakdown</span>
+              <div
+                role="switch"
+                aria-checked={hgvBreakdown}
+                className={`switch ${hgvBreakdown ? "on" : ""}`}
+                onClick={() => setHgvBreakdown(v => !v)}
+              />
+            </div>
+            {hgvBreakdown && (
+              <div className="flex items-center gap-1" data-testid="cohort-mode">
+                <button
+                  className={`pill ${cohortMode === "brand" ? "active" : ""}`}
+                  onClick={() => setCohortMode("brand")}
+                >by brand</button>
+                <button
+                  className={`pill ${cohortMode === "cohort" ? "active" : ""}`}
+                  onClick={() => setCohortMode("cohort")}
+                >acquisition cohort</button>
+              </div>
+            )}
+          </div>
+
+          <div data-testid="charts-grid" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+            {TS_METRICS.map(m => (
+              <MetricChart
+                key={m.key}
+                metric={m}
+                records={records}
+                range={range}
+                latestDate={latestDate}
+                hgvBreakdown={hgvBreakdown}
+                cohortMode={cohortMode}
+              />
+            ))}
+          </div>
+        </>
+      )}
+
       <Footer />
     </div>
   );

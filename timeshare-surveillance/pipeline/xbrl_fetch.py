@@ -104,14 +104,18 @@ def _fetch_network(cik: str) -> dict:
 
 
 def load_companyfacts(cik: str | int, fixture_path: Path | str | None = None) -> dict:
-    """Load companyfacts JSON from fixture or network.
+    """Load companyfacts JSON from fixture or network (via sec_cache).
 
-    `fixture_path` wins when provided; otherwise we hit SEC.
+    `fixture_path` wins when provided; otherwise we go through sec_cache so
+    the JSON is persisted to disk and reused on subsequent runs (TTL-gated).
     """
     if fixture_path:
         log.info("xbrl: loading companyfacts fixture %s", fixture_path)
         return _load_local(fixture_path)
-    return _fetch_network(str(cik))
+    # Late import keeps sec_cache importable from xbrl_fetch's own callers.
+    from pipeline import sec_cache  # noqa: PLC0415
+
+    return sec_cache.get_xbrl_facts(client=None, cik=str(cik), fetcher=_fetch_network)
 
 
 def _iter_fact_namespaces(cf: dict):

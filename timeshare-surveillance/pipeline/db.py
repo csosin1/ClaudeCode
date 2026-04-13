@@ -38,8 +38,11 @@ BOOKKEEPING_FIELDS = (
 )
 
 # Columns in filings (metric columns + bookkeeping). Used for UPSERT.
-_METRIC_COLS = [k for k in METRIC_SCHEMA.keys() if k != "vintage_pools"]
-_ALL_COLS = list(BOOKKEEPING_FIELDS) + _METRIC_COLS + ["vintage_pools"]
+# vintage_pools and segments are JSON TEXT blobs; every other metric is a
+# scalar column.
+_JSON_COLS = ("vintage_pools", "segments")
+_METRIC_COLS = [k for k in METRIC_SCHEMA.keys() if k not in _JSON_COLS]
+_ALL_COLS = list(BOOKKEEPING_FIELDS) + _METRIC_COLS + list(_JSON_COLS)
 
 
 def connect(db_path: Path | str) -> sqlite3.Connection:
@@ -52,11 +55,19 @@ def connect(db_path: Path | str) -> sqlite3.Connection:
 
 
 def init_db(db_path: Path | str) -> None:
-    """Create the filings table + indexes if they don't exist yet."""
+    """Create the filings table + indexes if they don't exist yet.
+
+    Also idempotently adds the `segments` column to pre-existing DBs created
+    before the segment-aware schema landed (SQLite doesn't support
+    `IF NOT EXISTS` on ADD COLUMN).
+    """
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     ddl = _SCHEMA_SQL.read_text()
     with connect(db_path) as conn:
         conn.executescript(ddl)
+        existing = {row[1] for row in conn.execute("PRAGMA table_info(filings)")}
+        if "segments" not in existing:
+            conn.execute("ALTER TABLE filings ADD COLUMN segments TEXT")
         conn.commit()
 
 
@@ -64,7 +75,7 @@ def _coerce_for_db(key: str, value):
     """Coerce a Python value into something SQLite can persist."""
     if value is None:
         return None
-    if key == "vintage_pools":
+    if key in _JSON_COLS:
         # Always store as JSON text; accept list-of-dicts or pre-serialised str.
         if isinstance(value, str):
             return value
@@ -113,15 +124,17 @@ def upsert_filing(db_path: Path | str, record: dict) -> None:
 
 def _row_to_record(row: sqlite3.Row) -> dict:
     d = dict(row)
-    # vintage_pools stored as JSON TEXT — deserialise; default [] when missing.
-    vp = d.get("vintage_pools")
-    if isinstance(vp, str):
-        try:
-            d["vintage_pools"] = json.loads(vp)
-        except (ValueError, TypeError):
-            d["vintage_pools"] = []
-    elif vp is None:
-        d["vintage_pools"] = []
+    # vintage_pools + segments stored as JSON TEXT — deserialise; default []
+    # when missing (NULL column on pre-segment rows).
+    for jk in _JSON_COLS:
+        raw = d.get(jk)
+        if isinstance(raw, str):
+            try:
+                d[jk] = json.loads(raw)
+            except (ValueError, TypeError):
+                d[jk] = []
+        elif raw is None:
+            d[jk] = []
     # Cast bool-ish integer columns back to Python bool/None.
     for bkey in ("management_flagged_credit_concerns", "dry_run", "extraction_error"):
         if bkey in d and d[bkey] is not None:

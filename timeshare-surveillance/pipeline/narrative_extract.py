@@ -48,6 +48,11 @@ def _strip_html(raw: str) -> str:
 _SECTION_WINDOW_BEFORE = 600
 _SECTION_WINDOW_AFTER = 11_400  # ~12k total incl. the "before" window
 
+# Segment tables often sit deep inside MD&A; widen the window so we catch
+# the full per-brand / per-cohort breakout, not just the anchor sentence.
+_SEGMENT_WINDOW_BEFORE = 2_000
+_SEGMENT_WINDOW_AFTER = 18_000
+
 
 def locate_sections(html: str) -> dict[str, str]:
     """Find the named sections in a filing; return {section: excerpt}.
@@ -63,11 +68,17 @@ def locate_sections(html: str) -> dict[str, str]:
         m = re.search(combined, text, flags=re.I)
         if not m:
             continue
-        start = max(0, m.start() - _SECTION_WINDOW_BEFORE)
-        end = min(len(text), m.start() + _SECTION_WINDOW_AFTER)
+        if section_name == "portfolio_segments":
+            before, after = _SEGMENT_WINDOW_BEFORE, _SEGMENT_WINDOW_AFTER
+            section_cap = cap * 2
+        else:
+            before, after = _SECTION_WINDOW_BEFORE, _SECTION_WINDOW_AFTER
+            section_cap = cap
+        start = max(0, m.start() - before)
+        end = min(len(text), m.start() + after)
         excerpt = text[start:end].strip()
-        if len(excerpt) > cap:
-            excerpt = excerpt[:cap]
+        if len(excerpt) > section_cap:
+            excerpt = excerpt[:section_cap]
         sections[section_name] = excerpt
 
     return sections
@@ -113,6 +124,18 @@ SECTION_FIELDS: dict[str, list[str]] = {
         "tour_flow_count",
         "vpg_dollars",
     ],
+    "portfolio_segments": [
+        "segments",
+    ],
+}
+
+
+# Canonical segment_keys accepted per ticker. Claude is instructed to use
+# only these and to fall back to `consolidated` if no breakdown is disclosed.
+CANONICAL_SEGMENT_KEYS: dict[str, list[str]] = {
+    "HGV": ["consolidated", "legacy_hgv", "diamond", "bluegreen", "originated", "acquired_at_fv"],
+    "VAC": ["consolidated", "marriott", "vistana", "welk"],
+    "TNL": ["consolidated", "club_wyndham", "margaritaville"],
 }
 
 
@@ -142,6 +165,8 @@ def _build_prompt(
     fields: list[str],
     excerpt: str,
 ) -> str:
+    if section_name == "portfolio_segments":
+        return _build_segments_prompt(ticker, filing_type, period_end, excerpt)
     schema_lines = "\n".join(f'  "{k}": {METRIC_SCHEMA.get(k, "")}' for k in fields)
     return (
         f"Issuer: {ticker}. Filing type: {filing_type}. Period ended: {period_end}.\n"
@@ -157,6 +182,66 @@ def _build_prompt(
         f"- vintage_pools: include every vintage year disclosed; "
         f"each entry {{vintage_year:int, original_balance_mm:float, "
         f"cumulative_default_rate_pct:float 0-1, as_of_period:str}}.\n\n"
+        f"Excerpt:\n-----\n{excerpt}\n-----"
+    )
+
+
+def _build_segments_prompt(
+    ticker: str,
+    filing_type: str,
+    period_end: str,
+    excerpt: str,
+) -> str:
+    """Segment extraction prompt.
+
+    Claude returns {"segments": [...]} with one entry per disclosed segment
+    (brand or acquisition cohort) plus a `consolidated` entry when a
+    consolidated total is reported.
+    """
+    allowed = CANONICAL_SEGMENT_KEYS.get(ticker.upper(), ["consolidated"])
+    allowed_list = ", ".join(f'"{k}"' for k in allowed)
+    return (
+        f"Issuer: {ticker}. Filing type: {filing_type}. Period ended: {period_end}.\n"
+        f"Section being analyzed: portfolio_segments.\n\n"
+        f"Extract one entry per disclosed receivables segment. Return:\n"
+        f"{{\n"
+        f'  "segments": [\n'
+        f"    {{\n"
+        f'      "segment_key": str,          // one of: {allowed_list}\n'
+        f'      "segment_label": str,        // human label, e.g. "Legacy-HGV"\n'
+        f'      "segment_type": str,         // "consolidated" | "brand" | "acquisition_cohort"\n'
+        f'      "gross_receivables_total_mm": float|null,\n'
+        f'      "allowance_for_loan_losses_mm": float|null,\n'
+        f'      "allowance_coverage_pct": float|null,\n'
+        f'      "provision_for_loan_losses_mm": float|null,\n'
+        f'      "delinquent_30_59_days_pct": float|null,\n'
+        f'      "delinquent_60_89_days_pct": float|null,\n'
+        f'      "delinquent_90_plus_days_pct": float|null,\n'
+        f'      "delinquent_total_pct": float|null,\n'
+        f'      "default_rate_annualized_pct": float|null,\n'
+        f'      "weighted_avg_fico_origination": int|null,\n'
+        f'      "fico_700_plus_pct": float|null,\n'
+        f'      "fico_below_600_pct": float|null,\n'
+        f'      "originations_mm": float|null,\n'
+        f'      "as_of_period": str          // ISO date, usually = period_end\n'
+        f"    }}\n"
+        f"  ]\n"
+        f"}}\n\n"
+        f"Rules:\n"
+        f"- Return a single JSON object with exactly the key `segments`.\n"
+        f"- No markdown fences, no commentary.\n"
+        f"- Use ONLY segment_key values from the allowed list above. Do not invent keys.\n"
+        f"- If the filing discloses a consolidated total, include a `consolidated` entry.\n"
+        f"- If the filing discloses brand-level breakouts (e.g. Legacy-HGV, Diamond, Bluegreen, "
+        f"Marriott Vacation Club, Vistana, Welk, Club Wyndham, Margaritaville), add one entry "
+        f"per brand with segment_type=\"brand\".\n"
+        f"- If the filing discloses originated vs acquired-at-fair-value cohorts, add entries "
+        f"with segment_type=\"acquisition_cohort\" and segment_key `originated` or "
+        f"`acquired_at_fv`.\n"
+        f"- Do NOT invent segments. If only a consolidated total is reported, return a single "
+        f"`consolidated` entry.\n"
+        f"- Any field within a segment not disclosed in this excerpt: null.\n"
+        f"- Percentages as decimals (7.1% -> 0.071). Dollar _mm fields in millions.\n\n"
         f"Excerpt:\n-----\n{excerpt}\n-----"
     )
 
@@ -194,7 +279,17 @@ def _call_claude(
     except json.JSONDecodeError:
         log.warning("PARSE_ERROR section=%s %s %s %s; nulling fields",
                     section_name, ticker, filing_type, period_end)
+        if section_name == "portfolio_segments":
+            return ({"segments": []}, usage)
         return ({k: None for k in fields}, usage)
+
+    if section_name == "portfolio_segments":
+        segs = parsed.get("segments")
+        if not isinstance(segs, list):
+            segs = []
+        # Defensive filter: drop entries with non-string segment_key.
+        segs = [s for s in segs if isinstance(s, dict) and isinstance(s.get("segment_key"), str)]
+        return ({"segments": segs}, usage)
 
     # Keep only requested keys; null the rest.
     out = {k: parsed.get(k, None) for k in fields}
@@ -225,6 +320,10 @@ def extract_from_sections(
             section_name, fields, excerpt,
         )
         for k, v in result.items():
+            # segments is section-scoped to portfolio_segments; never let
+            # another section overwrite it.
+            if k == "segments" and section_name != "portfolio_segments":
+                continue
             # First non-null wins (stable across sections; matches v1 merge).
             if merged.get(k) in (None, [], "") and v not in (None, [], ""):
                 merged[k] = v

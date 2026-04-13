@@ -19,6 +19,11 @@ SEEN_ACCESSIONS_JSON = DATA_DIR / "seen_accessions.json"
 FIXTURES_DIR = BASE_DIR / "pipeline" / "fixtures"
 SQLITE_DB_PATH = DATA_DIR / "surveillance.db"
 
+# Persistent on-disk cache of raw SEC responses. Survives redeploys so a
+# 5-year backfill never re-downloads — see pipeline/sec_cache.py.
+SEC_CACHE_DIR = DATA_DIR / "sec_cache"
+SEC_CACHE_XBRL_TTL_HOURS = int(os.environ.get("SEC_CACHE_XBRL_TTL_HOURS", "168"))
+
 LOG_DIR = Path("/var/log/timeshare-surveillance")
 LOG_FILE = LOG_DIR / "pipeline.log"
 
@@ -51,7 +56,7 @@ TARGETS = [
 EDGAR_USER_AGENT = "CAS Investment Partners research@casinvestmentpartners.com"
 EDGAR_RATE_LIMIT_PER_SEC = 8
 FILING_TYPES = ["10-K", "10-Q"]
-LOOKBACK_FILINGS = 4
+LOOKBACK_FILINGS = 25
 
 # ----- Anthropic -----
 
@@ -152,6 +157,13 @@ NARRATIVE_SECTION_PATTERNS: dict[str, list[str]] = {
         r"Critical Accounting",
         r"Credit Losses",
         r"Allowance for",
+    ],
+    "portfolio_segments": [
+        r"Legacy[- ]HGV", r"Legacy[- ]Diamond", r"Bluegreen",
+        r"Vistana", r"Welk", r"Margaritaville",
+        r"acquired\s+(?:timeshare|vacation)\s+(?:financing|receivable)",
+        r"originated\s+(?:timeshare|vacation)\s+(?:financing|receivable)",
+        r"portfolio\s+segment",
     ],
 }
 

@@ -5,12 +5,18 @@ const VIEWPORTS = [
   { name: 'desktop', width: 1280, height: 800 },
 ];
 
+const PREVIEW = '/timeshare-surveillance/preview/';
+
 for (const vp of VIEWPORTS) {
   test.describe(`Timeshare Surveillance (${vp.name} ${vp.width}x${vp.height})`, () => {
     test.use({ viewport: { width: vp.width, height: vp.height } });
 
-    test('dashboard loads at 200', async ({ page }) => {
-      const resp = await page.goto('/timeshare-surveillance/preview/');
+    test('dashboard loads at 200 with header + no console errors', async ({ page }) => {
+      const errors: string[] = [];
+      page.on('pageerror', (e) => errors.push(e.message));
+      page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+
+      const resp = await page.goto(PREVIEW);
       expect(resp?.status()).toBe(200);
       const hdr = page.getByTestId('hdr');
       await expect(hdr).toBeVisible();
@@ -18,46 +24,88 @@ for (const vp of VIEWPORTS) {
       await expect(hdr).toContainText('HGV');
       await expect(hdr).toContainText('VAC');
       await expect(hdr).toContainText('TNL');
-      // active-flags badge is present
-      await expect(page.getByTestId('active-flags-count')).toBeVisible();
-    });
 
-    test('KPI scorecard renders three ticker columns', async ({ page }) => {
-      await page.goto('/timeshare-surveillance/preview/');
-      const scorecard = page.getByTestId('kpi-scorecard');
-      await expect(scorecard).toBeVisible();
-      await expect(scorecard.locator('[data-ticker]')).toHaveCount(3);
-      await expect(scorecard.locator('[data-ticker="HGV"]')).toBeVisible();
-      await expect(scorecard.locator('[data-ticker="VAC"]')).toBeVisible();
-      await expect(scorecard.locator('[data-ticker="TNL"]')).toBeVisible();
-    });
-
-    test('charts grid has 6 chart containers', async ({ page }) => {
-      await page.goto('/timeshare-surveillance/preview/');
-      const grid = page.getByTestId('charts-grid');
-      await expect(grid).toBeVisible();
-      await expect(grid.locator('[data-chart]')).toHaveCount(6);
-    });
-
-    test('flag panel, peer table, vintages, commentary, and footer render', async ({ page }) => {
-      await page.goto('/timeshare-surveillance/preview/');
-      await expect(page.getByTestId('flag-panel')).toBeVisible();
-      await expect(page.getByTestId('peer-table')).toBeVisible();
-      await expect(page.getByTestId('vintages')).toBeVisible();
-      await expect(page.getByTestId('commentary')).toBeVisible();
-      await expect(page.getByTestId('footer')).toBeVisible();
-      await expect(page.getByTestId('footer')).toContainText('SEC EDGAR');
-      await expect(page.getByTestId('footer')).toContainText('https://casinv.dev/timeshare-surveillance/');
-    });
-
-    test('no JS console errors', async ({ page }) => {
-      const errors: string[] = [];
-      page.on('pageerror', (e) => errors.push(e.message));
-      page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
-      await page.goto('/timeshare-surveillance/preview/');
+      // Allow combined.json fetch errors when the pipeline hasn't ingested yet.
       await page.waitForLoadState('networkidle');
       const real = errors.filter((e) => !/favicon/i.test(e) && !/combined\.json/i.test(e));
       expect(real, `unexpected console errors: ${real.join('\n')}`).toEqual([]);
+    });
+
+    test('renders either snapshot+charts OR pipeline-warming-up state', async ({ page }) => {
+      await page.goto(PREVIEW);
+      await page.waitForLoadState('networkidle');
+
+      const empty = page.getByTestId('empty-state');
+      const charts = page.getByTestId('charts-grid');
+      const eitherVisible = await Promise.race([
+        empty.waitFor({ state: 'visible', timeout: 4000 }).then(() => 'empty').catch(() => null),
+        charts.waitFor({ state: 'visible', timeout: 4000 }).then(() => 'charts').catch(() => null),
+      ]);
+      expect(eitherVisible, 'expected either empty-state or charts-grid to be visible').not.toBeNull();
+    });
+
+    test('snapshot strip shows all 3 tickers when data is present', async ({ page }) => {
+      await page.goto(PREVIEW);
+      await page.waitForLoadState('networkidle');
+      const empty = page.getByTestId('empty-state');
+      if (await empty.isVisible().catch(() => false)) {
+        test.skip(true, 'pipeline not populated yet');
+      }
+      const strip = page.getByTestId('snapshot-strip');
+      await expect(strip).toBeVisible();
+      await expect(strip.locator('[data-ticker="HGV"]')).toBeVisible();
+      await expect(strip.locator('[data-ticker="VAC"]')).toBeVisible();
+      await expect(strip.locator('[data-ticker="TNL"]')).toBeVisible();
+    });
+
+    test('default range is 5y and grid renders 9 charts', async ({ page }) => {
+      await page.goto(PREVIEW);
+      await page.waitForLoadState('networkidle');
+      const empty = page.getByTestId('empty-state');
+      if (await empty.isVisible().catch(() => false)) {
+        test.skip(true, 'pipeline not populated yet');
+      }
+      const pill5y = page.locator('[data-range="5y"]');
+      await expect(pill5y).toHaveClass(/active/);
+
+      const cards = page.getByTestId('chart-card');
+      await expect(cards).toHaveCount(9);
+    });
+
+    test('switching range to 1y reduces or holds the visible x-axis tick count', async ({ page }) => {
+      await page.goto(PREVIEW);
+      await page.waitForLoadState('networkidle');
+      const empty = page.getByTestId('empty-state');
+      if (await empty.isVisible().catch(() => false)) {
+        test.skip(true, 'pipeline not populated yet');
+      }
+
+      const firstChart = page.getByTestId('chart-card').first();
+      const ticksAt5y = await firstChart.locator('.recharts-xAxis .recharts-cartesian-axis-tick').count();
+
+      await page.locator('[data-range="1y"]').click();
+      await expect(page.locator('[data-range="1y"]')).toHaveClass(/active/);
+      const ticksAt1y = await firstChart.locator('.recharts-xAxis .recharts-cartesian-axis-tick').count();
+
+      // Equal is acceptable on tiny datasets.
+      expect(ticksAt1y).toBeLessThanOrEqual(ticksAt5y);
+    });
+
+    test('toggling HGV breakdown adds at least 2 HGV-segment lines on a chart', async ({ page }) => {
+      await page.goto(PREVIEW);
+      await page.waitForLoadState('networkidle');
+      const empty = page.getByTestId('empty-state');
+      if (await empty.isVisible().catch(() => false)) {
+        test.skip(true, 'pipeline not populated yet');
+      }
+
+      const toggle = page.getByTestId('hgv-toggle').locator('.switch');
+      await toggle.click();
+      await expect(page.getByTestId('hgv-toggle').locator('.switch')).toHaveClass(/on/);
+
+      const segLines = page.locator('[data-line^="HGV_legacy_hgv"], [data-line^="HGV_diamond"], [data-line^="HGV_bluegreen"]');
+      const count = await segLines.count();
+      expect(count).toBeGreaterThanOrEqual(2);
     });
   });
 }
@@ -80,33 +128,26 @@ test.describe('Landing page link', () => {
   });
 });
 
-// XBRL-first refactor: combined.json must still be served alongside the
-// dashboard and must preserve the METRIC_SCHEMA shape the React code relies
-// on. These tests fetch combined.json directly (via the browser) and assert
-// structural properties without caring whether the pipeline ran against real
-// EDGAR data or the --dry-run stub path.
-test.describe('combined.json shape (XBRL-first refactor)', () => {
+test.describe('combined.json shape', () => {
   test('served at the expected URL with a JSON array body', async ({ page }) => {
     const resp = await page.goto('/timeshare-surveillance/preview/data/combined.json');
-    // 200 when the pipeline has run, 404 is also acceptable if nothing has
-    // landed yet — but when 200, the body must parse as an array.
     if (resp && resp.status() === 200) {
       const body = await resp.json();
       expect(Array.isArray(body)).toBeTruthy();
       if (body.length > 0) {
         const first = body[0];
-        // Every record carries at minimum these bookkeeping fields.
         for (const k of ['ticker', 'period_end', 'accession']) {
           expect(first).toHaveProperty(k);
         }
-        // And at least one METRIC_SCHEMA-style numeric key.
-        expect(first).toHaveProperty('gross_receivables_total_mm');
+        // Every record has a segments array (may be empty if not disclosed).
+        expect(first).toHaveProperty('segments');
+        expect(Array.isArray(first.segments)).toBeTruthy();
       }
     }
   });
 
-  test('dashboard HTML references ./data/combined.json (not a legacy path)', async ({ page }) => {
-    const resp = await page.goto('/timeshare-surveillance/preview/');
+  test('dashboard HTML references ./data/combined.json', async ({ page }) => {
+    const resp = await page.goto(PREVIEW);
     expect(resp?.status()).toBe(200);
     const html = await page.content();
     expect(html).toContain('data/combined.json');
