@@ -49,6 +49,8 @@ body{
 .badge-budget{background:#145a32;color:#82e0aa}
 .badge-mid{background:#4a235a;color:#bb8fce}
 .badge-premium{background:#641e16;color:#f1948a}
+.badge-public{background:#1e3a5f;color:#ffd166;border:1px solid #ffd166}
+.badge-unknown{background:#333;color:#888}
 select,input[type=number],input[type=password],input[type=text]{
   width:100%;padding:10px 12px;margin:6px 0 12px;
   border:1px solid var(--border);border-radius:8px;
@@ -141,6 +143,7 @@ label{font-size:.85rem;color:var(--text-dim);font-weight:600}
     <button class="country-btn" data-c="DE">DE</button>
   </div>
   <div id="mkt-summary" style="padding:8px 12px;color:var(--text-dim);font-size:.85rem"></div>
+  <div id="mkt-muni" data-testid="municipal-counter" style="padding:0 12px 8px;color:var(--text-dim);font-size:.85rem"></div>
   <div id="mkt-table-wrap" style="padding:0 12px 12px"></div>
 </div>
 
@@ -247,6 +250,12 @@ function classBadge(c) {
   return `<span class="badge badge-direct">${(c || 'unknown').replace(/_/g, ' ')}</span>`;
 }
 
+function ownershipPill(o) {
+  if (o === 'public') return '<span class="badge badge-public" data-testid="public-pill">Public</span>';
+  if (o === 'unknown' || !o) return '<span class="badge badge-unknown">?</span>';
+  return ''; // private: no pill
+}
+
 // ---- TAB 1: Market Table ----
 let currentCountry = 'All Europe';
 
@@ -289,14 +298,22 @@ async function loadTable() {
   const totalGyms = data.reduce((a, d) => a + d.region_count, 0);
   summary.textContent = `${data.length} chains · ${totalGyms.toLocaleString()} gyms · ${currentCountry}`;
 
+  // Municipal competitors counter (direct_competitor + public ownership).
+  const muniEl = document.getElementById('mkt-muni');
+  const status = await api('status');
+  const muniCount = status && typeof status.municipal_competitors === 'number' ? status.municipal_competitors : 0;
+  muniEl.textContent = `Municipal competitors: ${muniCount}`;
+
   const maxCount = data[0].region_count;
-  let html = '<table class="gym-table"><thead><tr><th>#</th><th>Chain</th><th style="text-align:right">Gyms</th><th></th></tr></thead><tbody>';
+  let html = '<table class="gym-table" data-testid="chain-table"><thead><tr><th>#</th><th>Chain</th><th style="text-align:right">Gyms</th><th></th></tr></thead><tbody>';
 
   data.forEach((d, i) => {
     const pct = maxCount > 0 ? (d.region_count / maxCount * 100) : 0;
-    html += `<tr>
+    const pill = ownershipPill(d.ownership_type);
+    const rowAttr = d.competitive_classification === 'direct_competitor' ? ' data-testid="direct-row"' : '';
+    html += `<tr${rowAttr}>
       <td style="color:var(--text-dim);font-size:.8rem">${i + 1}</td>
-      <td class="chain-name">${esc(d.canonical_name)}</td>
+      <td class="chain-name">${esc(d.canonical_name)} ${pill}</td>
       <td class="count">${d.region_count.toLocaleString()}</td>
       <td class="bar-cell"><div class="bar-fill" style="width:${pct}%"></div></td>
     </tr>`;
