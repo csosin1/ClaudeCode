@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS filings (
 
     -- Compound / narrative
     vintage_pools                         TEXT,    -- JSON
+    segments                              TEXT,    -- JSON (HGV/VAC/TNL segment breakdowns)
     management_flagged_credit_concerns    INTEGER,
     management_credit_commentary          TEXT,
 

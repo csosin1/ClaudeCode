@@ -35,6 +35,7 @@ sys.path.insert(0, str(_HERE.parent))
 from config import settings  # noqa: E402
 from pipeline import db as pdb  # noqa: E402
 from pipeline import narrative_extract as nx  # noqa: E402
+from pipeline import sec_cache  # noqa: E402
 from pipeline import xbrl_fetch as xf  # noqa: E402
 from pipeline.metric_schema import METRIC_SCHEMA, null_record  # noqa: E402
 
@@ -100,9 +101,7 @@ class _EdgarClient:
 
 
 def _list_filings(client: _EdgarClient, cik: str) -> list[dict]:
-    url = f"https://data.sec.gov/submissions/CIK{cik}.json"
-    r = client.get(url)
-    data = r.json()
+    data = sec_cache.get_submissions(client, cik)
     recent = data.get("filings", {}).get("recent", {})
     rows: list[dict] = []
     n = len(recent.get("accessionNumber", []))
@@ -222,6 +221,40 @@ _DRY_RUN_STUBS: dict[str, dict] = {
                 {"vintage_year": 2023, "original_balance_mm": 1050.0, "cumulative_default_rate_pct": 0.054, "as_of_period": "2025-03-31"},
                 {"vintage_year": 2024, "original_balance_mm": 1120.0, "cumulative_default_rate_pct": 0.023, "as_of_period": "2025-03-31"},
             ],
+            "segments": [
+                {"segment_key": "consolidated", "segment_label": "HGV consolidated", "segment_type": "consolidated",
+                 "gross_receivables_total_mm": 3450.0, "allowance_for_loan_losses_mm": 380.0, "allowance_coverage_pct": 0.110,
+                 "provision_for_loan_losses_mm": 54.0, "delinquent_30_59_days_pct": 0.018, "delinquent_60_89_days_pct": 0.011,
+                 "delinquent_90_plus_days_pct": 0.062, "delinquent_total_pct": 0.091, "default_rate_annualized_pct": 0.074,
+                 "weighted_avg_fico_origination": 720, "fico_700_plus_pct": 0.62, "fico_below_600_pct": 0.04,
+                 "originations_mm": 375.0, "as_of_period": "2025-03-31"},
+                {"segment_key": "legacy_hgv", "segment_label": "Legacy-HGV", "segment_type": "brand",
+                 "gross_receivables_total_mm": 1520.0, "allowance_for_loan_losses_mm": 140.0, "allowance_coverage_pct": 0.092,
+                 "provision_for_loan_losses_mm": 20.0, "delinquent_30_59_days_pct": 0.013, "delinquent_60_89_days_pct": 0.008,
+                 "delinquent_90_plus_days_pct": 0.042, "delinquent_total_pct": 0.063, "default_rate_annualized_pct": 0.055,
+                 "weighted_avg_fico_origination": 738, "fico_700_plus_pct": 0.71, "fico_below_600_pct": 0.022,
+                 "originations_mm": 165.0, "as_of_period": "2025-03-31"},
+                {"segment_key": "diamond", "segment_label": "Diamond", "segment_type": "brand",
+                 "gross_receivables_total_mm": 1050.0, "allowance_for_loan_losses_mm": 140.0, "allowance_coverage_pct": 0.133,
+                 "provision_for_loan_losses_mm": 20.0, "delinquent_30_59_days_pct": 0.023, "delinquent_60_89_days_pct": 0.014,
+                 "delinquent_90_plus_days_pct": 0.082, "delinquent_total_pct": 0.119, "default_rate_annualized_pct": 0.094,
+                 "weighted_avg_fico_origination": 701, "fico_700_plus_pct": 0.54, "fico_below_600_pct": 0.061,
+                 "originations_mm": 118.0, "as_of_period": "2025-03-31"},
+                {"segment_key": "bluegreen", "segment_label": "Bluegreen", "segment_type": "brand",
+                 "gross_receivables_total_mm": 880.0, "allowance_for_loan_losses_mm": 100.0, "allowance_coverage_pct": 0.114,
+                 "provision_for_loan_losses_mm": 14.0, "delinquent_30_59_days_pct": 0.019, "delinquent_60_89_days_pct": 0.012,
+                 "delinquent_90_plus_days_pct": 0.068, "delinquent_total_pct": 0.099, "default_rate_annualized_pct": 0.078,
+                 "weighted_avg_fico_origination": 712, "fico_700_plus_pct": 0.59, "fico_below_600_pct": 0.046,
+                 "originations_mm": 92.0, "as_of_period": "2025-03-31"},
+                {"segment_key": "originated", "segment_label": "Originated post-acquisition", "segment_type": "acquisition_cohort",
+                 "gross_receivables_total_mm": 2150.0, "allowance_for_loan_losses_mm": 210.0, "allowance_coverage_pct": 0.098,
+                 "delinquent_90_plus_days_pct": 0.048, "delinquent_total_pct": 0.072,
+                 "weighted_avg_fico_origination": 728, "as_of_period": "2025-03-31"},
+                {"segment_key": "acquired_at_fv", "segment_label": "Acquired at fair value", "segment_type": "acquisition_cohort",
+                 "gross_receivables_total_mm": 1300.0, "allowance_for_loan_losses_mm": 170.0, "allowance_coverage_pct": 0.131,
+                 "delinquent_90_plus_days_pct": 0.085, "delinquent_total_pct": 0.123,
+                 "weighted_avg_fico_origination": 704, "as_of_period": "2025-03-31"},
+            ],
             "management_flagged_credit_concerns": False,
             "management_credit_commentary": (
                 "Management observes an uptick in early-stage delinquency "
@@ -270,6 +303,21 @@ _DRY_RUN_STUBS: dict[str, dict] = {
                 {"vintage_year": 2023, "original_balance_mm": 810.0, "cumulative_default_rate_pct": 0.047, "as_of_period": "2025-03-31"},
                 {"vintage_year": 2024, "original_balance_mm": 860.0, "cumulative_default_rate_pct": 0.019, "as_of_period": "2025-03-31"},
             ],
+            "segments": [
+                {"segment_key": "consolidated", "segment_label": "VAC consolidated", "segment_type": "consolidated",
+                 "gross_receivables_total_mm": 2280.0, "allowance_for_loan_losses_mm": 245.0, "allowance_coverage_pct": 0.107,
+                 "provision_for_loan_losses_mm": 41.0, "delinquent_90_plus_days_pct": 0.055, "delinquent_total_pct": 0.089,
+                 "weighted_avg_fico_origination": 732, "fico_below_600_pct": 0.03, "originations_mm": 298.0,
+                 "as_of_period": "2025-03-31"},
+                {"segment_key": "marriott", "segment_label": "Marriott Vacation Club", "segment_type": "brand",
+                 "gross_receivables_total_mm": 1580.0, "allowance_for_loan_losses_mm": 160.0, "allowance_coverage_pct": 0.101,
+                 "delinquent_90_plus_days_pct": 0.049, "delinquent_total_pct": 0.081,
+                 "weighted_avg_fico_origination": 741, "originations_mm": 210.0, "as_of_period": "2025-03-31"},
+                {"segment_key": "vistana", "segment_label": "Vistana", "segment_type": "brand",
+                 "gross_receivables_total_mm": 700.0, "allowance_for_loan_losses_mm": 85.0, "allowance_coverage_pct": 0.121,
+                 "delinquent_90_plus_days_pct": 0.069, "delinquent_total_pct": 0.105,
+                 "weighted_avg_fico_origination": 712, "originations_mm": 88.0, "as_of_period": "2025-03-31"},
+            ],
             "management_flagged_credit_concerns": False,
             "management_credit_commentary": (
                 "Portfolio credit performance remains within historical ranges. "
@@ -317,6 +365,13 @@ _DRY_RUN_STUBS: dict[str, dict] = {
                 {"vintage_year": 2023, "original_balance_mm": 910.0, "cumulative_default_rate_pct": 0.061, "as_of_period": "2025-03-31"},
                 {"vintage_year": 2024, "original_balance_mm": 950.0, "cumulative_default_rate_pct": 0.028, "as_of_period": "2025-03-31"},
             ],
+            "segments": [
+                {"segment_key": "consolidated", "segment_label": "TNL consolidated", "segment_type": "consolidated",
+                 "gross_receivables_total_mm": 3010.0, "allowance_for_loan_losses_mm": 295.0, "allowance_coverage_pct": 0.098,
+                 "provision_for_loan_losses_mm": 58.0, "delinquent_90_plus_days_pct": 0.068, "delinquent_total_pct": 0.107,
+                 "weighted_avg_fico_origination": 704, "fico_below_600_pct": 0.068, "originations_mm": 333.0,
+                 "as_of_period": "2025-03-31"},
+            ],
             "management_flagged_credit_concerns": True,
             "management_credit_commentary": (
                 "Management noted elevated early-stage delinquency in the "
@@ -358,14 +413,21 @@ def _merge_xbrl_and_narrative(
     xbrl_slice: dict,
     narrative: dict,
 ) -> dict:
-    """XBRL wins for fields it covers; narrative fills the rest."""
+    """XBRL wins for scalar fields it covers; narrative fills the rest.
+
+    `segments` is narrative-only (XBRL doesn't express segment breakdowns
+    reliably), so we always take it from narrative when present.
+    """
     rec = null_record()
     for k, v in narrative.items():
         if v not in (None, [], ""):
             rec[k] = v
     for k, v in xbrl_slice.items():
-        if v is not None:
+        if v is not None and k != "segments":
             rec[k] = v
+    # Narrative wins for the segments array unconditionally.
+    if narrative.get("segments"):
+        rec["segments"] = narrative["segments"]
     return rec
 
 
@@ -418,10 +480,10 @@ def process_ticker(ticker: str, dry_run: bool = False) -> int:
             accession = f["accession"]
             url = _primary_doc_url(cik, accession, f["primary_doc"])
 
-            # 3. Download filing HTML.
+            # 3. Download filing HTML (cache-first; SEC primary-docs are
+            # immutable per accession, so the cache is keep-forever).
             try:
-                resp = edgar.get(url)
-                html = resp.text
+                html = sec_cache.get_filing_html(edgar, ticker, accession, url)
             except Exception as e:
                 log.error("fetch failed %s: %s", url, e)
                 continue

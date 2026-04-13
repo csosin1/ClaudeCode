@@ -46,13 +46,24 @@ METRIC_SCHEMA: dict[str, str] = {
         "array of {vintage_year:int, original_balance_mm:float, "
         "cumulative_default_rate_pct:float 0-1, as_of_period:str}"
     ),
+    "segments": (
+        "array of {segment_key:str, segment_label:str, segment_type:str, "
+        "gross_receivables_total_mm:float, allowance_for_loan_losses_mm:float, "
+        "allowance_coverage_pct:float, provision_for_loan_losses_mm:float, "
+        "delinquent_30_59_days_pct:float, delinquent_60_89_days_pct:float, "
+        "delinquent_90_plus_days_pct:float, delinquent_total_pct:float, "
+        "default_rate_annualized_pct:float, weighted_avg_fico_origination:int, "
+        "fico_700_plus_pct:float, fico_below_600_pct:float, "
+        "originations_mm:float, as_of_period:str}"
+    ),
     "management_flagged_credit_concerns": "bool, true if management notes credit stress",
     "management_credit_commentary": "string, <=2 sentences summarizing management credit commentary",
 }
 
 
 def null_record() -> dict:
-    """Fresh record with every metric key set to None (vintage_pools -> [])."""
+    """Fresh record with every metric key set to None (vintage_pools/segments -> [])."""
     rec = {k: None for k in METRIC_SCHEMA}
     rec["vintage_pools"] = []
+    rec["segments"] = []
     return rec
