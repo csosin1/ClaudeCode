@@ -310,23 +310,26 @@ app.get('/setup', (_req, res) => {
       margin-left: 6px;
     }
     .row {
-      display: flex;
-      gap: 8px;
-      align-items: stretch;
-      margin-bottom: 2px;
+      display: block;
+      margin-bottom: 6px;
     }
-    .row input { flex: 1; margin-bottom: 0; }
+    .row input {
+      display: block;
+      width: 100%;
+      margin-bottom: 8px;
+      box-sizing: border-box;
+    }
     .save-one {
-      flex: 0 0 auto;
-      padding: 0 14px;
-      font-size: 0.85rem;
+      display: block;
+      width: 100%;
+      padding: 10px 14px;
+      font-size: 0.95rem;
       font-weight: 600;
       background: #2563eb;
       color: #fff;
       border: none;
-      border-radius: 6px;
+      border-radius: 8px;
       cursor: pointer;
-      min-width: 68px;
       transition: background 0.15s;
     }
     .save-one:disabled { opacity: 0.6; cursor: wait; }
