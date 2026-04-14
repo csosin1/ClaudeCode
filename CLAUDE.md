@@ -168,6 +168,9 @@ Long sessions degrade response quality. At natural checkpoints (task done, big m
 ## Autonomy
 Do the work. Don't ask the user to run commands, read logs, or verify URLs. Escalate only after genuinely different approaches have failed. Never say "it should work" — verify, then share the link.
 
+## Restore, Then Root-Cause
+When something breaks: patch fast to restore service if needed — then **always** do root-cause analysis and fix the real cause. Never stop at the restore. Every incident ends with a `LESSONS.md` entry (root cause + fix + preventive rule) committed alongside the permanent fix. Patches without an RCA follow-up are incident debt. See `SKILLS/root-cause-analysis.md`.
+
 ## User Actions & Accounts
 Whenever you need the user to do something manual (sign up, paste a credential, click a console button), file it with `user-action.sh add …` — never leave it buried in chat. Check `user-action.sh remind` at session start. Only mark done after **you** verify. Register every new third-party account with `account.sh add …` so subscriptions are centralized. See `SKILLS/user-action-tracking.md` and `SKILLS/accounts-registry.md`.
 
