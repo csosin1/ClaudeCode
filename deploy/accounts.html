@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Accounts · casinv.dev</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+    background: #0f172a; color: #e2e8f0; min-height: 100vh;
+    padding: 1rem; line-height: 1.5;
+  }
+  h1 { font-size: 1.4rem; margin-bottom: 0.25rem; }
+  .sub { color: #64748b; font-size: 0.8rem; margin-bottom: 1rem; }
+  h2.group { font-size: 0.85rem; color: #94a3b8; margin: 1rem 0 0.5rem;
+             text-transform: uppercase; letter-spacing: 0.05em; }
+  .card {
+    background: #1e293b; border: 1px solid #334155; border-radius: 12px;
+    padding: 1rem; margin-bottom: 0.75rem;
+  }
+  .card.cancelled { opacity: 0.55; }
+  .card h3 { font-size: 1rem; margin-bottom: 0.35rem; color: #f8fafc; }
+  .purpose { color: #cbd5e1; font-size: 0.9rem; margin-bottom: 0.4rem; }
+  .row { font-size: 0.85rem; color: #94a3b8; margin-top: 0.2rem; }
+  .row b { color: #cbd5e1; font-weight: 600; }
+  .cost { display: inline-block; background: #1e3a5f; color: #bfdbfe;
+          border-radius: 4px; padding: 0.1rem 0.5rem; font-size: 0.75rem;
+          margin-left: 0.3rem; }
+  a { color: #60a5fa; word-break: break-all; }
+  a:active { opacity: 0.7; }
+  code { background: #0f172a; padding: 0.1rem 0.3rem; border-radius: 3px;
+         font-size: 0.8rem; color: #f9a8d4; word-break: break-all; }
+  .empty { background: #1e293b; border: 1px dashed #334155; border-radius: 12px;
+           padding: 1.25rem; text-align: center; color: #64748b; }
+  .back { display: inline-block; color: #94a3b8; font-size: 0.85rem;
+          margin-top: 1.5rem; }
+</style>
+</head>
+<body>
+<h1>Accounts &amp; Subscriptions</h1>
+<div class="sub" id="sub">loading…</div>
+<div id="active"></div>
+<div id="cancelled"></div>
+<a class="back" href="/projects.html">← all projects</a>
+
+<script>
+function card(a, cancelled) {
+  return `<div class="card${cancelled ? ' cancelled' : ''}">
+    <h3>${a.service}${a.monthly_cost ? `<span class="cost">${a.monthly_cost}</span>` : ''}</h3>
+    <div class="purpose">${a.purpose}</div>
+    <div class="row"><b>URL:</b> <a href="${a.url}">${a.url}</a></div>
+    <div class="row"><b>Credentials:</b> <code>${a.cred_location}</code></div>
+    <div class="row"><b>${cancelled ? 'Cancelled' : 'Added'}:</b> ${cancelled ? (a.cancelled_at || '?') : a.added}</div>
+  </div>`;
+}
+async function render() {
+  let doc = { accounts: [], updated_at: '' };
+  try {
+    const r = await fetch('/accounts.json?v=' + Date.now(), { cache: 'no-cache' });
+    if (r.ok) doc = await r.json();
+  } catch {}
+  const active    = (doc.accounts || []).filter(a => a.status === 'active');
+  const cancelled = (doc.accounts || []).filter(a => a.status === 'cancelled');
+  const monthly = active
+    .map(a => parseFloat(String(a.monthly_cost || '').replace(/[^0-9.]/g, '')))
+    .filter(n => !isNaN(n)).reduce((s,n) => s+n, 0);
+
+  document.getElementById('sub').textContent =
+    `${active.length} active${monthly ? ` · ~$${monthly.toFixed(0)}/mo` : ''} · updated ${doc.updated_at || 'never'}`;
+
+  document.getElementById('active').innerHTML =
+    active.length
+      ? `<h2 class="group">Active</h2>` + active.map(a => card(a, false)).join('')
+      : `<div class="empty">No accounts tracked yet.</div>`;
+
+  document.getElementById('cancelled').innerHTML =
+    cancelled.length
+      ? `<h2 class="group">Cancelled</h2>` + cancelled.map(a => card(a, true)).join('')
+      : '';
+}
+render();
+setInterval(render, 30000);
+</script>
+</body>
+</html>

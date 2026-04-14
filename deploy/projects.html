@@ -44,11 +44,27 @@
   .badge.archived { background: #44403c; color: #d6d3d1; }
   .liveness { font-size: 0.75rem; color: #64748b; margin-top: 0.25rem; }
   code { background: #0f172a; padding: 0.1rem 0.3rem; border-radius: 3px; font-size: 0.8rem; }
+  .nav { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem; }
+  .nav a {
+    display: inline-block; padding: 0.55rem 0.9rem; border-radius: 8px;
+    font-size: 0.9rem; text-decoration: none; background: #1e293b;
+    color: #e2e8f0; border: 1px solid #334155;
+  }
+  .nav a .count {
+    display: inline-block; background: #f59e0b; color: #0f172a;
+    border-radius: 999px; padding: 0.05rem 0.5rem; font-size: 0.75rem;
+    font-weight: 700; margin-left: 0.35rem;
+  }
+  .nav a.todo.has-pending { background: #7c2d12; border-color: #ea580c; color: #fff7ed; }
 </style>
 </head>
 <body>
 <h1>Projects</h1>
 <div class="updated" id="updated">loading…</div>
+<div class="nav">
+  <a class="todo" id="nav-todo" href="/todo.html">📋 Your to-do<span class="count" id="todo-count" style="display:none"></span></a>
+  <a href="/accounts.html">🔑 Accounts</a>
+</div>
 <div id="cards"></div>
 
 <script>
@@ -90,6 +106,23 @@ async function render() {
   try {
     const r = await fetch('/liveness.json?v=' + Date.now(), { cache: 'no-cache' });
     if (r.ok) live = await r.json();
+  } catch {}
+  try {
+    const r = await fetch('/pending-actions.json?v=' + Date.now(), { cache: 'no-cache' });
+    if (r.ok) {
+      const doc = await r.json();
+      const n = (doc.actions || []).filter(a => a.status === 'pending').length;
+      const countEl = document.getElementById('todo-count');
+      const linkEl  = document.getElementById('nav-todo');
+      if (n > 0) {
+        countEl.textContent = n;
+        countEl.style.display = '';
+        linkEl.classList.add('has-pending');
+      } else {
+        countEl.style.display = 'none';
+        linkEl.classList.remove('has-pending');
+      }
+    }
   } catch {}
 
   document.getElementById('updated').textContent =

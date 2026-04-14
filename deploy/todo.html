@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Your To-Do · casinv.dev</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+    background: #0f172a; color: #e2e8f0; min-height: 100vh;
+    padding: 1rem; line-height: 1.5;
+  }
+  h1 { font-size: 1.4rem; margin-bottom: 0.25rem; }
+  .sub { color: #64748b; font-size: 0.8rem; margin-bottom: 1rem; }
+  .card {
+    background: #1e293b; border: 1px solid #334155; border-radius: 12px;
+    padding: 1rem; margin-bottom: 0.75rem;
+  }
+  .card h2 { font-size: 1rem; margin-bottom: 0.5rem; color: #f8fafc; }
+  .project { display: inline-block; background: #334155; color: #cbd5e1;
+             border-radius: 4px; padding: 0.1rem 0.5rem; font-size: 0.7rem;
+             margin-right: 0.5rem; vertical-align: middle; letter-spacing: 0.02em; }
+  .section-title { color: #94a3b8; font-size: 0.75rem; margin-top: 0.75rem;
+                   text-transform: uppercase; letter-spacing: 0.05em; }
+  .steps, .verify { white-space: pre-wrap; font-size: 0.9rem; color: #cbd5e1;
+                    margin-top: 0.25rem; }
+  .verify { color: #94a3b8; font-style: italic; }
+  .meta { font-size: 0.7rem; color: #64748b; margin-top: 0.5rem; }
+  .empty { background: #1e293b; border: 1px dashed #334155; border-radius: 12px;
+           padding: 2rem 1rem; text-align: center; color: #64748b; }
+  a { color: #60a5fa; }
+  a:active { opacity: 0.7; }
+  code { background: #0f172a; padding: 0.1rem 0.3rem; border-radius: 3px;
+         font-size: 0.85em; color: #f9a8d4; }
+  .back { display: inline-block; color: #94a3b8; font-size: 0.85rem;
+          margin-top: 1.5rem; }
+</style>
+</head>
+<body>
+<h1>Things to Do</h1>
+<div class="sub" id="sub">loading…</div>
+<div id="cards"></div>
+<a class="back" href="/projects.html">← all projects</a>
+
+<script>
+function linkify(s) {
+  return String(s || '').replace(/https?:\/\/[^\s)]+/g,
+    u => `<a href="${u}">${u}</a>`);
+}
+async function render() {
+  let doc = { actions: [], updated_at: '' };
+  try {
+    const r = await fetch('/pending-actions.json?v=' + Date.now(), { cache: 'no-cache' });
+    if (r.ok) doc = await r.json();
+  } catch {}
+  const pending = (doc.actions || []).filter(a => a.status === 'pending');
+  document.getElementById('sub').textContent =
+    `${pending.length} pending · updated ${doc.updated_at || 'never'}`;
+  if (pending.length === 0) {
+    document.getElementById('cards').innerHTML =
+      `<div class="empty">Nothing for you right now. Tap <a href="/projects.html">projects</a> to see what's running.</div>`;
+    return;
+  }
+  document.getElementById('cards').innerHTML = pending.map(a => `
+    <div class="card">
+      <h2><span class="project">${a.project}</span>${a.title}</h2>
+      <div class="section-title">Steps</div>
+      <div class="steps">${linkify(a.steps)}</div>
+      <div class="section-title">How it'll be verified</div>
+      <div class="verify">${linkify(a.verify_by)}</div>
+      <div class="meta">id <code>${a.id}</code> · added ${a.created_at}</div>
+    </div>`).join('');
+}
+render();
+setInterval(render, 10000);
+</script>
+</body>
+</html>

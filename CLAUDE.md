@@ -168,6 +168,9 @@ Long sessions degrade response quality. At natural checkpoints (task done, big m
 ## Autonomy
 Do the work. Don't ask the user to run commands, read logs, or verify URLs. Escalate only after genuinely different approaches have failed. Never say "it should work" — verify, then share the link.
 
+## User Actions & Accounts
+Whenever you need the user to do something manual (sign up, paste a credential, click a console button), file it with `user-action.sh add …` — never leave it buried in chat. Check `user-action.sh remind` at session start. Only mark done after **you** verify. Register every new third-party account with `account.sh add …` so subscriptions are centralized. See `SKILLS/user-action-tracking.md` and `SKILLS/accounts-registry.md`.
+
 ## Never Idle — Gather Blockers Upfront, Work Around the Rest
 The user's time is the scarce resource. Do not end a turn waiting for permission when any useful work remains.
 
