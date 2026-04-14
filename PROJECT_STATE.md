@@ -11,7 +11,9 @@ _Last updated: 2026-04-14 (pre-resize checkpoint)_
 - `0413c62` dashboard renderer (CarMax Notes & OC tab + restatement flag + DQ tail suppression)
 - `1a91324` post-fix audit report
 
-**New follow-up (non-blocking):** PK-collision sweep found 26 orphan filings (8 Carvana benign — rescue rows already captured via 10-D/A; 18 CarMax = lost amendments, mostly 8-year-old, low magnitude). Fix requires parser collision-resolution rule (prefer /A, else latest filing_date) + batch re-ingest. Queue for next session.
+**PK-collision follow-up: RESOLVED** (`40b815d`). Both parsers now resolve (deal, distribution_date) PK collisions explicitly: amendments win over plain filings, later filing_date wins ties, and a 30-day stale-header guard skips writes when extracted distribution_date disagrees egregiously with filing_date. All 26 orphan filings re-ingested: **26 → 0**. Collision decisions logged to `<issuer>_abs/db/ingestion_decisions.log` for future audit. No regressions detected.
+
+**All data issues closed.** Data trusted, live dashboard updated, 7 commits of fixes in this session.
 
 ## Memory hygiene 2026-04-14
 Found 2 wins: (1) `export_dashboard_db.py` in both issuers materialized 417k-row `loans` table via `fetchall()` → converted to chunked cursor iteration (10k/batch). Peak RSS on export dropped to ~38MB. (2) WAL checkpoint on both 3GB source DBs — already clean (0 frames). Deferred as separate tasks: `.copy()` chains in `generate_dashboard.py` (intentional chart-data isolation, needs careful audit); `pd.read_sql_query` full-table load in `default_model.py:206` (417k-row loan frame — chunksize conversion is a small refactor, not hygiene); no `lru_cache` anywhere (cache-layer add, out of scope).
