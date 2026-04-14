@@ -166,6 +166,39 @@ def chart(traces, layout, height=350):
     return f'<div id="{cid}" style="width:100%;height:{height}px;background:white;border-radius:8px;margin:8px 0;box-shadow:0 1px 3px rgba(0,0,0,.1)"></div>\n<script>Plotly.newPlot("{cid}",{traces_json},{layout_json},{{displayModeBar:false,responsive:true}});</script>\n'
 
 
+def _restatement_overlay(x_list, y_list):
+    """Build a monotone envelope + restatement-marker overlay for a cumulative
+    loss series (audit finding #7). A restatement is any period where the raw
+    cumulative value decreases from the prior period (servicers sometimes
+    correct chargeoff/recovery allocations in a later cert).
+
+    Returns (envelope_list, markers_x, markers_y). If no restatements are
+    found, returns (None, [], []) so callers can omit the overlay entirely.
+    """
+    env = []
+    markers_x, markers_y = [], []
+    running_max = None
+    restated = False
+    for xv, yv in zip(x_list, y_list):
+        if yv is None or (isinstance(yv, float) and pd.isna(yv)):
+            env.append(running_max)
+            continue
+        yv_f = float(yv)
+        if running_max is None:
+            running_max = yv_f
+        elif yv_f < running_max - 0.5:  # tolerance: sub-dollar noise is not a restatement
+            markers_x.append(xv)
+            markers_y.append(yv_f)
+            restated = True
+            # envelope stays at running_max
+        else:
+            running_max = max(running_max, yv_f)
+        env.append(running_max)
+    if not restated:
+        return None, [], []
+    return env, markers_x, markers_y
+
+
 def table_html(df, cls=""):
     cls_attr = f' class="{cls}"' if cls else ""
     rows = "".join(f"<th>{c}</th>" for c in df.columns)
@@ -557,17 +590,31 @@ def generate_carmax_deal_content(deal):
         ("delinquent_91_120_balance", "91-120d", "#FF5722"),
         ("delinquent_121_plus_balance", "121+d", "#D32F2F"),
     ]
+    # Tail-amortization mask (audit #9). Rate denominator becomes noisy once
+    # the pool runs below 10% of its original balance; mask rates there and
+    # render raw dollar balances as a companion chart.
+    _tail_mask = [
+        (float(e) / ORIG_BAL) < 0.10 if (pd.notna(e) and e and ORIG_BAL) else False
+        for e in pool["ending_pool_balance"].tolist()
+    ]
     traces = []
+    bal_traces = []
     have_any_dq = False
     for col, label, color in dq_cols:
         if col in pool.columns and pool[col].notna().any():
             rates = [
-                (float(b) / float(e)) if (pd.notna(b) and pd.notna(e) and e)
+                (float(b) / float(e)) if (pd.notna(b) and pd.notna(e) and e and not m)
                 else None
-                for b, e in zip(pool[col].tolist(), pool["ending_pool_balance"].tolist())
+                for b, e, m in zip(pool[col].tolist(),
+                                   pool["ending_pool_balance"].tolist(),
+                                   _tail_mask)
             ]
             traces.append({
                 "x": x, "y": rates, "name": label,
+                "stackgroup": "dq", "line": {"color": color},
+            })
+            bal_traces.append({
+                "x": x, "y": pool[col].tolist(), "name": label,
                 "stackgroup": "dq", "line": {"color": color},
             })
             have_any_dq = True
@@ -576,6 +623,16 @@ def generate_carmax_deal_content(deal):
             "title": "Delinquency Rates (% of Pool)",
             "yaxis": {"tickformat": ".2%"}, "hovermode": "x unified",
         })
+        if any(_tail_mask) and bal_traces:
+            h += chart(bal_traces, {
+                "title": "Delinquency Balances ($) — pool &lt; 10% of original",
+                "yaxis": {"tickformat": "$,.0f"}, "hovermode": "x unified",
+            })
+            h += ('<p style="font-size:.75rem;color:#666;margin-top:-4px;">'
+                  "Rate trace is suppressed once the pool amortizes below 10% "
+                  "of its original balance — the denominator becomes too small "
+                  "to be meaningful. Raw dollar balances remain visible."
+                  "</p>")
     # Trigger vs actual (CarMax reports delinquency_trigger_actual; trigger
     # level may be absent on many certs)
     if "delinquency_trigger_actual" in pool.columns and pool["delinquency_trigger_actual"].notna().any():
@@ -665,6 +722,22 @@ def generate_carmax_deal_content(deal):
         if net_vals:
             traces.append({"x": x, "y": net_vals, "name": "Net Losses",
                            "line": {"color": "#FF9800", "dash": "dash"}})
+            # Restatement envelope + markers (audit finding #7). Servicers
+            # sometimes restate cumulative_net_losses downward in a later
+            # period. Overlay the running max (monotone envelope) and drop
+            # a subtle marker where the raw series ticks down.
+            envelope, markers_x, markers_y = _restatement_overlay(x, net_vals)
+            if envelope is not None:
+                traces.append({"x": x, "y": envelope, "name": "Net Losses (monotone envelope)",
+                               "line": {"color": "#FF9800", "dash": "dot", "width": 1},
+                               "opacity": 0.5})
+            if markers_x:
+                traces.append({
+                    "x": markers_x, "y": markers_y, "name": "Restatement",
+                    "mode": "markers", "type": "scatter",
+                    "marker": {"symbol": "triangle-down", "size": 9, "color": "#607D8B"},
+                    "hovertemplate": "Servicer restated cumulative loss on %{x}<extra></extra>",
+                })
         h += chart(traces, {
             "title": "Cumulative Gross Losses vs Recoveries",
             "yaxis": {"tickformat": "$,.0f"}, "hovermode": "x unified",
@@ -691,6 +764,49 @@ def generate_carmax_deal_content(deal):
           "ABS-EE loan tape ingestion which is not yet complete for CarMax. "
           "Pool-level losses above are parsed from the servicer certificate.</p>")
     sections["Losses"] = h
+
+    # ── NOTES & OC ──
+    # Mirrors the Carvana Notes & OC block (generate_deal_content). CarMax
+    # ingestion now populates note_balance_a1..a4/b/c/d, aggregate_note_balance,
+    # reserve_account_balance and overcollateralization_amount on every deal
+    # (commit 84a7ebb). `dist_date_iso` orders chronologically. Carvana's
+    # `notes` table isn't populated for CarMax, so we don't attempt a
+    # subordination-ratio view.
+    h = ""
+    if not pool.empty:
+        nc = [c for c in ["note_balance_a1","note_balance_a2","note_balance_a3","note_balance_a4",
+                           "note_balance_b","note_balance_c","note_balance_d"]
+              if c in pool.columns and pool[c].notna().any()
+              and (pool[c].fillna(0) > 0).any()]  # omit class that is always 0
+        if nc:
+            traces = []
+            for c in nc:
+                traces.append({"x": pool["period"].tolist(), "y": pool[c].fillna(0).tolist(),
+                               "name": c.replace("note_balance_","").upper(),
+                               "stackgroup": "notes"})
+            h += chart(traces, {"title": "Note Balances by Class",
+                                "yaxis": {"tickformat": "$,.0f"}, "hovermode": "x unified"})
+        # Reserve account + OC lines (separate chart — different magnitudes)
+        oc_traces = []
+        if "overcollateralization_amount" in pool.columns and pool["overcollateralization_amount"].notna().any():
+            oc_nn = pool.dropna(subset=["overcollateralization_amount"])
+            oc_traces.append({"x": oc_nn["period"].tolist(),
+                              "y": oc_nn["overcollateralization_amount"].tolist(),
+                              "name": "Overcollateralization",
+                              "line": {"color": "#F47920"}})
+        if "reserve_account_balance" in pool.columns and pool["reserve_account_balance"].notna().any():
+            rb_nn = pool.dropna(subset=["reserve_account_balance"])
+            oc_traces.append({"x": rb_nn["period"].tolist(),
+                              "y": rb_nn["reserve_account_balance"].tolist(),
+                              "name": "Reserve Account",
+                              "line": {"color": "#FFD200"}})
+        if oc_traces:
+            h += chart(oc_traces, {"title": "Overcollateralization & Reserve Account",
+                                   "yaxis": {"tickformat": "$,.0f"},
+                                   "hovermode": "x unified"})
+    if not h:
+        h = "<p>No note-balance or credit-enhancement data available.</p>"
+    sections["Notes & OC"] = h
 
     # ── DOCUMENTS ──
     h = ""
@@ -1460,12 +1576,33 @@ def generate_deal_content(deal):
     sections["Pool Summary"] = h
 
     # ── DELINQUENCIES ──
+    # Tail-amortization mask (audit #9): once pool drops below 10% of original
+    # balance, remaining-balance denominator becomes noisy and the rate is
+    # meaningless. Mask rate traces there; keep raw dollar balances visible.
+    _tail_mask = [(b / ORIG_BAL) < 0.10 if (b and ORIG_BAL) else False
+                  for b in lp["total_balance"].tolist()]
+    def _mask_tail(series):
+        return [None if m else v for v, m in zip(series, _tail_mask)]
     h = chart([
-        {"x": x, "y": lp["dq30r"].tolist(), "name": "30d", "stackgroup": "dq", "line": {"color": "#FFC107"}},
-        {"x": x, "y": lp["dq60r"].tolist(), "name": "60d", "stackgroup": "dq", "line": {"color": "#FF9800"}},
-        {"x": x, "y": lp["dq90r"].tolist(), "name": "90d", "stackgroup": "dq", "line": {"color": "#FF5722"}},
-        {"x": x, "y": lp["dq120r"].tolist(), "name": "120+d", "stackgroup": "dq", "line": {"color": "#D32F2F"}},
+        {"x": x, "y": _mask_tail(lp["dq30r"].tolist()), "name": "30d", "stackgroup": "dq", "line": {"color": "#FFC107"}},
+        {"x": x, "y": _mask_tail(lp["dq60r"].tolist()), "name": "60d", "stackgroup": "dq", "line": {"color": "#FF9800"}},
+        {"x": x, "y": _mask_tail(lp["dq90r"].tolist()), "name": "90d", "stackgroup": "dq", "line": {"color": "#FF5722"}},
+        {"x": x, "y": _mask_tail(lp["dq120r"].tolist()), "name": "120+d", "stackgroup": "dq", "line": {"color": "#D32F2F"}},
     ], {"title": "Delinquency Rates (% of Pool)", "yaxis": {"tickformat": ".2%"}, "hovermode": "x unified"})
+    if any(_tail_mask):
+        # Raw dollar-balance stacked area stays visible for the tail.
+        h += chart([
+            {"x": x, "y": lp["dq_30_balance"].tolist(), "name": "30d", "stackgroup": "dq", "line": {"color": "#FFC107"}},
+            {"x": x, "y": lp["dq_60_balance"].tolist(), "name": "60d", "stackgroup": "dq", "line": {"color": "#FF9800"}},
+            {"x": x, "y": lp["dq_90_balance"].tolist(), "name": "90d", "stackgroup": "dq", "line": {"color": "#FF5722"}},
+            {"x": x, "y": lp["dq_120_plus_balance"].tolist(), "name": "120+d", "stackgroup": "dq", "line": {"color": "#D32F2F"}},
+        ], {"title": "Delinquency Balances ($) — pool &lt; 10% of original",
+            "yaxis": {"tickformat": "$,.0f"}, "hovermode": "x unified"})
+        h += ('<p style="font-size:.75rem;color:#666;margin-top:-4px;">'
+              "Rate trace is suppressed once the pool amortizes below 10% of "
+              "its original balance — at that point the rate denominator is "
+              "too small to be meaningful. Raw dollar balances remain visible."
+              "</p>")
     if not pool.empty and "delinquency_trigger_level" in pool.columns:
         trig = pool.dropna(subset=["delinquency_trigger_level", "delinquency_trigger_actual"])
         if not trig.empty:
@@ -1485,11 +1622,27 @@ def generate_deal_content(deal):
     # ── LOSSES ──
     h = chart([{"x": x, "y": lp["loss_rate"].tolist(), "type": "scatter", "fill": "tozeroy", "line": {"color": "#D32F2F"}}],
               {"title": f"Cumulative Net Loss Rate (% of {fm(ORIG_BAL)})", "yaxis": {"tickformat": ".2%"}, "hovermode": "x unified"})
-    h += chart([
+    # Restatement overlay (audit #7) — applies to cum_net (derived from cumsum
+    # of period chargeoffs/recoveries for Carvana). Restatements show up when
+    # the servicer adjusts period flows downward in a later cert.
+    _net_traces = [
         {"x": x, "y": lp["cum_co"].tolist(), "name": "Gross Chargeoffs", "line": {"color": "#D32F2F"}},
         {"x": x, "y": lp["cum_rec"].tolist(), "name": "Recoveries", "line": {"color": "#4CAF50"}},
         {"x": x, "y": lp["cum_net"].tolist(), "name": "Net Losses", "line": {"color": "#FF9800", "dash": "dash"}},
-    ], {"title": "Cumulative Gross Losses vs Recoveries", "yaxis": {"tickformat": "$,.0f"}, "hovermode": "x unified"})
+    ]
+    _env, _mx, _my = _restatement_overlay(x, lp["cum_net"].tolist())
+    if _env is not None:
+        _net_traces.append({"x": x, "y": _env, "name": "Net Losses (monotone envelope)",
+                            "line": {"color": "#FF9800", "dash": "dot", "width": 1},
+                            "opacity": 0.5})
+    if _mx:
+        _net_traces.append({
+            "x": _mx, "y": _my, "name": "Restatement",
+            "mode": "markers", "type": "scatter",
+            "marker": {"symbol": "triangle-down", "size": 9, "color": "#607D8B"},
+            "hovertemplate": "Servicer restated cumulative loss on %{x}<extra></extra>",
+        })
+    h += chart(_net_traces, {"title": "Cumulative Gross Losses vs Recoveries", "yaxis": {"tickformat": "$,.0f"}, "hovermode": "x unified"})
     rr = lp.dropna(subset=["cum_rec_rate"])
     if not rr.empty:
         h += chart([{"x": rr["period"].tolist(), "y": rr["cum_rec_rate"].tolist(), "line": {"color": "#4CAF50"}}],
