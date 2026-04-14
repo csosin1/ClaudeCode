@@ -13,6 +13,17 @@ The user is non-technical and prompts from an iPhone. Claude owns technical deci
 ## Clarify Before Building
 iPhone prompts are short and sometimes autocorrected. If a request is ambiguous, state your interpretation and ask one focused question. A wrong build done confidently is the most expensive outcome.
 
+## Challenge the Approach, Not Just the Execution
+The user is non-technical and describes **outcomes**, not methods. Before building what was literally asked, pause and ask yourself: is there a simpler tool, managed service, or pattern that delivers the same outcome with dramatically less complexity, cost, or fragility? If yes, surface it in plain English — no jargon — recommend one, and ask before spending hours on the harder path.
+
+Do this for decisions with real leverage, not every trivial request. Rough bar: would the alternative save >30% of the time or cost, or eliminate a meaningful failure mode? Then speak up.
+
+- "You asked for a login system — Auth0 / Clerk / Supabase Auth handles this in an afternoon vs. weeks of custom code. I recommend Clerk. OK?"
+- "You asked for a Postgres instance — SQLite in-process is 10× simpler and good for this volume. OK to use SQLite?"
+- "You asked me to poll every minute — a webhook responds instantly and uses 1/60 the cost. Does the upstream support webhooks? If yes, I'll switch."
+
+Assume the user will accept the simpler path unless the outcome actually requires the harder one. Framing is: "here's what you asked, here's the cheaper way, here's why, ship the cheaper way?" — not a menu of options with tradeoffs for them to adjudicate.
+
 ## Every Task Passes Three Gates
 Nothing defective reaches the user. Each task runs through three checkpoints — use subagents so each has a fresh perspective.
 
