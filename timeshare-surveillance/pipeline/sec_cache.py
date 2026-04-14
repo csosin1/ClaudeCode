@@ -22,6 +22,7 @@ copy if the network call fails, logging a warning.
 
 from __future__ import annotations
 
+import gzip
 import json
 import logging
 import os
@@ -73,6 +74,21 @@ def _atomic_write_text(path: Path, text: str) -> None:
     os.replace(tmp, path)
 
 
+def _atomic_write_gz(path: Path, text: str) -> None:
+    """Gzip-encode `text` and atomically write to `path` (expected to end in .gz).
+
+    Uses GzipFile directly (not gzip.open) because older Python versions
+    accept `mtime=` only on GzipFile. mtime=0 makes the output
+    byte-deterministic — no machine-specific timestamp in the gzip header,
+    which keeps rsync and cache-hit debugging sane.
+    """
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with open(tmp, "wb") as raw:
+        with gzip.GzipFile(fileobj=raw, mode="wb", compresslevel=6, mtime=0) as f:
+            f.write(text.encode("utf-8"))
+    os.replace(tmp, path)
+
+
 def _is_fresh(path: Path, ttl_hours: int) -> bool:
     if not path.exists():
         return False
@@ -97,13 +113,27 @@ def get_filing_html(
     SEC primary-doc responses for an accession are immutable so we never
     TTL-expire these; the cache is permanent until the file is deleted.
     `refresh=True` forces a re-fetch and overwrites.
+
+    Storage: new writes are gzip-compressed (~80% size reduction vs raw HTML).
+    Reads prefer <accession>.html.gz, fall back to the legacy <accession>.html
+    so existing caches keep working through the migration.
     """
-    path = _filings_dir(ticker) / f"{accession}.html"
-    if path.exists() and not refresh:
-        try:
-            return path.read_text(encoding="utf-8", errors="replace")
-        except OSError as e:
-            log.warning("sec_cache: read failed for %s: %s; refetching", path, e)
+    base = _filings_dir(ticker)
+    gz_path = base / f"{accession}.html.gz"
+    raw_path = base / f"{accession}.html"
+
+    if not refresh:
+        if gz_path.exists():
+            try:
+                with gzip.open(gz_path, "rb") as f:
+                    return f.read().decode("utf-8", errors="replace")
+            except OSError as e:
+                log.warning("sec_cache: read failed for %s: %s; refetching", gz_path, e)
+        elif raw_path.exists():
+            try:
+                return raw_path.read_text(encoding="utf-8", errors="replace")
+            except OSError as e:
+                log.warning("sec_cache: read failed for %s: %s; refetching", raw_path, e)
 
     resp = client.get(url)
     status = getattr(resp, "status_code", 200)
@@ -112,9 +142,15 @@ def get_filing_html(
         raise RuntimeError(f"sec_cache: refusing to cache non-2xx {status} for {url}")
     text = resp.text
     try:
-        _atomic_write_text(path, text)
+        _atomic_write_gz(gz_path, text)
+        # If a legacy uncompressed copy exists, remove it — the gz is canonical now.
+        if raw_path.exists():
+            try:
+                raw_path.unlink()
+            except OSError:
+                pass
     except OSError as e:
-        log.warning("sec_cache: write failed for %s: %s", path, e)
+        log.warning("sec_cache: write failed for %s: %s", gz_path, e)
     return text
 
 

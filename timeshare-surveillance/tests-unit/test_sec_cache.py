@@ -59,17 +59,19 @@ def test_filing_html_miss_then_hit(tmp_path):
     assert out2 == "<html>body</html>"
     assert len(client2.calls) == 0
 
-    # File is at the expected path.
-    expected = Path(settings.SEC_CACHE_DIR) / "filings" / "HGV" / "acc-1.html"
+    # File is at the expected path (new writes are gzip-compressed).
+    expected = Path(settings.SEC_CACHE_DIR) / "filings" / "HGV" / "acc-1.html.gz"
     assert expected.exists()
 
 
 def test_filing_html_atomic_write_no_stale_tmp(tmp_path):
+    import gzip
     client = _FakeClient([_FakeResp(text="hello")])
     sec_cache.get_filing_html(client, "HGV", "acc-atomic", "https://x/x.html")
-    path = Path(settings.SEC_CACHE_DIR) / "filings" / "HGV" / "acc-atomic.html"
+    path = Path(settings.SEC_CACHE_DIR) / "filings" / "HGV" / "acc-atomic.html.gz"
     assert path.exists()
-    assert path.read_text() == "hello"
+    with gzip.open(path, "rb") as f:
+        assert f.read().decode("utf-8") == "hello"
     # No .tmp sibling left behind.
     assert list(path.parent.glob("*.tmp")) == []
 
@@ -78,9 +80,23 @@ def test_filing_html_refuses_non_2xx(tmp_path):
     client = _FakeClient([_FakeResp(text="nope", status=500)])
     with pytest.raises(RuntimeError):
         sec_cache.get_filing_html(client, "HGV", "acc-err", "https://x/y.html")
-    # Nothing written.
-    path = Path(settings.SEC_CACHE_DIR) / "filings" / "HGV" / "acc-err.html"
-    assert not path.exists()
+    # Nothing written (neither gzipped nor legacy).
+    base = Path(settings.SEC_CACHE_DIR) / "filings" / "HGV"
+    assert not (base / "acc-err.html.gz").exists()
+    assert not (base / "acc-err.html").exists()
+
+
+def test_filing_html_reads_legacy_uncompressed(tmp_path):
+    """Backwards-compat: caches written before gzip landed still work."""
+    base = Path(settings.SEC_CACHE_DIR) / "filings" / "HGV"
+    base.mkdir(parents=True, exist_ok=True)
+    legacy = base / "acc-legacy.html"
+    legacy.write_text("<html>legacy body</html>", encoding="utf-8")
+    # No .gz sibling — reader must fall back to the raw file.
+    client = _FakeClient([])  # network should not be called
+    out = sec_cache.get_filing_html(client, "HGV", "acc-legacy", "https://x.html")
+    assert out == "<html>legacy body</html>"
+    assert len(client.calls) == 0
 
 
 def test_xbrl_ttl_hit_within_window(tmp_path, monkeypatch):

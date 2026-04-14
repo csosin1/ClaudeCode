@@ -51,6 +51,9 @@ def connect(db_path: Path | str) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
+    # 10 MB page cache (negative = KB). The 2 MB default is too small for
+    # export_combined's working set; 10 MB is cheap on any droplet.
+    conn.execute("PRAGMA cache_size=-10000")
     return conn
 
 

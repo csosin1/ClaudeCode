@@ -160,6 +160,22 @@ def _write_atomic(path: Path, data) -> None:
     os.replace(tmp, path)
 
 
+def _checkpoint_wal() -> None:
+    """Truncate the WAL file after a successful merge.
+
+    Without periodic TRUNCATE checkpoints, the WAL grows unbounded across
+    long-running extractions and can double the on-disk footprint of the DB.
+    This is a no-op when WAL is empty.
+    """
+    import sqlite3
+    try:
+        conn = sqlite3.connect(str(settings.SQLITE_DB_PATH))
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        conn.close()
+    except sqlite3.Error as e:
+        log.warning("merge: wal_checkpoint failed: %s", e)
+
+
 def build_combined() -> list[dict]:
     records = _load_records()
     records = _derive(records)
@@ -177,6 +193,7 @@ def build_combined() -> list[dict]:
             log.info("mirrored combined.json -> %s", target)
         except OSError as e:
             log.warning("could not mirror to dashboard dir %s: %s", target, e)
+    _checkpoint_wal()
     return records
 
 
