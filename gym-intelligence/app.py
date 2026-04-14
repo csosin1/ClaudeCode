@@ -151,12 +151,107 @@ def api_test_results():
 
 @bp.route("/api/snapshot-dates")
 def api_snapshot_dates():
+    """Distinct snapshot_date values, ascending.
+
+    Returns {"dates": [...], "count": N}. Frontend uses count<2 to hide the
+    Trend column before the historical backfill has produced multiple dates.
+    """
     conn = get_connection()
     rows = conn.execute(
-        "SELECT DISTINCT snapshot_date FROM snapshots ORDER BY snapshot_date DESC"
+        "SELECT DISTINCT snapshot_date FROM snapshots ORDER BY snapshot_date ASC"
     ).fetchall()
     conn.close()
-    return jsonify([r["snapshot_date"] for r in rows])
+    dates = [r["snapshot_date"] for r in rows]
+    return jsonify({"dates": dates, "count": len(dates)})
+
+
+@bp.route("/api/chain-history")
+def api_chain_history():
+    """Time-series of location_count for one chain across snapshot dates.
+
+    Query:
+      name    - canonical_name (required)
+      country - country code, or blank / "All Europe" for Europe-wide sum.
+
+    Returns: {canonical_name, country, series:[{snapshot_date, location_count}],
+              yoy_delta, yoy_pct}. yoy_* are null if the series has <2 points.
+    """
+    name = (request.args.get("name") or "").strip()
+    if not name:
+        return jsonify({"error": "name required"}), 400
+    country = (request.args.get("country") or "").strip()
+
+    conn = get_connection()
+    chain_row = conn.execute(
+        "SELECT id FROM chains WHERE canonical_name = ?", (name,)
+    ).fetchone()
+    if not chain_row:
+        conn.close()
+        return jsonify({"error": "chain not found"}), 404
+    chain_id = chain_row["id"]
+
+    if country and country != "All Europe":
+        rows = conn.execute(
+            """
+            SELECT snapshot_date, SUM(location_count) AS location_count
+            FROM snapshots
+            WHERE chain_id = ? AND country = ?
+            GROUP BY snapshot_date
+            ORDER BY snapshot_date ASC
+            """,
+            (chain_id, country),
+        ).fetchall()
+        country_label = country
+    else:
+        rows = conn.execute(
+            """
+            SELECT snapshot_date, SUM(location_count) AS location_count
+            FROM snapshots
+            WHERE chain_id = ?
+            GROUP BY snapshot_date
+            ORDER BY snapshot_date ASC
+            """,
+            (chain_id,),
+        ).fetchall()
+        country_label = "All Europe"
+    conn.close()
+
+    series = [
+        {"snapshot_date": r["snapshot_date"], "location_count": int(r["location_count"] or 0)}
+        for r in rows
+    ]
+
+    yoy_delta = None
+    yoy_pct = None
+    if len(series) >= 2:
+        # Latest point vs the point closest to 365 days earlier. Use string
+        # date arithmetic via datetime to avoid depending on SQLite date funcs.
+        from datetime import datetime as _dt
+        latest = series[-1]
+        latest_dt = _dt.fromisoformat(latest["snapshot_date"])
+        target_days = 365
+        best = None
+        best_gap = None
+        for point in series[:-1]:
+            pt_dt = _dt.fromisoformat(point["snapshot_date"])
+            gap = abs((latest_dt - pt_dt).days - target_days)
+            if best is None or gap < best_gap:
+                best = point
+                best_gap = gap
+        if best is not None:
+            yoy_delta = latest["location_count"] - best["location_count"]
+            if best["location_count"] > 0:
+                yoy_pct = round(yoy_delta / best["location_count"] * 100, 1)
+            else:
+                yoy_pct = None
+
+    return jsonify({
+        "canonical_name": name,
+        "country": country_label,
+        "series": series,
+        "yoy_delta": yoy_delta,
+        "yoy_pct": yoy_pct,
+    })
 
 
 @bp.route("/api/country-counts")

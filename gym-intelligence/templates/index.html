@@ -117,6 +117,13 @@ label{font-size:.85rem;color:var(--text-dim);font-weight:600}
 .gym-table .count{font-variant-numeric:tabular-nums;text-align:right;color:var(--accent);font-weight:700}
 .bar-cell{position:relative;min-width:60px}
 .bar-fill{position:absolute;left:0;top:50%;transform:translateY(-50%);height:18px;background:rgba(233,69,96,.25);border-radius:3px}
+.trend-cell{white-space:nowrap;font-size:.82rem;text-align:right;font-variant-numeric:tabular-nums;color:var(--text-dim)}
+.trend-pill{display:inline-block;padding:1px 7px;border-radius:10px;background:rgba(255,255,255,.06);font-weight:600;margin-left:4px}
+.trend-arrow{display:inline-block;font-weight:700;margin-right:2px}
+.trend-up{color:#82e0aa}
+.trend-down{color:#f1948a}
+.trend-flat{color:#aab}
+.no-trend-notice{padding:8px 10px;margin:0 0 10px;border-radius:8px;background:rgba(93,173,226,.08);color:#9ec7e8;font-size:.82rem;border:1px solid rgba(93,173,226,.2)}
 .hidden{display:none}
 .spinner{display:inline-block;width:18px;height:18px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite;vertical-align:middle;margin-right:6px}
 @keyframes spin{to{transform:rotate(360deg)}}
@@ -293,10 +300,81 @@ async function initMarket() {
   loadTable();
 }
 
+// Run an async task pool with concurrency cap. Prevents hammering the
+// single-threaded Flask dev server when we fire one chain-history request
+// per row. Returns after all tasks complete.
+async function runPool(items, worker, concurrency) {
+  const queue = items.slice();
+  const runners = new Array(Math.min(concurrency, queue.length)).fill(0).map(async () => {
+    while (queue.length) {
+      const next = queue.shift();
+      try { await worker(next); } catch (e) { console.warn('pool worker error', e); }
+    }
+  });
+  await Promise.all(runners);
+}
+
+function trendArrowHtml(yoyPct) {
+  // Thresholds: >=+5% up (green), <=-5% down (red), else flat (gray).
+  if (yoyPct === null || yoyPct === undefined || Number.isNaN(yoyPct)) {
+    return '<span class="trend-arrow trend-flat" data-testid="trend-arrow">—</span>';
+  }
+  if (yoyPct >= 5) {
+    return '<span class="trend-arrow trend-up" data-testid="trend-arrow">↑</span>';
+  }
+  if (yoyPct <= -5) {
+    return '<span class="trend-arrow trend-down" data-testid="trend-arrow">↓</span>';
+  }
+  return '<span class="trend-arrow trend-flat" data-testid="trend-arrow">→</span>';
+}
+
+function trendDeltaLabel(delta) {
+  if (delta === null || delta === undefined || Number.isNaN(delta)) return '—';
+  if (delta === 0) return 'no change';
+  const sign = delta > 0 ? '+' : '−';
+  return `${sign}${Math.abs(delta).toLocaleString()}`;
+}
+
+function trendTooltip(series) {
+  if (!series || !series.length) return '';
+  return series.map(p => {
+    // "2022-06: 1,100" — trim day for compactness on hover.
+    const ym = (p.snapshot_date || '').slice(0, 7);
+    return `${ym}: ${(p.location_count || 0).toLocaleString()}`;
+  }).join(' / ');
+}
+
+async function populateTrendCells(chains) {
+  // Fire per-row history requests with a small concurrency cap. Flask is
+  // single-threaded in dev; 10 concurrent hits keeps the UI responsive
+  // without queuing requests for seconds.
+  const country = currentCountry === 'All Europe' ? '' : currentCountry;
+  await runPool(chains, async (name) => {
+    const cell = document.querySelector(`[data-testid="trend-cell"][data-chain="${CSS.escape(name)}"]`);
+    if (!cell) return;
+    const qs = 'chain-history?name=' + encodeURIComponent(name)
+             + (country ? '&country=' + encodeURIComponent(country) : '');
+    const data = await api(qs);
+    if (!data) {
+      cell.textContent = '—';
+      return;
+    }
+    const arrow = trendArrowHtml(data.yoy_pct);
+    const label = trendDeltaLabel(data.yoy_delta);
+    const tip = trendTooltip(data.series);
+    cell.innerHTML = `${arrow}<span class="trend-pill" title="${esc(tip)}">${esc(label)}</span>`;
+    cell.setAttribute('title', tip);
+  }, 10);
+}
+
 async function loadTable() {
   const wrap = document.getElementById('mkt-table-wrap');
   const summary = document.getElementById('mkt-summary');
   wrap.innerHTML = '<p style="color:var(--text-dim)">Loading...</p>';
+
+  // Kick off snapshot-dates in parallel; we need its count before we decide
+  // whether to render the Trend column.
+  const datesPromise = api('snapshot-dates');
 
   const showParam = competitorsOnly ? 'competitive' : 'all';
   const data = (await api('chains-table?country=' + encodeURIComponent(currentCountry) + '&show=' + showParam)) || [];
@@ -315,23 +393,44 @@ async function loadTable() {
   const muniCount = status && typeof status.municipal_competitors === 'number' ? status.municipal_competitors : 0;
   muniEl.textContent = `Municipal competitors: ${muniCount}`;
 
+  const datesRes = await datesPromise;
+  const snapshotCount = (datesRes && typeof datesRes.count === 'number')
+    ? datesRes.count
+    : (Array.isArray(datesRes) ? datesRes.length : 0);
+  const showTrend = snapshotCount >= 2;
+
   const maxCount = data[0].region_count;
-  let html = '<table class="gym-table" data-testid="chain-table"><thead><tr><th>#</th><th>Chain</th><th style="text-align:right">Gyms</th><th></th></tr></thead><tbody>';
+  let notice = '';
+  if (!showTrend) {
+    notice = '<div class="no-trend-notice" data-testid="no-trend-notice">Historical data will populate after the first backfill run.</div>';
+  }
+  const trendHead = showTrend ? '<th style="text-align:right">Trend (1y)</th>' : '';
+  let html = notice + '<table class="gym-table" data-testid="chain-table"><thead><tr><th>#</th><th>Chain</th><th style="text-align:right">Gyms</th><th></th>' + trendHead + '</tr></thead><tbody>';
 
   data.forEach((d, i) => {
     const pct = maxCount > 0 ? (d.region_count / maxCount * 100) : 0;
     const pill = ownershipPill(d.ownership_type);
     const rowAttr = d.competitive_classification === 'direct_competitor' ? ' data-testid="direct-row"' : '';
+    const trendCell = showTrend
+      ? `<td class="trend-cell" data-testid="trend-cell" data-chain="${esc(d.canonical_name)}">—</td>`
+      : '';
     html += `<tr${rowAttr}>
       <td style="color:var(--text-dim);font-size:.8rem">${i + 1}</td>
       <td class="chain-name">${esc(d.canonical_name)} ${pill}</td>
       <td class="count">${d.region_count.toLocaleString()}</td>
       <td class="bar-cell"><div class="bar-fill" style="width:${pct}%"></div></td>
+      ${trendCell}
     </tr>`;
   });
 
   html += '</tbody></table>';
   wrap.innerHTML = html;
+
+  if (showTrend) {
+    // Fire per-row history requests asynchronously so the table paints first.
+    const names = data.map(d => d.canonical_name);
+    populateTrendCells(names).catch(e => console.warn('populateTrendCells error', e));
+  }
 }
 
 // ---- TAB 2: Chain Explorer ----
