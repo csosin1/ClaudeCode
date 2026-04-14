@@ -2459,6 +2459,14 @@ app.listen(port, '0.0.0.0', () => {
     if (selfTest.proxyResult && selfTest.proxyResult.ok) {
       // Check if a recent Carvana result already exists (avoid hammering on rapid redeploys)
       let shouldRun = true;
+      // Kill-switch: SKIP_STARTUP_AUTORUN=1 env var disables the startup
+      // Carvana quote entirely. Used during manual wizard debugging so the
+      // auto-run doesn't contend for the shared Chromium profile with whatever
+      // wizard the developer kicked off via POST /api/<site>.
+      if (process.env.SKIP_STARTUP_AUTORUN === '1' || process.env.SKIP_STARTUP_AUTORUN === 'true') {
+        console.log('[startup] SKIP_STARTUP_AUTORUN set — skipping Carvana auto-run');
+        shouldRun = false;
+      }
       try {
         const resultsPath = path.join(__dirname, 'startup-results.json');
         if (fs.existsSync(resultsPath)) {

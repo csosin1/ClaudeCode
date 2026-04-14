@@ -259,6 +259,12 @@ async function _drivewayPostVinLoop({ page, log, vin, mileage, zip, condition, c
   let selectedCondition = false;
   let filledEmail = false;
   let stuckCount = 0;
+  // Count how many iterations in a row we clicked an advance button without
+  // the URL changing. If we click "Get an Offer" 3+ times on the same URL,
+  // the form is either rejecting silently or the wrong tab is active — bail
+  // rather than burn the 15-min timeout.
+  let clickSubmitSameUrlCount = 0;
+  let lastUrl = page.url();
 
   for (let step = 0; step < 20; step++) {
     checkTimeout();
@@ -421,6 +427,36 @@ async function _drivewayPostVinLoop({ page, log, vin, mileage, zip, condition, c
 
     await humanDelay(3000, 6000);
     const newUrl = page.url();
+
+    // Hard bail-out: if we just clicked a submit-style CTA but URL didn't
+    // change, count it. After 3 consecutive same-URL-after-submit iterations,
+    // break. The form is either silently rejecting (validation, tab flipped
+    // back to LP, backend 500) or we're looking at the wrong button.
+    const submitLabels = /get.*offer|see.*offer|view.*offer|continue|next|submit/i;
+    if (next.clicked && submitLabels.test(next.label || '') && newUrl === url) {
+      clickSubmitSameUrlCount++;
+      log(`[driveway] same-URL-after-submit count=${clickSubmitSameUrlCount}`);
+      if (clickSubmitSameUrlCount >= 3) {
+        log('[driveway] 3x same-URL-after-submit → bailing (likely silent rejection or tab flipped)');
+        // Check whether the LP tab was silently activated (common failure mode).
+        try {
+          const tabInfo = await page.evaluate(() => {
+            const vinTab = document.querySelector('[data-testid="vin-tab"]');
+            const lpTab = document.querySelector('[data-testid="lp-tab"]');
+            const vinSelected = vinTab && vinTab.getAttribute('aria-selected') === 'true';
+            const lpSelected = lpTab && lpTab.getAttribute('aria-selected') === 'true';
+            const vinInputPresent = !!document.querySelector('#vinInput');
+            const plateInputPresent = !!document.querySelector('#plateNumberInput');
+            return { vinSelected, lpSelected, vinInputPresent, plateInputPresent };
+          });
+          log(`[driveway] tab diag: ${JSON.stringify(tabInfo)}`);
+        } catch { /* ignore */ }
+        break;
+      }
+    } else if (newUrl !== url) {
+      clickSubmitSameUrlCount = 0;
+    }
+
     if (newUrl === url && !interacted) {
       stuckCount++;
       log(`[driveway] stuck=${stuckCount}`);

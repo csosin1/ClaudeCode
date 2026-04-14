@@ -359,6 +359,25 @@ async function launchBrowser(_options = {}) {
   if (proxyConfig) contextOptions.proxy = proxyConfig;
 
   // Priority: patchright → playwright-extra → plain playwright.
+  // Between fallback attempts, clear stale Singleton* files IFF no Chromium
+  // is actually using them. A failed patchright launch sometimes leaves the
+  // lock file behind after the Chromium process exits, blocking fallback
+  // launches. Do NOT kill running Chromes — another in-process wizard may be
+  // using them; caller is responsible for serializing via the activeRun queue.
+  const clearStaleLocksOnly = () => {
+    try {
+      const { execSync } = require('child_process');
+      const running = execSync('pgrep -f "user-data-dir=' + USER_DATA_DIR + '" || true').toString().trim();
+      if (!running) {
+        for (const name of ['SingletonLock', 'SingletonCookie', 'SingletonSocket']) {
+          try { fs.unlinkSync(path.join(USER_DATA_DIR, name)); } catch { /* not present */ }
+        }
+      }
+      // If a Chrome IS running on this profile: don't touch anything. The
+      // fallback launch will fail again with "Singleton lock exists"; the
+      // caller's outer retry or queue will pick up after the live Chrome exits.
+    } catch { /* non-fatal */ }
+  };
   let context;
   let launchMethod = 'unknown';
   try {
@@ -368,6 +387,7 @@ async function launchBrowser(_options = {}) {
     console.log('[browser] Launched via patchright launchPersistentContext');
   } catch (patchErr) {
     console.warn(`[browser] Patchright persistent launch failed: ${patchErr.message}`);
+    clearStaleLocksOnly();
     try {
       const { chromium } = require('playwright-extra');
       const StealthPlugin = require('puppeteer-extra-plugin-stealth');
@@ -377,6 +397,7 @@ async function launchBrowser(_options = {}) {
       console.log('[browser] Launched via playwright-extra launchPersistentContext');
     } catch (stealthErr) {
       console.warn(`[browser] Stealth persistent launch failed: ${stealthErr.message}`);
+      clearStaleLocksOnly();
       const pw = require('playwright');
       context = await pw.chromium.launchPersistentContext(USER_DATA_DIR, contextOptions);
       launchMethod = 'playwright-persistent';
