@@ -140,6 +140,7 @@ _Scan: 2026-04-14. 100% coverage across Carvana (607 rows, 16 deals) + CarMax (2
 - **Flagged by:** Phase 1 outlier scan — `recoveries` z-score outlier (top 4 of that metric across both issuers)
 - **Status:** open
 - **Root-cause group:** G-Iter4-A (CarMax 2018-vintage Jan-2022 parser slip)
+- **Status (Iter 5 re-audit):** verified — post-fix DB shows `recoveries=-15,923.82 / -10,285.72`, `cumulative_liquidation_proceeds=$22,123,235.66 / $23,065,733.37`, `cumulative_gross_losses=$44,347,947.09 / $47,327,206.80` on 2018-2 / 2018-3 for 2022-01-18. All 14 other CarMax deals filed on 2022-01-18 unchanged. The 2 negative recoveries are now flagged by the blanket `neg_violations` heuristic but are source-faithful (issuer reported prior-period clawback) and covered under NEGATIVE_OK semantics for this column.
 
 #### F-011 — CarMax 2014–2015 old-format parser gap: 85 rows missing 6 key metrics
 - **Location:** `carmax_abs/db/carmax_abs.db::pool_performance` — 85 rows across deals 2014-1 (21), 2014-2 (18), 2014-3 (15), 2014-4 (12), 2015-1 (9), 2015-2 (6), 2015-3 (3), 2015-4 (1). All dist dates in 2014-03 through 2015-11.
@@ -152,6 +153,7 @@ _Scan: 2026-04-14. 100% coverage across Carvana (607 rows, 16 deals) + CarMax (2
 - **Flagged by:** Phase 1 NULL census + distribution smell test
 - **Status:** open
 - **Root-cause group:** G-Iter4-B (CarMax 2014–2015 old-format parser coverage)
+- **Status (Iter 5 re-audit):** verified — post-fix NULL census on 390 2014-2015 CarMax rows: `net_charged_off_amount`, `gross_charged_off_amount`, `delinquent_31_60_balance`, `delinquent_61_90_balance`, `delinquent_91_120_balance`, `delinquent_91_120_count`, `total_delinquent_balance` are all 0-NULL (previously 85-NULL on the old-format rows, newer 2015-Dec rows unaffected). Residual 85-NULL on `recoveries`, `cumulative_gross_losses`, `cumulative_liquidation_proceeds`, `delinquent_121_plus_balance`, `delinquent_121_plus_count`, `delinquency_trigger_actual` is documented source-faithful (labels absent in 2014-2015 format). 2016+ CarMax NULL counts unchanged (0 on the same cols) — no regression.
 
 #### F-012 — CarMax systemic always-NULL columns: parser never populates 4 fields (2,006/2,006 rows)
 - **Location:** `carmax_abs/db/carmax_abs.db::pool_performance`
