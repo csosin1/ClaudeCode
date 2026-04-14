@@ -108,6 +108,19 @@ def init_db(db_path: str | Path | None = None):
                 analysis_text TEXT NOT NULL,
                 model_used TEXT NOT NULL
             );
+
+            -- Tracks per-date outcomes of the historical backfill runner so
+            -- partial runs and failures are auditable without re-running.
+            CREATE TABLE IF NOT EXISTS snapshot_runs (
+                snapshot_date TEXT NOT NULL,
+                status TEXT NOT NULL,
+                error TEXT,
+                wall_seconds REAL,
+                completed_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_snapshot_runs_date
+                ON snapshot_runs(snapshot_date);
         """)
 
         # --- Idempotent migrations -------------------------------------
