@@ -177,6 +177,9 @@ Whenever you need the user to do something manual (sign up, paste a credential, 
 ## Capacity Awareness
 Before heavy work (batch scraping, concurrent builders, big model runs), check `/capacity.json` or `https://casinv.dev/capacity.html`. If state is `warn` or `urgent`, don't add load — notify the user with a concrete upgrade recommendation instead. Silent thrashing is the worst failure mode. See `SKILLS/capacity-monitoring.md`.
 
+## Memory Hygiene
+Weekly per-chat pass — and on-demand whenever `/capacity.html` goes `warn`. Basic flossing only: streaming queries, closed handles, closed browsers, SQLite WAL checkpoint + VACUUM, bounded caches, log rotation, gzipped raw caches. Anything that needs a schema change, a new library, or a real perf tradeoff files a separate task instead. See `SKILLS/memory-hygiene.md`.
+
 ## Never Idle — Gather Blockers Upfront, Work Around the Rest
 The user's time is the scarce resource. Do not end a turn waiting for permission when any useful work remains.
 
