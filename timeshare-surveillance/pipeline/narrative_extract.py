@@ -167,6 +167,7 @@ SECTION_FIELDS: dict[str, list[str]] = {
     ],
     "management_commentary": [
         "management_flagged_credit_concerns",
+        "management_flag_reason",
         "management_credit_commentary",
         "new_securitization_volume_mm",
         "new_securitization_advance_rate_pct",
@@ -181,6 +182,12 @@ SECTION_FIELDS: dict[str, list[str]] = {
     ],
     "portfolio_segments": [
         "segments",
+    ],
+    "balance_sheet": [
+        "gross_receivables_total_mm",
+        "allowance_for_loan_losses_mm",
+        "net_receivables_mm",
+        "securitized_receivables_mm",
     ],
 }
 
@@ -212,6 +219,75 @@ def _strip_json_fences(s: str) -> str:
     return s.strip()
 
 
+_FICO_GUIDANCE = (
+    "\nFICO denominator/numerator rules:\n"
+    "- VAC and HGV often disclose SEPARATE \"Originated\" and \"Acquired\" tables.\n"
+    "  When computing fico_700_plus_pct / fico_below_600_pct:\n"
+    "  - Numerator and denominator MUST come from the SAME table. Do not mix\n"
+    "    Originated numerator with Acquired denominator or vice versa.\n"
+    "  - If only the Originated table is shown, use that. If only a consolidated\n"
+    "    (combined) table is shown, use that. If both tables are shown, prefer\n"
+    "    the combined total; if only separate tables are shown, prefer the\n"
+    "    Originated portfolio and note that in management_credit_commentary.\n"
+    "  - Express as a decimal (56.2%% -> 0.562).\n"
+)
+
+_VINTAGE_GUIDANCE = (
+    "\nvintage_pools rules:\n"
+    "- Include every vintage row disclosed in the table. Each entry is:\n"
+    "  {\n"
+    "    \"vintage_year\": int | null,\n"
+    "    \"is_prior_bucket\": bool,   // true for \"2020 & Prior\" / \"Prior\" / similar aggregate\n"
+    "    \"original_balance_mm\": float | null,\n"
+    "    \"cumulative_default_rate_pct\": float 0-1 | null,\n"
+    "    \"as_of_period\": str (YYYY-MM-DD)\n"
+    "  }\n"
+    "- If the filing groups older years into a single \"Prior\" or \"X & Prior\"\n"
+    "  row, emit ONE entry with vintage_year=null, is_prior_bucket=true, and\n"
+    "  original_balance_mm set to that row's balance.\n"
+    "- Never fabricate a vintage_year integer when the label is aggregate.\n"
+    "- as_of_period must be the specific balance-sheet date of that row; if\n"
+    "  the filing shows both current-quarter and prior-year-end columns, use\n"
+    "  the current-quarter column.\n"
+)
+
+_BALANCE_SHEET_GUIDANCE = (
+    "\nbalance_sheet rules:\n"
+    "- Pick the TIMESHARE or VACATION-OWNERSHIP receivable balance. Do NOT\n"
+    "  use general accounts receivable or \"doubtful accounts\".\n"
+    "- gross_receivables_total_mm = gross timeshare financing receivables\n"
+    "  BEFORE the allowance for credit/loan losses.\n"
+    "- allowance_for_loan_losses_mm = the allowance contra-asset against\n"
+    "  those receivables (NOT general doubtful accounts). If the filing\n"
+    "  presents an allowance rollforward, use the ENDING balance.\n"
+    "- net_receivables_mm = gross minus allowance (the carrying value).\n"
+    "- securitized_receivables_mm = receivables pledged in outstanding\n"
+    "  securitization VIEs, if disclosed.\n"
+    "- All dollar fields in millions USD (scale accordingly).\n"
+    "- Use the most recent column shown (current quarter / fiscal year end).\n"
+)
+
+_MGMT_COMMENTARY_GUIDANCE = (
+    "\nmanagement_flagged_credit_concerns rules:\n"
+    "Set management_flagged_credit_concerns=true ONLY if management's own\n"
+    "words include at least one of these stress signals:\n"
+    "- \"deterioration\", \"deteriorating\"\n"
+    "- \"significantly higher\" / \"materially higher\" / \"sharp increase\" / \"step-up\"\n"
+    "- \"tightening underwriting\" / \"tighter underwriting\" / \"restrict lending\"\n"
+    "- \"elevated losses\" / \"elevated default\" (not just \"elevated\")\n"
+    "- \"credit stress\" / \"portfolio stress\"\n"
+    "- \"increased reserve\" combined with a forward-looking negative outlook\n"
+    "Do NOT flag on: \"continuing to monitor\", \"routine provisioning\", \"in\n"
+    "line with historical experience\", \"within our expectations\". Boilerplate\n"
+    "does not count.\n"
+    "\n"
+    "management_flag_reason:\n"
+    "- When flag=true, return a short quote (<=30 words) of the specific\n"
+    "  stress language that triggered the flag.\n"
+    "- When flag=false, return null.\n"
+)
+
+
 def _build_prompt(
     ticker: str,
     filing_type: str,
@@ -223,6 +299,17 @@ def _build_prompt(
     if section_name == "portfolio_segments":
         return _build_segments_prompt(ticker, filing_type, period_end, excerpt)
     schema_lines = "\n".join(f'  "{k}": {METRIC_SCHEMA.get(k, "")}' for k in fields)
+
+    guidance = ""
+    if section_name == "fico":
+        guidance = _FICO_GUIDANCE
+    elif section_name == "vintage":
+        guidance = _VINTAGE_GUIDANCE
+    elif section_name == "balance_sheet":
+        guidance = _BALANCE_SHEET_GUIDANCE
+    elif section_name == "management_commentary":
+        guidance = _MGMT_COMMENTARY_GUIDANCE
+
     return (
         f"Issuer: {ticker}. Filing type: {filing_type}. Period ended: {period_end}.\n"
         f"Section being analyzed: {section_name}.\n\n"
@@ -234,10 +321,8 @@ def _build_prompt(
         f"- Any field not disclosed in this excerpt: null.\n"
         f"- Percentages as decimals (7.1% -> 0.071).\n"
         f"- Dollar fields ending in _mm are in millions.\n"
-        f"- vintage_pools: include every vintage year disclosed; "
-        f"each entry {{vintage_year:int, original_balance_mm:float, "
-        f"cumulative_default_rate_pct:float 0-1, as_of_period:str}}.\n\n"
-        f"Excerpt:\n-----\n{excerpt}\n-----"
+        f"{guidance}"
+        f"\nExcerpt:\n-----\n{excerpt}\n-----"
     )
 
 

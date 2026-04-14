@@ -107,7 +107,12 @@ XBRL_TAG_MAP: dict[str, dict] = {
             "AllowanceForLoanAndLeaseLossesProvisionForLossNet",
             "AllowanceForNotesAndLoansReceivableCurrent",
             "AllowanceForNotesAndLoansReceivableNoncurrent",
-            "AllowanceForDoubtfulAccountsReceivable",
+            # NB: AllowanceForDoubtfulAccountsReceivable was previously
+            # listed as a fallback but it's semantically wrong for timeshare
+            # lenders — it captures non-timeshare doubtful accounts
+            # (~$93M for HGV 2025 vs the real ~$900M ACL). Removed. For
+            # HGV post-2021 and VAC throughout, XBRL returns null here;
+            # the `balance_sheet` narrative section fills the gap.
         ],
         "unit": "USD",
         "scale": 1e-6,
@@ -184,7 +189,14 @@ XBRL_VINTAGE_TAG_OFFSETS: list[tuple[str, int]] = [
 NARRATIVE_SECTION_PATTERNS: dict[str, list[str]] = {
     "delinquency": [r"delinqu", r"past due", r"aging"],
     "fico": [r"\bFICO\b", r"credit score"],
-    "vintage": [r"vintage", r"static pool"],
+    "vintage": [
+        r"vintage",
+        r"static pool",
+        r"Origination Year",
+        r"year of origination",
+        r"originated in",
+        r"Vintage Origination",
+    ],
     "management_commentary": [
         r"Critical Accounting",
         r"Credit Losses",
@@ -196,6 +208,13 @@ NARRATIVE_SECTION_PATTERNS: dict[str, list[str]] = {
         r"acquired\s+(?:timeshare|vacation)\s+(?:financing|receivable)",
         r"originated\s+(?:timeshare|vacation)\s+(?:financing|receivable)",
         r"portfolio\s+segment",
+    ],
+    "balance_sheet": [
+        r"Timeshare financing receivables",
+        r"vacation ownership notes receivable",
+        r"Notes receivable, net",
+        r"Allowance for (credit losses|loan losses|financing receivable)",
+        r"Financing receivables",
     ],
 }
 

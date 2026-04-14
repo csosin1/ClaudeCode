@@ -68,6 +68,11 @@ def init_db(db_path: Path | str) -> None:
         existing = {row[1] for row in conn.execute("PRAGMA table_info(filings)")}
         if "segments" not in existing:
             conn.execute("ALTER TABLE filings ADD COLUMN segments TEXT")
+        # `management_flag_reason` holds a short quote supporting a true
+        # management_flagged_credit_concerns flag. Added after the initial
+        # schema landed; idempotent ALTER keeps pre-existing DBs upgradable.
+        if "management_flag_reason" not in existing:
+            conn.execute("ALTER TABLE filings ADD COLUMN management_flag_reason TEXT")
         conn.commit()
 
 

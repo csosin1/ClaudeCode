@@ -87,3 +87,62 @@ def test_upsert_is_idempotent(tmp_path: Path):
 def test_export_empty_when_db_missing(tmp_path: Path):
     db_path = tmp_path / "does_not_exist.db"
     assert pdb.export_combined(db_path) == []
+
+
+def test_management_flag_reason_round_trip(tmp_path: Path):
+    """management_flag_reason is a new string column added via idempotent
+    ALTER; it must round-trip through upsert + export."""
+    db_path = tmp_path / "surveillance.db"
+    pdb.init_db(db_path)
+    rec = _sample_record()
+    rec["management_flagged_credit_concerns"] = True
+    rec["management_flag_reason"] = (
+        "elevated losses in the 600-699 FICO cohort; tightening underwriting"
+    )
+    pdb.upsert_filing(db_path, rec)
+
+    out = pdb.export_combined(db_path)
+    assert len(out) == 1
+    got = out[0]
+    assert "management_flag_reason" in got
+    assert got["management_flag_reason"] == rec["management_flag_reason"]
+    assert got["management_flagged_credit_concerns"] is True
+
+    # Null reason should also round-trip cleanly.
+    rec2 = _sample_record()
+    rec2["accession"] = "0001674168-25-000099"
+    rec2["management_flag_reason"] = None
+    pdb.upsert_filing(db_path, rec2)
+    out2 = pdb.export_combined(db_path)
+    got2 = next(r for r in out2 if r["accession"] == rec2["accession"])
+    assert got2["management_flag_reason"] is None
+
+
+def test_is_prior_bucket_vintage_round_trip(tmp_path: Path):
+    """Vintage_pools entries can carry is_prior_bucket=true with vintage_year
+    null for aggregate 'X & Prior' rows. JSON blob round-trip must preserve."""
+    db_path = tmp_path / "surveillance.db"
+    pdb.init_db(db_path)
+    rec = _sample_record()
+    rec["vintage_pools"] = [
+        {"vintage_year": None, "is_prior_bucket": True,
+         "original_balance_mm": 412.0, "cumulative_default_rate_pct": 0.12,
+         "as_of_period": "2025-03-31"},
+        {"vintage_year": 2023, "is_prior_bucket": False,
+         "original_balance_mm": 1050.0, "cumulative_default_rate_pct": 0.054,
+         "as_of_period": "2025-03-31"},
+        {"vintage_year": 2024, "is_prior_bucket": False,
+         "original_balance_mm": 1120.0, "cumulative_default_rate_pct": 0.023,
+         "as_of_period": "2025-03-31"},
+    ]
+    pdb.upsert_filing(db_path, rec)
+    out = pdb.export_combined(db_path)
+    assert len(out) == 1
+    vps = out[0]["vintage_pools"]
+    assert isinstance(vps, list) and len(vps) == 3
+    prior = [v for v in vps if v.get("is_prior_bucket")]
+    assert len(prior) == 1
+    assert prior[0]["vintage_year"] is None
+    assert prior[0]["original_balance_mm"] == 412.0
+    years = sorted(v["vintage_year"] for v in vps if not v.get("is_prior_bucket"))
+    assert years == [2023, 2024]

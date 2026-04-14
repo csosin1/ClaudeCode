@@ -43,8 +43,10 @@ METRIC_SCHEMA: dict[str, str] = {
     "contract_rescission_rate_pct": "float 0-1",
     "weighted_avg_ltv_pct": "float 0-1",
     "vintage_pools": (
-        "array of {vintage_year:int, original_balance_mm:float, "
-        "cumulative_default_rate_pct:float 0-1, as_of_period:str}"
+        "array of {vintage_year:int|null, is_prior_bucket:bool, "
+        "original_balance_mm:float, cumulative_default_rate_pct:float 0-1, "
+        "as_of_period:str}. `is_prior_bucket` is true for aggregate "
+        "'X & Prior' / 'Prior' rows; when true vintage_year must be null."
     ),
     "segments": (
         "array of {segment_key:str, segment_label:str, segment_type:str, "
@@ -58,6 +60,11 @@ METRIC_SCHEMA: dict[str, str] = {
     ),
     "management_flagged_credit_concerns": "bool, true if management notes credit stress",
     "management_credit_commentary": "string, <=2 sentences summarizing management credit commentary",
+    "management_flag_reason": (
+        "string up to 200 chars, short quote (<=30 words) of the specific "
+        "stress language supporting management_flagged_credit_concerns=true. "
+        "null when flag is false."
+    ),
 }
 
 
