@@ -1,4 +1,4 @@
-# abs-dashboard — Project State
+# Carvana Loan Dashboard — Project State
 
 _Last updated: 2026-04-14 (pre-resize checkpoint)_
 
