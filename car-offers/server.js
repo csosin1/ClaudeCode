@@ -309,6 +309,27 @@ app.get('/setup', (_req, res) => {
       font-weight: 700;
       margin-left: 6px;
     }
+    .row {
+      display: flex;
+      gap: 8px;
+      align-items: stretch;
+      margin-bottom: 2px;
+    }
+    .row input { flex: 1; margin-bottom: 0; }
+    .save-one {
+      flex: 0 0 auto;
+      padding: 0 14px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      background: #2563eb;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      min-width: 68px;
+      transition: background 0.15s;
+    }
+    .save-one:disabled { opacity: 0.6; cursor: wait; }
   </style>
 </head>
 <body>
@@ -335,31 +356,33 @@ app.get('/setup', (_req, res) => {
     <h2 class="section">Paid human-loop (Prolific + MTurk)</h2>
     <p class="section-sub">Orchestrator uses these to post paid micro-tasks when automation stalls.</p>
 
+    <p class="section-sub">Paste whatever you have ready, tap <em>Save</em> next to that field. Other fields are left untouched — you can come back later for the rest.</p>
+
     <label for="prolificToken">Prolific API token <span class="check" data-for="prolificToken"></span></label>
-    <input type="password" id="prolificToken" name="prolificToken" placeholder="${config.PROLIFIC_TOKEN ? '••••••••' : 'Paste Prolific API token'}" value="" autocomplete="off">
+    <div class="row"><input type="password" id="prolificToken" name="prolificToken" placeholder="${config.PROLIFIC_TOKEN ? '••••••••' : 'Paste Prolific API token'}" value="" autocomplete="off"><button type="button" class="save-one" data-field="prolificToken">Save</button></div>
     <p class="help">Create at app.prolific.com → Settings → API Tokens.</p>
 
     <label for="prolificBalanceUsd">Prolific prepaid balance (USD) <span class="check" data-for="prolificBalanceUsd"></span></label>
-    <input type="number" id="prolificBalanceUsd" name="prolificBalanceUsd" placeholder="200" inputmode="numeric" min="0" step="1" value="${escapeAttr(config.PROLIFIC_BALANCE_USD || '')}">
+    <div class="row"><input type="number" id="prolificBalanceUsd" name="prolificBalanceUsd" placeholder="200" inputmode="numeric" min="0" step="1" value="${escapeAttr(config.PROLIFIC_BALANCE_USD || '')}"><button type="button" class="save-one" data-field="prolificBalanceUsd">Save</button></div>
     <p class="help">Whole dollars currently funded on your Prolific workspace.</p>
 
     <label for="mturkAccessKeyId">MTurk access key id <span class="check" data-for="mturkAccessKeyId"></span></label>
-    <input type="text" id="mturkAccessKeyId" name="mturkAccessKeyId" placeholder="AKIA..." autocapitalize="characters" autocomplete="off" value="${escapeAttr(config.MTURK_ACCESS_KEY_ID)}">
+    <div class="row"><input type="text" id="mturkAccessKeyId" name="mturkAccessKeyId" placeholder="AKIA..." autocapitalize="characters" autocomplete="off" value="${escapeAttr(config.MTURK_ACCESS_KEY_ID)}"><button type="button" class="save-one" data-field="mturkAccessKeyId">Save</button></div>
     <p class="help">AWS IAM access key id for your MTurk requester account (starts with AKIA).</p>
 
     <label for="mturkSecretAccessKey">MTurk secret access key <span class="check" data-for="mturkSecretAccessKey"></span></label>
-    <input type="password" id="mturkSecretAccessKey" name="mturkSecretAccessKey" placeholder="${config.MTURK_SECRET_ACCESS_KEY ? '••••••••' : 'Paste AWS secret key'}" value="" autocomplete="off">
+    <div class="row"><input type="password" id="mturkSecretAccessKey" name="mturkSecretAccessKey" placeholder="${config.MTURK_SECRET_ACCESS_KEY ? '••••••••' : 'Paste AWS secret key'}" value="" autocomplete="off"><button type="button" class="save-one" data-field="mturkSecretAccessKey">Save</button></div>
     <p class="help">Paired secret for the access key above; never shown back to you.</p>
 
     <label for="mturkBalanceUsd">MTurk prepaid balance (USD) <span class="check" data-for="mturkBalanceUsd"></span></label>
-    <input type="number" id="mturkBalanceUsd" name="mturkBalanceUsd" placeholder="100" inputmode="numeric" min="0" step="1" value="${escapeAttr(config.MTURK_BALANCE_USD || '')}">
+    <div class="row"><input type="number" id="mturkBalanceUsd" name="mturkBalanceUsd" placeholder="100" inputmode="numeric" min="0" step="1" value="${escapeAttr(config.MTURK_BALANCE_USD || '')}"><button type="button" class="save-one" data-field="mturkBalanceUsd">Save</button></div>
     <p class="help">Whole dollars currently prepaid on your MTurk requester account.</p>
 
     <label for="humanloopDailyCapUsd">Daily spending cap (USD) <span class="check" data-for="humanloopDailyCapUsd"></span></label>
-    <input type="number" id="humanloopDailyCapUsd" name="humanloopDailyCapUsd" placeholder="50" inputmode="numeric" min="1" step="1" value="${escapeAttr(config.HUMANLOOP_DAILY_CAP_USD || 50)}">
+    <div class="row"><input type="number" id="humanloopDailyCapUsd" name="humanloopDailyCapUsd" placeholder="50" inputmode="numeric" min="1" step="1" value="${escapeAttr(config.HUMANLOOP_DAILY_CAP_USD || 50)}"><button type="button" class="save-one" data-field="humanloopDailyCapUsd">Save</button></div>
     <p class="help">Hard daily cap across Prolific + MTurk. Orchestrator pauses paid tasks after this.</p>
 
-    <button type="submit">Save Configuration</button>
+    <button type="submit">Save everything at once</button>
   </form>
 
   <div class="card" style="margin-top:20px;">
@@ -368,6 +391,52 @@ app.get('/setup', (_req, res) => {
   </div>
 
   <script>
+    // Per-field Save buttons — paste one credential at a time, no need to
+    // fill everything. Blank fields on the server keep the current value.
+    document.querySelectorAll('.save-one').forEach(function (btn) {
+      btn.addEventListener('click', async function () {
+        const field = btn.getAttribute('data-field');
+        const input = document.getElementById(field);
+        if (!input || !input.value) {
+          btn.textContent = 'Empty';
+          setTimeout(function () { btn.textContent = 'Save'; }, 1400);
+          return;
+        }
+        btn.disabled = true;
+        const original = btn.textContent;
+        btn.textContent = 'Saving…';
+        try {
+          const body = {}; body[field] = input.value;
+          const r = await fetch('/car-offers/api/setup', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          });
+          if (r.ok) {
+            btn.textContent = 'Saved ✓';
+            btn.style.background = '#059669';
+            if (input.type === 'password') input.value = '';
+            const check = document.querySelector('.check[data-for="' + field + '"]');
+            if (check) check.textContent = '\u2713 set';
+          } else {
+            let err = 'Error';
+            try { const j = await r.json(); err = j.error || err; } catch (_) {}
+            btn.textContent = err.slice(0, 20);
+            btn.style.background = '#dc2626';
+          }
+        } catch (e) {
+          btn.textContent = 'Network err';
+          btn.style.background = '#dc2626';
+        } finally {
+          setTimeout(function () {
+            btn.disabled = false;
+            btn.textContent = original;
+            btn.style.background = '';
+          }, 2000);
+        }
+      });
+    });
+
     // On load, fetch /api/setup/status and paint a green check next to
     // every field that's already configured. Never shows the actual value.
     (async function paintStatus() {
@@ -426,12 +495,15 @@ app.post('/api/setup', (req, res) => {
     return res.redirect('/car-offers/setup?msg=required');
   };
 
-  const proxyHost = sanitize(req.body.proxyHost);
-  const proxyPort = sanitize(req.body.proxyPort);
-  const proxyUser = sanitize(req.body.proxyUser);
-  // If password field is blank, keep the existing value (existing behavior).
-  const proxyPass = req.body.proxyPass ? sanitize(req.body.proxyPass) : config.PROXY_PASS;
-  const projectEmail = sanitize(req.body.projectEmail);
+  // All fields: blank submission keeps the current value. This makes the form
+  // safe for per-field "save one at a time" UX — typing just the Prolific token
+  // and hitting Save will not clobber proxy/email.
+  const keep = (raw, current) => (raw && sanitize(raw)) ? sanitize(raw) : (current || '');
+  const proxyHost = keep(req.body.proxyHost, config.PROXY_HOST);
+  const proxyPort = keep(req.body.proxyPort, config.PROXY_PORT);
+  const proxyUser = keep(req.body.proxyUser, config.PROXY_USER);
+  const proxyPass = keep(req.body.proxyPass, config.PROXY_PASS);
+  const projectEmail = keep(req.body.projectEmail, config.PROJECT_EMAIL);
 
   // --- Paid human-loop fields (all optional: blank means "keep current"). ---
   const prolificToken = req.body.prolificToken
