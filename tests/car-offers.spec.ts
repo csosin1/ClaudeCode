@@ -195,6 +195,92 @@ test.describe('Car-offers consumer panel', () => {
   });
 });
 
+test.describe('Car-offers /setup (humanloop credentials)', () => {
+  test('GET /setup returns 200 and mentions Prolific + MTurk', async ({ page, request }) => {
+    const resp = await request.get('/car-offers/setup');
+    expect(resp.status(), '/setup should answer 200').toBe(200);
+    const html = await resp.text();
+    // Older builds won't have the humanloop section — skip so we don't
+    // falsely regress a preview that hasn't been deployed yet.
+    if (!/Paid human-loop/i.test(html)) {
+      test.skip(true, '/setup humanloop section not deployed yet');
+    }
+    expect(html).toContain('Prolific');
+    expect(html).toContain('MTurk');
+
+    await page.goto('/car-offers/setup');
+    // Ensure the section heading actually renders (not just buried in a string).
+    const section = page.locator('h2.section', { hasText: /Prolific/ });
+    await expect(section).toBeVisible();
+  });
+
+  test('GET /api/setup/status returns booleans + numbers, no secret values', async ({ request }) => {
+    const resp = await request.get('/car-offers/api/setup/status');
+    if (resp.status() === 404) test.skip(true, '/api/setup/status not on this build');
+    expect(resp.ok(), 'status endpoint should be 200').toBeTruthy();
+    const body = await resp.json();
+    // Shape contract: six documented fields. Booleans MUST be booleans,
+    // numbers MUST be numbers — anything else would mean we leaked a value.
+    expect(typeof body.proxy).toBe('boolean');
+    expect(typeof body.email).toBe('boolean');
+    expect(typeof body.prolific).toBe('boolean');
+    expect(typeof body.mturk).toBe('boolean');
+    expect(typeof body.daily_cap).toBe('number');
+    // At least one balance field must be numeric (both are, but we only
+    // require one to keep this tolerant to future naming tweaks).
+    const hasNumericBalance =
+      typeof body.prolific_balance === 'number' || typeof body.mturk_balance === 'number';
+    expect(hasNumericBalance).toBeTruthy();
+    // Sanity: the JSON blob shouldn't contain obvious secret shapes.
+    const raw = JSON.stringify(body);
+    expect(raw).not.toMatch(/AKIA[0-9A-Z]{16}/);
+  });
+
+  test('POST /api/setup with a valid MTURK_ACCESS_KEY_ID returns 200 {ok:true}', async ({ request }) => {
+    // Probe the status endpoint first — on builds without the new handler,
+    // the old form-only handler redirects (302); we only run the JSON path
+    // against the extended handler.
+    const probe = await request.get('/car-offers/api/setup/status');
+    if (probe.status() === 404) test.skip(true, '/api/setup extended handler not on this build');
+
+    // Valid AWS access key id pattern: AKIA + 16 uppercase alphanumerics.
+    // dry_run=true ensures we validate without clobbering the real .env on
+    // the live/preview droplet — essential for CI safety.
+    const resp = await request.post('/car-offers/api/setup', {
+      headers: { 'content-type': 'application/json' },
+      data: {
+        mturkAccessKeyId: 'AKIAABCDEFGHIJKLMNOP',
+        humanloopDailyCapUsd: '50',
+        dry_run: true,
+      },
+    });
+    expect(resp.status(), `unexpected status ${resp.status()}`).toBe(200);
+    const body = await resp.json();
+    expect(body.ok).toBe(true);
+    expect(typeof body.saved).toBe('number');
+    // Dry-run must NOT have written anything.
+    expect(body.saved).toBe(0);
+    expect(body.dry_run).toBe(true);
+  });
+
+  test('POST /api/setup with an INVALID MTURK_ACCESS_KEY_ID returns 400', async ({ request }) => {
+    const probe = await request.get('/car-offers/api/setup/status');
+    if (probe.status() === 404) test.skip(true, '/api/setup extended handler not on this build');
+
+    const resp = await request.post('/car-offers/api/setup', {
+      headers: { 'content-type': 'application/json' },
+      data: {
+        mturkAccessKeyId: 'not-a-valid-key',
+        dry_run: true,
+      },
+    });
+    expect(resp.status(), `expected 400, got ${resp.status()}`).toBe(400);
+    const body = await resp.json();
+    expect(body.ok).toBe(false);
+    expect(typeof body.error).toBe('string');
+  });
+});
+
 test.describe('Car-offers security', () => {
   test('.env is not served', async ({ request }) => {
     const resp = await request.get('/car-offers/.env');

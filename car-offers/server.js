@@ -285,6 +285,30 @@ app.get('/setup', (_req, res) => {
     }
     .alert-warn { background: #422006; color: #fbbf24; }
     .alert-ok   { background: #052e16; color: #4ade80; }
+    h2.section {
+      font-size: 1rem;
+      color: #38bdf8;
+      margin: 28px 0 4px;
+      padding-top: 16px;
+      border-top: 1px solid #334155;
+    }
+    .section-sub {
+      font-size: 0.8rem;
+      color: #94a3b8;
+      margin-bottom: 4px;
+    }
+    .help {
+      font-size: 0.75rem;
+      color: #64748b;
+      margin-top: 4px;
+      line-height: 1.3;
+    }
+    .check {
+      display: inline-block;
+      color: #4ade80;
+      font-weight: 700;
+      margin-left: 6px;
+    }
   </style>
 </head>
 <body>
@@ -302,11 +326,38 @@ app.get('/setup', (_req, res) => {
     <label for="proxyUser">Proxy Username</label>
     <input type="text" id="proxyUser" name="proxyUser" placeholder="username" value="${escapeAttr(config.PROXY_USER || 'spjax0kgms')}">
 
-    <label for="proxyPass">Proxy Password</label>
+    <label for="proxyPass">Proxy Password <span class="check" data-for="proxyPass"></span></label>
     <input type="password" id="proxyPass" name="proxyPass" placeholder="${config.PROXY_PASS ? '••••••••' : 'password'}" value="">
 
-    <label for="projectEmail">Project Email</label>
+    <label for="projectEmail">Project Email <span class="check" data-for="projectEmail"></span></label>
     <input type="email" id="projectEmail" name="projectEmail" placeholder="you@example.com (optional)" value="${escapeAttr(config.PROJECT_EMAIL)}">
+
+    <h2 class="section">Paid human-loop (Prolific + MTurk)</h2>
+    <p class="section-sub">Orchestrator uses these to post paid micro-tasks when automation stalls.</p>
+
+    <label for="prolificToken">Prolific API token <span class="check" data-for="prolificToken"></span></label>
+    <input type="password" id="prolificToken" name="prolificToken" placeholder="${config.PROLIFIC_TOKEN ? '••••••••' : 'Paste Prolific API token'}" value="" autocomplete="off">
+    <p class="help">Create at app.prolific.com → Settings → API Tokens.</p>
+
+    <label for="prolificBalanceUsd">Prolific prepaid balance (USD) <span class="check" data-for="prolificBalanceUsd"></span></label>
+    <input type="number" id="prolificBalanceUsd" name="prolificBalanceUsd" placeholder="200" inputmode="numeric" min="0" step="1" value="${escapeAttr(config.PROLIFIC_BALANCE_USD || '')}">
+    <p class="help">Whole dollars currently funded on your Prolific workspace.</p>
+
+    <label for="mturkAccessKeyId">MTurk access key id <span class="check" data-for="mturkAccessKeyId"></span></label>
+    <input type="text" id="mturkAccessKeyId" name="mturkAccessKeyId" placeholder="AKIA..." autocapitalize="characters" autocomplete="off" value="${escapeAttr(config.MTURK_ACCESS_KEY_ID)}">
+    <p class="help">AWS IAM access key id for your MTurk requester account (starts with AKIA).</p>
+
+    <label for="mturkSecretAccessKey">MTurk secret access key <span class="check" data-for="mturkSecretAccessKey"></span></label>
+    <input type="password" id="mturkSecretAccessKey" name="mturkSecretAccessKey" placeholder="${config.MTURK_SECRET_ACCESS_KEY ? '••••••••' : 'Paste AWS secret key'}" value="" autocomplete="off">
+    <p class="help">Paired secret for the access key above; never shown back to you.</p>
+
+    <label for="mturkBalanceUsd">MTurk prepaid balance (USD) <span class="check" data-for="mturkBalanceUsd"></span></label>
+    <input type="number" id="mturkBalanceUsd" name="mturkBalanceUsd" placeholder="100" inputmode="numeric" min="0" step="1" value="${escapeAttr(config.MTURK_BALANCE_USD || '')}">
+    <p class="help">Whole dollars currently prepaid on your MTurk requester account.</p>
+
+    <label for="humanloopDailyCapUsd">Daily spending cap (USD) <span class="check" data-for="humanloopDailyCapUsd"></span></label>
+    <input type="number" id="humanloopDailyCapUsd" name="humanloopDailyCapUsd" placeholder="50" inputmode="numeric" min="1" step="1" value="${escapeAttr(config.HUMANLOOP_DAILY_CAP_USD || 50)}">
+    <p class="help">Hard daily cap across Prolific + MTurk. Orchestrator pauses paid tasks after this.</p>
 
     <button type="submit">Save Configuration</button>
   </form>
@@ -317,6 +368,30 @@ app.get('/setup', (_req, res) => {
   </div>
 
   <script>
+    // On load, fetch /api/setup/status and paint a green check next to
+    // every field that's already configured. Never shows the actual value.
+    (async function paintStatus() {
+      try {
+        const r = await fetch('/car-offers/api/setup/status', { cache: 'no-store' });
+        if (!r.ok) return;
+        const s = await r.json();
+        const map = {
+          proxyPass: s.proxy === true,
+          projectEmail: s.email === true,
+          prolificToken: s.prolific === true,
+          prolificBalanceUsd: typeof s.prolific_balance === 'number' && s.prolific_balance > 0,
+          mturkAccessKeyId: s.mturk === true,
+          mturkSecretAccessKey: s.mturk === true,
+          mturkBalanceUsd: typeof s.mturk_balance === 'number' && s.mturk_balance > 0,
+          humanloopDailyCapUsd: typeof s.daily_cap === 'number' && s.daily_cap > 0,
+        };
+        document.querySelectorAll('.check').forEach(function (el) {
+          var key = el.getAttribute('data-for');
+          if (map[key]) el.textContent = '\u2713 set';
+        });
+      } catch (_) { /* silent: status is advisory only */ }
+    })();
+
     async function testProxy() {
       const btn = document.getElementById('testBtn');
       const result = document.getElementById('testResult');
@@ -345,14 +420,60 @@ app.get('/setup', (_req, res) => {
 
 app.post('/api/setup', (req, res) => {
   const sanitize = (v) => String(v || '').replace(/[\r\n]/g, '').trim();
+  const isJson = (req.headers['content-type'] || '').includes('application/json');
+  const fail = (msg, field) => {
+    if (isJson) return res.status(400).json({ ok: false, error: msg, field: field || null });
+    return res.redirect('/car-offers/setup?msg=required');
+  };
 
   const proxyHost = sanitize(req.body.proxyHost);
   const proxyPort = sanitize(req.body.proxyPort);
   const proxyUser = sanitize(req.body.proxyUser);
-  // If password field is blank, keep the existing value
+  // If password field is blank, keep the existing value (existing behavior).
   const proxyPass = req.body.proxyPass ? sanitize(req.body.proxyPass) : config.PROXY_PASS;
   const projectEmail = sanitize(req.body.projectEmail);
 
+  // --- Paid human-loop fields (all optional: blank means "keep current"). ---
+  const prolificToken = req.body.prolificToken
+    ? sanitize(req.body.prolificToken)
+    : config.PROLIFIC_TOKEN;
+  const mturkAccessKeyId = req.body.mturkAccessKeyId
+    ? sanitize(req.body.mturkAccessKeyId)
+    : config.MTURK_ACCESS_KEY_ID;
+  const mturkSecretAccessKey = req.body.mturkSecretAccessKey
+    ? sanitize(req.body.mturkSecretAccessKey)
+    : config.MTURK_SECRET_ACCESS_KEY;
+
+  // Positive-int parser: blank means "don't update"; anything else must parse
+  // to a non-negative integer. Returns { ok, value, error } so we can 400 early.
+  function parseIntField(raw, label, currentVal, { min = 0 } = {}) {
+    const s = sanitize(raw);
+    if (!s) return { ok: true, value: currentVal };
+    if (!/^\d+$/.test(s)) return { ok: false, error: `${label} must be a positive integer` };
+    const n = parseInt(s, 10);
+    if (n < min) return { ok: false, error: `${label} must be >= ${min}` };
+    return { ok: true, value: n };
+  }
+
+  const prolificBal = parseIntField(req.body.prolificBalanceUsd, 'Prolific balance', config.PROLIFIC_BALANCE_USD);
+  if (!prolificBal.ok) return fail(prolificBal.error, 'prolificBalanceUsd');
+  const mturkBal = parseIntField(req.body.mturkBalanceUsd, 'MTurk balance', config.MTURK_BALANCE_USD);
+  if (!mturkBal.ok) return fail(mturkBal.error, 'mturkBalanceUsd');
+  const dailyCap = parseIntField(req.body.humanloopDailyCapUsd, 'Daily cap', config.HUMANLOOP_DAILY_CAP_USD, { min: 1 });
+  if (!dailyCap.ok) return fail(dailyCap.error, 'humanloopDailyCapUsd');
+
+  // MTurk access key id: only validate when a NEW non-empty value is submitted.
+  // Blank means "don't change"; anything present must match the AWS IAM pattern.
+  if (req.body.mturkAccessKeyId && sanitize(req.body.mturkAccessKeyId)) {
+    if (!/^AKIA[0-9A-Z]{16}$/.test(mturkAccessKeyId)) {
+      return fail('MTURK_ACCESS_KEY_ID must match /^AKIA[0-9A-Z]{16}$/', 'mturkAccessKeyId');
+    }
+  }
+
+  // Write env files. The service runs from /opt/car-offers (live) or
+  // /opt/car-offers-preview (preview); when invoked on one instance we also
+  // mirror into the sibling instance's .env so "configure once" works for the
+  // non-technical user. Missing sibling is fine — skip silently.
   const envContent = [
     `PROXY_HOST=${proxyHost}`,
     `PROXY_PORT=${proxyPort}`,
@@ -360,27 +481,88 @@ app.post('/api/setup', (req, res) => {
     `PROXY_PASS=${proxyPass}`,
     `PROJECT_EMAIL=${projectEmail}`,
     `PORT=${config.PORT}`,
+    `PROLIFIC_TOKEN=${prolificToken}`,
+    `PROLIFIC_BALANCE_USD=${prolificBal.value}`,
+    `MTURK_ACCESS_KEY_ID=${mturkAccessKeyId}`,
+    `MTURK_SECRET_ACCESS_KEY=${mturkSecretAccessKey}`,
+    `MTURK_BALANCE_USD=${mturkBal.value}`,
+    `HUMANLOOP_DAILY_CAP_USD=${dailyCap.value}`,
   ].join('\n') + '\n';
 
-  const envPath = path.join(__dirname, '.env');
-  fs.writeFileSync(envPath, envContent, 'utf8');
-  config.reloadConfig();
+  // Dry-run mode: validate everything, don't persist, return {ok,saved:0,dry_run:true}.
+  // Used by tests so they can exercise validation without clobbering real creds.
+  const dryRun = req.query.dry_run === '1' || req.body.dry_run === true || req.body.dry_run === '1';
 
-  // If the request is JSON (API call), return JSON; otherwise redirect
-  if (req.headers['content-type'] === 'application/json') {
-    return res.json({ ok: true, message: 'Configuration saved.' });
+  const envPath = path.join(__dirname, '.env');
+  let saved = 0;
+  if (!dryRun) {
+    try {
+      fs.writeFileSync(envPath, envContent, 'utf8');
+      saved += 1;
+    } catch (e) {
+      console.error('[setup] failed to write primary .env:', e.message);
+      return isJson
+        ? res.status(500).json({ ok: false, error: 'failed to write .env' })
+        : res.redirect('/car-offers/setup?msg=required');
+    }
+
+    // Mirror to the sibling deployment (live <-> preview) if it exists.
+    try {
+      const siblingPaths = [
+        '/opt/car-offers/.env',
+        '/opt/car-offers-preview/.env',
+      ].filter((p) => p !== envPath);
+      for (const sp of siblingPaths) {
+        const dir = path.dirname(sp);
+        if (fs.existsSync(dir)) {
+          fs.writeFileSync(sp, envContent, 'utf8');
+          saved += 1;
+        }
+      }
+    } catch (e) {
+      // Non-fatal: the primary was already written.
+      console.error('[setup] failed to mirror .env to sibling:', e.message);
+    }
+
+    config.reloadConfig();
   }
+
+  if (isJson) {
+    return res.json({ ok: true, saved, dry_run: dryRun });
+  }
+  if (dryRun) return res.redirect('/car-offers/setup?msg=saved');
   res.redirect('/car-offers/setup?msg=saved');
 
-  // Re-run diagnostics in background after config change
-  setTimeout(async () => {
-    console.log('[setup] Config changed — re-running diagnostics...');
-    await runFullDiagnostic();
-    if (selfTest.proxyResult && selfTest.proxyResult.ok) {
-      console.log('[setup] Curl proxy works! Testing Playwright browser...');
-      await testPlaywrightProxy();
-    }
-  }, 2000);
+  // Re-run diagnostics in background after config change (skip on dry-run)
+  if (!dryRun) {
+    setTimeout(async () => {
+      console.log('[setup] Config changed — re-running diagnostics...');
+      await runFullDiagnostic();
+      if (selfTest.proxyResult && selfTest.proxyResult.ok) {
+        console.log('[setup] Curl proxy works! Testing Playwright browser...');
+        await testPlaywrightProxy();
+      }
+    }, 2000);
+  }
+});
+
+// Booleans-only view of what's configured. NEVER returns secret values.
+// Used by /setup to show "already set" checkmarks next to each field.
+// Shape: { proxy, email, prolific, mturk, daily_cap, prolific_balance, mturk_balance }
+// - proxy/email/prolific/mturk are booleans: "is this credential set?"
+// - daily_cap / *_balance are numbers: balances are non-secret integers the
+//   user typed, fine to echo, and we want the UI to surface them.
+app.get('/api/setup/status', (_req, res) => {
+  try { config.reloadConfig(); } catch (_) { /* .env may not exist yet */ }
+  res.json({
+    proxy: !!config.PROXY_PASS,
+    email: !!config.PROJECT_EMAIL,
+    prolific: !!config.PROLIFIC_TOKEN,
+    mturk: !!(config.MTURK_ACCESS_KEY_ID && config.MTURK_SECRET_ACCESS_KEY),
+    daily_cap: Number(config.HUMANLOOP_DAILY_CAP_USD) || 50,
+    prolific_balance: Number(config.PROLIFIC_BALANCE_USD) || 0,
+    mturk_balance: Number(config.MTURK_BALANCE_USD) || 0,
+  });
 });
 
 /** Escape a string for use inside an HTML attribute value (double-quoted). */
