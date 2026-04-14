@@ -52,25 +52,72 @@ def _extract_numbered_fields(text: str) -> dict:
 
     fields = {}
 
-    # Strategy 1: Workiva double-number format: (N) label (N) value
-    pattern1 = re.compile(r'\((\d+)\)\s*(.*?)\s*\(\1\)\s+(.*?)(?=\(\d+\)|\Z)', re.DOTALL)
+    # Strategy 1: Workiva double-number format: (N) label (N) value.
+    # Carvana field numbers stay under ~200; any "(N)" with a comma or >200
+    # value is a parenthesised dollar amount (e.g. "(3,277)" or "(525)"), not
+    # a field marker. Use a conservative upper bound to avoid stopping the
+    # value capture inside a negative amount.
+    #
+    # Additional guard: a genuine Workiva field pair has the TWO "(N)" tokens
+    # within ~400 chars of each other (label length is small). Reject pairs
+    # that span a huge distance — those are almost always a parenthesised
+    # value that happens to collide with a later same-numbered marker
+    # (e.g. "(93) ... (93) (138) (94) ... (138) <intrest rate table>").
+    pattern1 = re.compile(r'\((\d+)\)\s*(.{0,400}?)\s*\(\1\)\s+(.*?)(?=\((?:[1-9]\d?|1\d{2}|200)\)|\Z)', re.DOTALL)
     for match in pattern1.finditer(text):
         field_num = int(match.group(1))
         label = match.group(2).strip()
         value_str = match.group(3).strip()
         fields[field_num] = {"label": label, "raw": value_str}
 
-    # If we found fields with Strategy 1, we're done
-    if fields:
+    # Genuine Workiva certs produce 100+ Strategy-1 hits. Donnelley certs have
+    # formulas like "{sum of (17,23,29,35,41,47,53)}" and "{(14)*0.5%}" that
+    # cause spurious Strategy-1 matches (a single bogus field swallows huge
+    # amounts of surrounding text). Require a solid minimum before trusting
+    # Strategy 1 and skipping Strategy 2.
+    if len(fields) >= 20:
         return fields
 
+    # Reset — any Strategy-1 hits in Donnelley text are noise
+    fields = {}
+
     # Strategy 2: Donnelley single-number format: label (N) value
-    pattern2 = re.compile(r'(?:^|(?<=\s))\((\d+)\)\s+(.*?)(?=\(\d+\)|\Z)', re.DOTALL)
+    # Each match captures everything after "(N)" up to the next "(M)" — which
+    # contains the value followed by the next field's label.
+    # Restrict the lookahead to realistic field numbers (1-200) so a
+    # parenthesised negative value does not truncate the capture.
+    pattern2 = re.compile(r'(?:^|(?<=\s))\((\d+)\)\s+(.*?)(?=\((?:[1-9]\d?|1\d{2}|200)\)|\Z)', re.DOTALL)
+    ordered = []
     for match in pattern2.finditer(text):
         field_num = int(match.group(1))
         value_str = match.group(2).strip()
-        if field_num not in fields:
-            fields[field_num] = {"label": "", "raw": value_str}
+        ordered.append((field_num, value_str))
+
+    # Post-pass: each raw is "<value tokens> <next-field label text>".
+    # Split off the leading numeric tokens to recover the value and label.
+    # The recovered "tail label" is the LABEL of the NEXT field, so back-fill.
+    pending_label_for_next = ""
+    for i, (fnum, raw) in enumerate(ordered):
+        tokens = raw.split()
+        val_tokens = []
+        j = 0
+        while j < len(tokens):
+            tok = tokens[j]
+            cleaned = tok.replace(",", "").replace("$", "").replace("(", "").replace(")", "").replace("%", "")
+            # Numeric token (incl. negative, decimal, parenthesised, percent)
+            if re.match(r'^-?\d[\d,.]*$', cleaned) and cleaned not in ("",):
+                val_tokens.append(tok); j += 1
+            elif tok in ("$", "%", "(", ")"):
+                val_tokens.append(tok); j += 1
+            elif re.match(r'^\d+-\d+$', cleaned):  # bucket like 31-60
+                val_tokens.append(tok); j += 1
+            else:
+                break
+        value_str = " ".join(val_tokens).strip()
+        next_label = " ".join(tokens[j:]).strip()
+        if fnum not in fields:
+            fields[fnum] = {"label": pending_label_for_next, "raw": value_str}
+        pending_label_for_next = next_label
 
     return fields
 
@@ -101,14 +148,35 @@ def _parse_numbered_value(raw: str, expect_count_and_amount: bool = False) -> di
     # This avoids grabbing stray numbers from trailing label text like "60 days delinquent".
     tokens = raw.split()
     numbers = []
+    pending_open_paren = False  # True after we've seen "(" starting a negative
     for token in tokens:
-        cleaned = token.replace(",", "").replace("$", "")
         # Skip range patterns like "31-60", "61-90"
-        if re.match(r'^\d+-\d+$', cleaned):
+        bare = token.replace(",", "").replace("$", "").replace("(", "").replace(")", "")
+        if re.match(r'^\d+-\d+$', bare):
             continue
-        # If it looks like a number, add it
-        if re.match(r'^-?[\d,]+\.?\d*$', token.replace(",", "")):
-            numbers.append(token)
+        # Skip lone $ prefix
+        if token in ("$",):
+            continue
+        # Handle parenthesis-wrapped negatives: "(66,729 )" splits into
+        # "(66,729" and ")". Also "(66,729)" as one token. Normalise the
+        # token, extract numeric, tag sign.
+        # Open paren starts a potential negative
+        if token == "(":
+            pending_open_paren = True
+            continue
+        if token == ")":
+            # close paren; don't break the run — keep scanning
+            continue
+        # Strip surrounding parens and leading $ from the token for numeric test
+        stripped = token.strip("()").lstrip("$")
+        if re.match(r'^-?[\d,]+\.?\d*$', stripped.replace(",", "")):
+            tok_negative = (token.startswith("(") or pending_open_paren)
+            # If the token itself was "(NNN)" or "(NNN", or preceded by "(", treat as negative
+            if tok_negative:
+                numbers.append("-" + stripped)
+            else:
+                numbers.append(stripped)
+            pending_open_paren = False
         elif re.match(r'^[a-zA-Z]', token):
             # Hit a word — stop collecting numbers
             break
@@ -300,35 +368,72 @@ def _parse_from_numbered_text(text: str) -> dict:
     # 2022+ vintages use 90/94/97; non-prime has a different numbering with
     # the same labels). Try the "usual" field numbers first, then fall back
     # to a label-based lookup that works across all variants.
+    def _norm(s):
+        # Collapse whitespace AND normalise unicode dashes / non-breaking
+        # spaces to their ASCII equivalents so labels with u+2010 hyphens or
+        # u+00a0 non-breaking spaces still match against ASCII search strings.
+        if not s:
+            return ""
+        s = s.replace("\u00a0", " ")
+        for dash in ("\u2010", "\u2011", "\u2012", "\u2013", "\u2014"):
+            s = s.replace(dash, "-")
+        return re.sub(r'\s+', ' ', s).strip()
+
     def _by_label(label_substr):
+        # Collapse whitespace in both sides so newlines/tabs inserted by HTML
+        # layout do not break matching ("Receivables\nlosses" vs "Receivables losses").
+        target = _norm(label_substr)
         for fnum, fdata in fields.items():
-            if label_substr in (fdata.get("label") or ""):
+            lbl = _norm(fdata.get("label"))
+            if target in lbl:
                 return fdata["raw"]
         return None
+
+    def _val(field_num):
+        """Get parsed value from a numeric field, if present."""
+        if field_num in fields:
+            return _parse_numbered_value(fields[field_num]["raw"])["value"]
+        return None
+
+    def _pick(*candidates):
+        """Return first non-None candidate (preserves 0 correctly)."""
+        for c in candidates:
+            if c is not None:
+                return c
+        return None
+
+    def _label_val(label_substr):
+        raw = _by_label(label_substr)
+        if raw is None:
+            return None
+        return _parse_numbered_value(raw)["value"]
 
     if 8 in fields:
         v = _parse_numbered_value(fields[8]["raw"], expect_count_and_amount=True)
         data["gross_charged_off_amount"] = v["value"]
-    data["gross_charged_off_amount"] = (
-        data.get("gross_charged_off_amount")
-        or _parse_numbered_value(
-            _by_label("Gross Charged-Off Receivables losses occurring in current Collection Period") or ""
-        )["value"])
-    data["cumulative_gross_losses"] = _parse_numbered_value(
-        _by_label("Gross Charged-Off Receivables losses as of the last day of the current") or ""
-    )["value"]
-    data["liquidation_proceeds"] = _parse_numbered_value(
-        _by_label("Gross Liquidation Proceeds occurring in the current Collection Period") or ""
-    )["value"]
-    data["cumulative_liquidation_proceeds"] = _parse_numbered_value(
-        _by_label("Liquidation Proceeds as of the last day of the current") or ""
-    )["value"]
-    data["net_charged_off_amount"] = _parse_numbered_value(
-        _by_label("Net Charged-Off Receivables losses occurring in current Collection Period") or ""
-    )["value"]
-    data["cumulative_net_losses"] = _parse_numbered_value(
-        _by_label("Net Charged-Off Receivables losses as of the last day of the current") or ""
-    )["value"]
+    # Prefer label-based lookup (Workiva), fall back to Donnelley fixed field
+    # numbers, which are stable across Carvana 2020-P1 through mid-2023 certs.
+    # Use _pick to preserve legitimate 0 values (vs Python's `or` which would
+    # fall through to the next branch when the label-matched value is 0).
+    data["gross_charged_off_amount"] = _pick(
+        data.get("gross_charged_off_amount"),
+        _label_val("Gross Charged-Off Receivables losses occurring in current Collection Period"),
+        _val(90))
+    data["cumulative_gross_losses"] = _pick(
+        _label_val("Gross Charged-Off Receivables losses as of the last day of the current"),
+        _val(91))
+    data["liquidation_proceeds"] = _pick(
+        _label_val("Gross Liquidation Proceeds occurring in the current Collection Period"),
+        _val(93))
+    data["cumulative_liquidation_proceeds"] = _pick(
+        _label_val("Liquidation Proceeds as of the last day of the current"),
+        _val(95))
+    data["net_charged_off_amount"] = _pick(
+        _label_val("Net Charged-Off Receivables losses occurring in current Collection Period"),
+        _val(97))
+    data["cumulative_net_losses"] = _pick(
+        _label_val("Net Charged-Off Receivables losses as of the last day of the current"),
+        _val(98))
 
     # --- Delinquency buckets ---
     # The bucket rows are numbered fields whose extracted "label" comes out
@@ -445,26 +550,76 @@ def _parse_from_numbered_text(text: str) -> dict:
         data["reserve_account_balance"] = _parse_numbered_value(fields[81]["raw"])["value"]
     if 77 in fields:
         data["specified_reserve_amount"] = _parse_numbered_value(fields[77]["raw"])["value"]
+    # Label-based fallback — non-prime certs use different field numbers
+    # for the reserve rollforward. "Ending Reserve Account Balance" (field 36
+    # in 2021-N* certs) is the authoritative ending balance.
+    if data.get("reserve_account_balance") is None:
+        end_raw = _by_label("Ending Reserve Account Balance")
+        if end_raw:
+            data["reserve_account_balance"] = _parse_numbered_value(end_raw)["value"]
+    if data.get("specified_reserve_amount") is None:
+        spec_raw = _by_label("Specified Reserve Amount") or _by_label("Specified Reserve Account Amount")
+        if spec_raw:
+            data["specified_reserve_amount"] = _parse_numbered_value(spec_raw)["value"]
+    if data.get("overcollateralization_amount") is None:
+        oc_raw = _by_label("Overcollateralization in Dollars")
+        if oc_raw:
+            data["overcollateralization_amount"] = _parse_numbered_value(oc_raw)["value"]
 
     # --- Pool Statistics (fields 105-112) ---
-    if 105 in fields:
-        # WAC field has original/prev/current — take current (last number)
-        numbers = re.findall(r'[\d.]+%', fields[105]["raw"])
-        if numbers:
-            pct = _clean_number(numbers[-1].replace("%", ""))
-            data["weighted_avg_apr"] = pct / 100.0 if pct else None
-    if 106 in fields:
-        numbers = re.findall(r'[\d.]+', fields[106]["raw"])
-        if numbers:
-            data["weighted_avg_remaining_term"] = _clean_number(numbers[-1])
-    if 107 in fields:
-        numbers = re.findall(r'[\d.]+', fields[107]["raw"])
-        if numbers:
-            data["weighted_avg_original_term"] = _clean_number(numbers[-1])
-    if 108 in fields:
-        numbers = re.findall(r'[\d,.]+', fields[108]["raw"])
-        if numbers:
-            data["avg_principal_balance"] = _clean_number(numbers[-1])
+    def _last_pct_from_raw(raw):
+        nums = re.findall(r'[\d.]+%', raw or "")
+        if nums:
+            pct = _clean_number(nums[-1].replace("%", ""))
+            return pct / 100.0 if pct else None
+        return None
+    def _last_num_from_raw(raw):
+        nums = re.findall(r'[\d,]+\.?\d*', raw or "")
+        if nums:
+            return _clean_number(nums[-1])
+        return None
+
+    # Label-based extraction is most reliable — field numbers shift across
+    # vintages (prime 2020-P1 used 105/106/107/108 for APR/term/orig/balance,
+    # but Workiva 2024-P2 shifted them to 104/105/106/107, and non-prime certs
+    # use a completely different scheme). Use labels first, fallback to field
+    # numbers if labels miss.
+    raw = _by_label("Weighted Average APR of the Receivables")
+    if raw:
+        data["weighted_avg_apr"] = _last_pct_from_raw(raw)
+    elif 105 in fields:
+        data["weighted_avg_apr"] = _last_pct_from_raw(fields[105]["raw"])
+
+    raw = _by_label("Weighted Average Remaining Term of the Receivables")
+    if raw:
+        data["weighted_avg_remaining_term"] = _last_num_from_raw(raw)
+    elif 106 in fields:
+        data["weighted_avg_remaining_term"] = _last_num_from_raw(fields[106]["raw"])
+
+    raw = _by_label("Weighted Average Original Term of the Receivables")
+    if raw:
+        data["weighted_avg_original_term"] = _last_num_from_raw(raw)
+    elif 107 in fields:
+        data["weighted_avg_original_term"] = _last_num_from_raw(fields[107]["raw"])
+
+    # "Average Principal Balance" also appears inside the "Historical Net
+    # Loss Data" header label (field 99 on Donnelley), so prefer the full
+    # Receivables-qualified label, then a label that is EXACTLY "Average
+    # Principal Balance" (ignoring surrounding whitespace).
+    def _by_exact_label(target):
+        tgt = _norm(target)
+        for fnum, fdata in fields.items():
+            lbl = _norm(fdata.get("label"))
+            if lbl == tgt:
+                return fdata["raw"]
+        return None
+
+    raw = (_by_label("Average Principal Balance of the Receivables")
+           or _by_exact_label("Average Principal Balance"))
+    if raw:
+        data["avg_principal_balance"] = _last_num_from_raw(raw)
+    elif 108 in fields:
+        data["avg_principal_balance"] = _last_num_from_raw(fields[108]["raw"])
 
     # --- Extensions (fields 113-114) ---
     if 113 in fields:
