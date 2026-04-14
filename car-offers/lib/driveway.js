@@ -61,14 +61,27 @@ async function _getDrivewayOfferImpl({ vin, mileage, zip, condition, email, cons
     if (elapsed() > TOTAL_TIMEOUT) throw new Error('Total timeout exceeded');
   }
 
-  try {
-    log(`[driveway] Starting VIN=${vin} mi=${mileage} zip=${zip} cond=${condition}->${conditionLabel}`);
+  // Whoops-modal retry loop. Driveway responds to flagged proxy sessions with
+  // a generic "Whoops! Something went wrong on our end" modal after VIN submit.
+  // Confirmed against step-03-step3-after-vin.html capture 2026-04-13 22:01 UTC:
+  // VIN validated (valid-icon shown, green check) → submit triggered an MUI
+  // Dialog with id="modal-title" containing "Whoops!". We get one retry with a
+  // fresh Decodo session ID; that's the cheapest way to rotate IP reputation
+  // without picking a whole new consumer fingerprint.
+  let attempt = 0;
+  const MAX_ATTEMPTS = 2;
 
-    const result = await launchBrowser({ consumerId, fingerprintProfileId, proxyZip: proxyZip || zip });
+  while (attempt < MAX_ATTEMPTS) {
+    try {
+      log(`[driveway] Attempt ${attempt + 1}/${MAX_ATTEMPTS}: Starting VIN=${vin} mi=${mileage} zip=${zip} cond=${condition}->${conditionLabel}`);
+
+    const forceNewSession = attempt > 0;
+    if (forceNewSession) log('[driveway] Retry: forcing fresh proxy session');
+    const result = await launchBrowser({ consumerId, fingerprintProfileId, proxyZip: proxyZip || zip, forceNewSession });
     browser = result.browser;
     const page = result.page;
     launchMethod = result.launchMethod || 'unknown';
-    log(`[driveway] Browser: ${launchMethod} | headed: ${!!process.env.DISPLAY}`);
+    log(`[driveway] Browser: ${launchMethod} | headed: ${!!process.env.DISPLAY}${forceNewSession ? ' [FRESH SESSION]' : ''}`);
 
     // --- Warmup ---
     const isWarm = profileIsWarm(consumerId, WARMUP_TTL_HOURS);
@@ -84,12 +97,12 @@ async function _getDrivewayOfferImpl({ vin, mileage, zip, condition, email, cons
     // --- Navigate to sell page ---
     log(`[driveway] Navigating to ${DRIVEWAY_URL}`);
     let loaded = false;
-    for (let attempt = 0; attempt < 3; attempt++) {
+    for (let navAttempt = 0; navAttempt < 3; navAttempt++) {
       try {
         await page.goto(DRIVEWAY_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
       } catch (e) {
-        log(`[driveway] nav attempt ${attempt} failed: ${e.message}`);
-        if (attempt === 2) {
+        log(`[driveway] nav attempt ${navAttempt} failed: ${e.message}`);
+        if (navAttempt === 2) {
           await screenshot(page, 'driveway', 'nav-fail');
           return { status: 'error', error: `navigation failed: ${e.message}`, wizardLog, launchMethod };
         }
@@ -99,14 +112,14 @@ async function _getDrivewayOfferImpl({ vin, mileage, zip, condition, email, cons
       await humanDelay(5000, 8000);
       try { await simulateHumanBehavior(page); } catch { /* ok */ }
       try { await page.waitForLoadState('networkidle', { timeout: 30000 }); } catch { /* ok */ }
-      await screenshot(page, 'driveway', `01-landing-${attempt}`);
+      await screenshot(page, 'driveway', `01-landing-${navAttempt}`);
 
       if (!(await isBlocked(page))) { loaded = true; break; }
-      log(`[driveway] block detected attempt ${attempt}`);
-      if (await waitForBlockResolve(page, log, [30, 45, 60][attempt] || 60)) {
+      log(`[driveway] block detected attempt ${navAttempt}`);
+      if (await waitForBlockResolve(page, log, [30, 45, 60][navAttempt] || 60)) {
         loaded = true; break;
       }
-      if (attempt < 2) await humanDelay(10000, 15000);
+      if (navAttempt < 2) await humanDelay(10000, 15000);
     }
     if (!loaded) {
       await screenshot(page, 'driveway', 'blocked-final');
@@ -195,8 +208,21 @@ async function _getDrivewayOfferImpl({ vin, mileage, zip, condition, email, cons
     await humanDelay(4000, 7000);
     await screenshot(page, 'driveway', '03-after-vin');
     if (debug) await debugDump(page, 'driveway', 'step3-after-vin');
-    return await _drivewayPostVinLoop({ page, log, vin, mileage, zip, condition,
+    const loopResult = await _drivewayPostVinLoop({ page, log, vin, mileage, zip, condition,
       conditionLabel, offerEmail, launchMethod, wizardLog, checkTimeout, debug });
+    // If we got a Whoops-style backend error and have retries left, close
+    // the browser, force a fresh proxy session, and loop.
+    const isWhoops = loopResult && loopResult.status === 'error'
+      && typeof loopResult.error === 'string'
+      && /driveway_backend_error|whoops/i.test(loopResult.error);
+    if (isWhoops && attempt + 1 < MAX_ATTEMPTS) {
+      log('[driveway] Whoops modal → closing browser + retrying with fresh session');
+      await closeBrowser(browser);
+      browser = null;
+      attempt++;
+      continue;
+    }
+    return loopResult;
   } catch (err) {
     log(`[driveway] ERROR: ${err.message}`);
     return {
@@ -207,8 +233,10 @@ async function _getDrivewayOfferImpl({ vin, mileage, zip, condition, email, cons
     };
   } finally {
     await closeBrowser(browser);
+    browser = null;
     console.log(`[driveway] flow completed in ${Math.round(elapsed() / 1000)}s`);
   }
+  } // end while retry
 }
 
 /**

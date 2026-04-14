@@ -268,6 +268,12 @@ async function launchBrowser(_options = {}) {
 
   try { fs.mkdirSync(USER_DATA_DIR, { recursive: true }); } catch { /* exists */ }
 
+  // Optional: force a fresh proxy session (e.g. after bot-detection on the
+  // previous session). Delete the cached session file before getOrCreate runs.
+  if (_options.forceNewSession) {
+    try { fs.unlinkSync(SESSION_FILE); } catch { /* not present */ }
+  }
+
   // Clear stale SingletonLock from a previous crashed Chromium. Persistent
   // profiles leave these behind on SIGKILL / process crash and refuse to
   // launch until removed. Safe as long as no other Chromium is actually

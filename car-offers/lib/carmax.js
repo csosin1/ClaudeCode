@@ -449,34 +449,86 @@ async function _getCarmaxOfferImpl({ vin, mileage, zip, condition, email, consum
         }
       }
 
-      // Next / Continue / Get offer — but only if NOT disabled. CarMax's
-      // disabled "GET MY OFFER" button still matches has-text but clicking it
-      // has no effect; the wizard would loop forever. Probe the disabled
-      // attribute first.
-      const ctaTexts = ['Get Your Offer', 'Get My Offer', 'See My Offer', 'View Offer',
-         'Continue', 'Next', 'Submit', 'Confirm'];
+      // Next / Continue / Get offer — CarMax's PRIMARY advance button is
+      // <button id="ico-continue-button" class="kmx-button kmx-button--primary">Get My Offer</button>
+      // When the form is incomplete, CarMax adds "disabled" to the CLASS (NOT
+      // the disabled attribute). Clicking a class="disabled" button has no
+      // visible effect but our `button:has-text("Get My Offer")` selector would
+      // still match it, silently wasting iterations. Plus there are hero-section
+      // "Get my offer" buttons (the VIN+ZIP intake form at the top of
+      // /sell-my-car) that confuse text-based matchers. Target by ID first and
+      // check the class-based disabled state explicitly.
+      //
+      // Confirmed against step-02-wizard-1.html capture 2026-04-13 22:34 UTC:
+      // after filling mileage/email/all radios, #ico-continue-button had
+      // class="kmx-button kmx-button--primary" (no "disabled" class) and
+      // should have been clicked; the old text-based matcher was grabbing the
+      // hero-form button instead and stalling the wizard.
       let clickedNext = false;
-      for (const ctaText of ctaTexts) {
-        try {
-          const btn = await page.$(`button:has-text("${ctaText}"):not([disabled]):not([aria-disabled="true"])`);
-          if (btn && await btn.isVisible()) {
-            await humanDelay(700, 1300);
-            await btn.click();
-            log(`[carmax] clicked CTA: ${ctaText}`);
+      try {
+        const ctaInfo = await page.evaluate(() => {
+          const btn = document.querySelector('#ico-continue-button');
+          if (!btn) return { present: false };
+          const cls = btn.className || '';
+          const cssDisabled = /(^|\s)disabled(\s|$)/.test(cls);
+          const attrDisabled = btn.hasAttribute('disabled') || btn.getAttribute('aria-disabled') === 'true';
+          const style = window.getComputedStyle(btn);
+          const hidden = style.display === 'none' || style.visibility === 'hidden';
+          return {
+            present: true, cssDisabled, attrDisabled, hidden,
+            text: (btn.textContent || '').trim().slice(0, 40),
+          };
+        });
+        if (ctaInfo.present && !ctaInfo.cssDisabled && !ctaInfo.attrDisabled && !ctaInfo.hidden) {
+          await humanDelay(700, 1300);
+          try {
+            await page.click('#ico-continue-button');
+            log(`[carmax] clicked #ico-continue-button ("${ctaInfo.text}")`);
             clickedNext = true;
             interacted = true;
-            break;
+          } catch (cErr) {
+            log(`[carmax] #ico-continue-button click failed: ${cErr.message}`);
           }
-        } catch { /* next */ }
+        } else if (ctaInfo.present) {
+          log(`[carmax] #ico-continue-button present but not clickable: cssDisabled=${ctaInfo.cssDisabled} attrDisabled=${ctaInfo.attrDisabled} hidden=${ctaInfo.hidden}`);
+        }
+      } catch (probeErr) {
+        log(`[carmax] cta probe error: ${probeErr.message}`);
       }
+
+      // Fallback: text-based CTA search (for non-sell-my-car sub-pages where
+      // the button doesn't have the ico-continue-button id). Guard against
+      // both disabled-attribute AND class-based disabled state.
+      if (!clickedNext) {
+        const ctaTexts = ['Get Your Offer', 'Get My Offer', 'See My Offer', 'View Offer',
+           'Continue', 'Next', 'Submit', 'Confirm'];
+        for (const ctaText of ctaTexts) {
+          try {
+            const btn = await page.$(`button:has-text("${ctaText}"):not([disabled]):not([aria-disabled="true"]):not(.disabled)`);
+            if (btn && await btn.isVisible()) {
+              await humanDelay(700, 1300);
+              await btn.click();
+              log(`[carmax] clicked CTA: ${ctaText}`);
+              clickedNext = true;
+              interacted = true;
+              break;
+            }
+          } catch { /* next */ }
+        }
+      }
+
       // If no enabled CTA found, log it (helps diagnose accordion-blocked
       // forms) but don't error — maybe a page change is in flight.
       if (!clickedNext) {
-        const disabledBtns = await page.$$eval('button[disabled], button[aria-disabled="true"]', els =>
-          els.slice(0, 5).map(e => e.textContent.trim().slice(0, 40))
+        const disabledBtns = await page.$$eval('button[disabled], button[aria-disabled="true"], button.disabled', els =>
+          els.slice(0, 5).map(e => ({
+            text: e.textContent.trim().slice(0, 40),
+            id: e.id || null,
+            cls: (e.className || '').slice(0, 80),
+          }))
         ).catch(() => []);
         if (disabledBtns.length > 0) {
-          log(`[carmax] no enabled CTA found. Disabled buttons present: ${JSON.stringify(disabledBtns)}`);
+          log(`[carmax] no enabled CTA found. Disabled: ${JSON.stringify(disabledBtns)}`);
         }
       }
 

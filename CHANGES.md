@@ -11,6 +11,28 @@ Builder appends a per-task entry here after each build. Format:
 - **Things for the reviewer:**
 ```
 
+## 2026-04-14 — car-offers (overnight wizard rebuild from debug captures)
+
+- **What was built:**
+  - **CarMax**: rewrote the CTA-click step in `carmax.js` to target `#ico-continue-button` by id + inspect its actual class-based disabled state, rather than blindly using `button:has-text("Get My Offer"):not([disabled])`. Root cause from DOM capture `public-debug/carmax/step-02-wizard-1.html`: after filling every radio + mileage + email, `#ico-continue-button` transitions from `class="disabled kmx-button kmx-button--primary"` to `class="kmx-button kmx-button--primary"` (no "disabled" class) and becomes clickable. The OLD text-based matcher was matching the hero-section "Get my offer" (type=submit) button at the top of `/sell-my-car` first and silently no-op'ing it since its form was already submitted. Fallback text-based matcher now also filters out `button.disabled` (class-based) in addition to the disabled attribute.
+  - **Driveway**: added a Whoops-modal retry loop in `driveway.js`. Confirmed against capture `public-debug/driveway/step-03-step3-after-vin.html`: VIN validates (green check icon + "valid" container class), then POST triggers an MUI Dialog with `<span id="modal-title">Whoops!</span>`. On that modal we now close the browser, force a fresh Decodo proxy session via `launchBrowser({ forceNewSession: true })`, and retry once. Added `forceNewSession` option to `browser.js` that deletes the cached `.proxy-sessions/<consumer>.json` file before the normal getOrCreate path runs.
+  - **Carvana**: added `debugDump()` calls at step-1 (landing), step-2 (after landing CTA), step-3 (after VIN-radio click), and step-4 (after VIN submit) so the public-debug gallery captures the pre-wizard-loop state too. Previously `carvana.js` only dumped inside the wizard loop (post-VIN-submit), so when a run failed at `/sell-my-car/getoffer/entry` (which is where the Apr 13 runs all died after 14 click-retries on a "Get My Offer" button that never advanced the URL), there were no captures to diagnose against. No behavior change otherwise — this is a diagnostic-only change that unblocks the next iteration. Actual selector fixes for Carvana depend on captures from a fresh run.
+- **Files modified:**
+  - `car-offers/lib/carmax.js` (CTA targeting + disabled-state probe)
+  - `car-offers/lib/driveway.js` (Whoops retry loop with fresh proxy session)
+  - `car-offers/lib/browser.js` (`forceNewSession` option)
+  - `car-offers/lib/carvana.js` (pre-wizard-loop debug dumps)
+- **Tests added:** none — all 3 changes are ground-truth selector fixes against real DOM snapshots. The existing Playwright `tests/car-offers.spec.ts` is smoke-only and doesn't spin up real wizards.
+- **Assumptions:**
+  - CarMax `/sell-my-car` keeps its Material-UI stepper form with id `ico-continue-button`. If they redesign, the ID-probe returns `{present:false}` and the fallback text matcher still runs (same behavior as before, minus the double-click-of-a-disabled-button bug).
+  - Driveway's "Whoops" modal is a proxy-reputation signal, not a selector issue. If it turns out to be a site-wide outage, the retry still runs once (cheap) and then reports the error normally.
+  - Carvana's selector problems (the 14x "Get My Offer" loop at `/getoffer/entry`) are unaddressed pending a fresh debug capture. The existing wizard loop code was written by prior Builders with only screenshots, not HTML. The new debug dumps let the next pass fix this with ground truth.
+- **Things for the reviewer:**
+  - There are NO Carvana HTML captures in `public-debug/`. Only CarMax (2 steps) and Driveway (4 steps). The task brief suggested the captures covered all 3 sites; they don't. Next Builder should run `POST /api/carvana {..., debug:true}` against preview first, then fix selectors against the resulting captures.
+  - The previously-reported "CarMax `payments` + `title` are unidentified fields" claim from Builder #4 was WRONG. Capture `step-02-wizard-1.html` shows every `ico-r-*` radio group answered (aria-checked=true), mileage filled, email filled, and the continue button enabled. The selectors are correct; the problem was the wrong button was being clicked.
+  - Driveway wizard has a `TOTAL_TIMEOUT = 900_000` (15 min). A retry doubles the wall clock. Confirm that's still within the per-run budget the panel scheduler assumes.
+  - Branch `claude/car-offers-wizards-from-debug` does NOT auto-deploy. Reviewer should merge to main only after a manual debug run against the preview service confirms each wizard passes its landing/VIN step. For CarMax specifically, preview service auto-runs a Carvana quote on every restart and serializes all three wizards on a single Chromium profile, so expect a single round to take 5 to 15 min per site.
+
 ## 2026-04-13 — car-offers (/setup humanloop credentials)
 
 - **What was built:**

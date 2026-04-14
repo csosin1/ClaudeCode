@@ -379,11 +379,14 @@ async function _getCarvanaOfferImpl({ vin, mileage, zip, email, consumerId, fing
       return false;
     }
 
+    if (debug) await debugDump(page, 'carvana', 'step1-landing');
+
     if (page.url().includes('/sell-my-car') && !page.url().includes('/getoffer')) {
       await clickLandingGetOffer();
       await humanDelay(2000, 4000);
       try { await page.waitForURL(/getoffer/i, { timeout: 15000 }); } catch { /* continue anyway */ }
       await screenshot(page, '02-after-landing-cta');
+      if (debug) await debugDump(page, 'carvana', 'step2-after-landing-cta');
     }
 
     // On /getoffer/entry — select the VIN radio BEFORE filling the input.
@@ -433,6 +436,7 @@ async function _getCarvanaOfferImpl({ vin, mileage, zip, email, consumerId, fing
     if (!vinRadioClicked) {
       log('[carvana] VIN radio not found — proceeding (some layouts default to VIN already)');
     }
+    if (debug) await debugDump(page, 'carvana', 'step3-vin-radio-state');
 
     // State dropdown (may or may not be present). Pick consumer's state.
     const stateSelectSelectors = [
@@ -573,6 +577,7 @@ async function _getCarvanaOfferImpl({ vin, mileage, zip, email, consumerId, fing
 
     await humanDelay(4000, 7000);
     await screenshot(page, '03-after-vin-submit');
+    if (debug) await debugDump(page, 'carvana', 'step4-after-vin-submit');
     checkTimeout();
 
     // Cloudflare commonly re-challenges after form POST with an interactive
