@@ -106,11 +106,17 @@ def parse_servicer_certificate(html: str) -> dict:
     if m:
         data["distribution_date"] = m.group(1)
 
-    data["beginning_pool_balance"] = _grab_amount(text, r"1\.\s+Pool Balance on the close of the last day of the preceding")
-    data["ending_pool_balance"]    = _grab_amount(text, r"5\.\s+Pool Balance on the close of the last day of the related")
-    cnt = _grab_after(text, r"6\.\s+Total number of Receivables outstanding[^\n]*?", r"[\d,]+")
+    # Line numbers for opening balance table are stable across vintages,
+    # but keep label-anchored with a flexible line number prefix for safety.
+    data["beginning_pool_balance"] = _grab_amount(text, r"\d+\.\s+Pool Balance on the close of the last day of the preceding")
+    data["ending_pool_balance"]    = _grab_amount(text, r"\d+\.\s+Pool Balance on the close of the last day of the related")
+    cnt = _grab_after(text, r"\d+\.\s+Total number of Receivables outstanding[^\n]*?", r"[\d,]+")
     if cnt: data["ending_pool_count"] = int(_clean_number(cnt))
-    data["initial_pool_balance"] = _grab_amount(text, r"7\.\s+Initial Pool Balance")
+    # Initial Pool Balance — usually "$ X", but some late-period certs drop
+    # the "$".  Use a slightly looser pattern that picks up either.
+    m_init = re.search(r"\d+\.\s+Initial Pool Balance\s*\$?\s*([\d,]+(?:\.\d+)?)", text)
+    if m_init:
+        data["initial_pool_balance"] = _clean_number(m_init.group(1))
 
     # Note balance — each row has Beginning $ End $; we want the End column.
     # Pattern allows arbitrary chars (e.g. "(sum a - g)") between the label
@@ -127,11 +133,11 @@ def parse_servicer_certificate(html: str) -> dict:
     data["note_balance_d"]  = _note_end(r"g\.\s+Class D Note Balance")
     data["aggregate_note_balance"] = _note_end(r"h\.\s+Note Balance")
 
-    data["overcollateralization_amount"] = _grab_amount(text, r"11\.\s+Current overcollateralization amount")
-    data["weighted_avg_apr"] = _grab_percent(text, r"12\.\s+Weighted Average Coupon")
-    raw = _grab_after(text, r"13\.\s+Weighted Average Original Term[^\n]*?", r"[\d.]+")
+    data["overcollateralization_amount"] = _grab_amount(text, r"\d+\.\s+Current overcollateralization amount")
+    data["weighted_avg_apr"] = _grab_percent(text, r"\d+\.\s+Weighted Average Coupon")
+    raw = _grab_after(text, r"\d+\.\s+Weighted Average Original Term[^\n]*?", r"[\d.]+")
     data["weighted_avg_original_term"] = _clean_number(raw)
-    raw = _grab_after(text, r"14\.\s+Weighted Average Remaining Term[^\n]*?", r"[\d.]+")
+    raw = _grab_after(text, r"\d+\.\s+Weighted Average Remaining Term[^\n]*?", r"[\d.]+")
     data["weighted_avg_remaining_term"] = _clean_number(raw)
 
     fc_coll = _grab_amount(text, r"a\.\s+Collections allocable to Finance Charge")
@@ -178,18 +184,53 @@ def parse_servicer_certificate(html: str) -> dict:
         data["total_delinquent_balance"] = total_dq
     data["delinquency_trigger_actual"] = _grab_percent(text, r"f\.\s+Delinquent Loans as a percentage")
 
-    co_count, co_amt = _grab_count_and_amount(text, r"73\.\s+Defaulted Receivables")
-    if co_amt is not None: data["gross_charged_off_amount"] = co_amt
-    rec_count, rec_amt = _grab_count_and_amount(text, r"74\.\s+Recoveries")
-    data["net_charged_off_amount"] = _grab_amount(text, r"75\.\s+Net Losses")
-    if rec_amt is not None and "recoveries" not in data:
-        data["recoveries"] = rec_amt
+    # Period loss / recovery / net.
+    # 2017+ certs have two distinct lines for period vs cumulative, both
+    # using identical labels — first occurrence is PERIOD, second is
+    # CUMULATIVE.  The "(charge-offs)" / "(recoveries)" suffix
+    # distinguishes them from line-4 "Defaulted Receivables" (period $
+    # only, no count).  2014 certs lack the suffix and the cumulative
+    # breakdowns entirely — only the consolidated "Cumulative Net Losses"
+    # line exists.
+    all_def = list(re.finditer(
+        r"\d+\.\s+Defaulted Receivables\s*\(charge-offs?\)\s+([\d,]+)\s+\$\s*([\d,]+(?:\.\d+)?)", text))
+    if all_def:
+        data["gross_charged_off_amount"] = _clean_number(all_def[0].group(2))
+        if len(all_def) > 1:
+            data["cumulative_gross_losses"] = _clean_number(all_def[-1].group(2))
+    else:
+        # 2014-era fallback: line 4 has "Defaulted Receivables $ X" no count
+        m4 = re.search(r"\d+\.\s+Defaulted Receivables\s+\$\s*([\d,]+(?:\.\d+)?)", text)
+        if m4:
+            data["gross_charged_off_amount"] = _clean_number(m4.group(1))
 
-    _, data["cumulative_gross_losses"] = _grab_count_and_amount(text, r"77\.\s+Defaulted Receivables")
-    _, data["cumulative_liquidation_proceeds"] = _grab_count_and_amount(text, r"78\.\s+Recoveries")
-    data["cumulative_net_losses"] = _grab_amount(text, r"79\.\s+Cumulative Net Losses")
+    # Recoveries label varies by vintage:
+    #   "Liquidation Proceeds (recoveries)"  (some 2017-era certs)
+    #   "Recoveries"                          (most 2017+ certs)
+    # Both formats: <n>. <label> <count> $ <amount>
+    all_rec = list(re.finditer(
+        r"\d+\.\s+(?:Liquidation Proceeds\s*\(recoveries\)|Recoveries)\s+([\d,]+)\s+\$\s*([\d,]+(?:\.\d+)?)", text))
+    if all_rec:
+        if "recoveries" not in data:
+            data["recoveries"] = _clean_number(all_rec[0].group(2))
+        if len(all_rec) > 1:
+            data["cumulative_liquidation_proceeds"] = _clean_number(all_rec[-1].group(2))
 
-    data["extensions_balance"] = _grab_amount(text, r"82\.\s+Principal Balance of Receivables extended")
+    # Period net loss — line "<n>. Net Losses (Ln <a> - Ln <b>) $ X".
+    # Can be negative (more period recoveries than period defaults).
+    m_net = re.search(r"\d+\.\s+Net Losses\s+(?:\(Ln[^)]*\)\s+)?\$\s*(-?[\d,]+(?:\.\d+)?)", text)
+    if m_net:
+        data["net_charged_off_amount"] = _clean_number(m_net.group(1))
+
+    # Cumulative net loss
+    m_cum = re.search(r"\d+\.\s+Cumulative Net Losses[^\n]*?\$\s*([\d,]+(?:\.\d+)?)", text)
+    if m_cum:
+        data["cumulative_net_losses"] = _clean_number(m_cum.group(1))
+
+    # Extensions
+    m_ext = re.search(r"\d+\.\s+Principal Balance of Receivables extended[^\n]*?\$\s*([\d,]+(?:\.\d+)?)", text)
+    if m_ext:
+        data["extensions_balance"] = _clean_number(m_ext.group(1))
     return data
 
 
