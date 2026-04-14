@@ -114,15 +114,17 @@ Each active project gets its own Claude conversation in a separate tmux window. 
 
 When starting work on a named project, spawn its window first. Multi-hour tasks should use their own window so the orchestrator chat stays clear.
 
-## Feature-Branch Workflow (recommended for multi-project parallelism)
-For anything more than a small fix, use feature branches so parallel projects don't collide on main:
+## Feature-Branch Workflow (worktree-based — isolates parallel projects)
+Feature branches live in **isolated git worktrees**, never in the shared `/opt/site-deploy` checkout. The shared checkout stays on `main` at all times so parallel project chats can't corrupt each other's commits.
 
-- **Start a task:** `start-task.sh <project> "<description>"` — creates branch `claude/<project>-<slug>` from origin/main, sets task status.
-- **Do the work:** commit as normal on the branch. Pushing the branch does NOT deploy — only main deploys.
-- **Ship to preview:** `finish-task.sh <project>` — merges the branch into main, pushes, updates task status. Auto-deploy handles the rest.
+- **Start a task:** `start-task.sh <project> "<description>"` — creates branch `claude/<project>-<slug>` and a worktree at `/opt/worktrees/<project>-<slug>` off origin/main. Prints the worktree path.
+- **Do the work:** `cd /opt/worktrees/<project>-<slug>` and commit as usual. Pushing the branch does NOT deploy — only main deploys.
+- **Ship to preview:** `finish-task.sh <project>` — pushes the branch, merges into main via the canonical repo, pushes main, removes the worktree. Auto-deploy updates the preview URL.
 - **User says "ship it":** `bash /opt/site-deploy/deploy/promote.sh <project>` — promotes preview → live.
 
-Small fixes can still push directly to main.
+Small fixes (< ~30 lines, one file, no cross-cutting concern) can still push directly to main from `/opt/site-deploy`. Anything larger must use a worktree.
+
+**Invariant:** `git -C /opt/site-deploy branch --show-current` must always return `main`. `start-task.sh` will auto-correct if it doesn't, but that's a smell worth investigating.
 
 ## Remote-Control Fallback
 `/remote-control` session URLs depend on Anthropic's relay. If the Claude app stays on "Remote Control connecting…" forever, fall back to the web terminal:

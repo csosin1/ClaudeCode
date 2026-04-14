@@ -33,6 +33,16 @@
   .task .stage.blocked { color: #f87171; }
   .task .stage.done { color: #4ade80; }
   .muted { color: #64748b; font-style: italic; }
+  .badge {
+    display: inline-block; padding: 0.15rem 0.5rem; border-radius: 999px;
+    font-size: 0.7rem; font-weight: 600; margin-left: 0.4rem; vertical-align: middle;
+    letter-spacing: 0.02em;
+  }
+  .badge.busy     { background: #1e40af; color: #bfdbfe; }
+  .badge.idle     { background: #334155; color: #94a3b8; }
+  .badge.stuck    { background: #7f1d1d; color: #fecaca; }
+  .badge.archived { background: #44403c; color: #d6d3d1; }
+  .liveness { font-size: 0.75rem; color: #64748b; margin-top: 0.25rem; }
   code { background: #0f172a; padding: 0.1rem 0.3rem; border-radius: 3px; font-size: 0.8rem; }
 </style>
 </head>
@@ -61,11 +71,25 @@ async function checkRemote(key) {
   } catch { return null; }
 }
 
+function fmtElapsed(s) {
+  if (!s) return '';
+  if (s < 60) return s + 's';
+  const m = Math.floor(s / 60), r = s % 60;
+  if (m < 60) return m + 'm' + (r ? ' ' + r + 's' : '');
+  const h = Math.floor(m / 60);
+  return h + 'h ' + (m % 60) + 'm';
+}
+
 async function render() {
   let tasks = { projects: {}, last_updated: '' };
+  let live  = { projects: {} };
   try {
     const r = await fetch('/tasks.json?v=' + Date.now(), { cache: 'no-cache' });
     if (r.ok) tasks = await r.json();
+  } catch {}
+  try {
+    const r = await fetch('/liveness.json?v=' + Date.now(), { cache: 'no-cache' });
+    if (r.ok) live = await r.json();
   } catch {}
 
   document.getElementById('updated').textContent =
@@ -78,11 +102,22 @@ async function render() {
     const t = tasks.projects?.[p.key];
     const cur = t?.current_task;
     const last = t?.last_done;
+    const l = live.projects?.[p.key];
 
     const links = [];
     if (p.live)    links.push(`<a class="live" href="${p.live}">Live</a>`);
     if (p.preview) links.push(`<a class="preview" href="${p.preview}">Preview</a>`);
     if (remote)    links.push(`<a class="remote" href="${remote}">Remote Control</a>`);
+
+    let badge = '', liveness = '';
+    if (l) {
+      badge = `<span class="badge ${l.status}">${l.status}</span>`;
+      if (l.status === 'busy' || l.status === 'stuck') {
+        liveness = `<div class="liveness">${l.activity} · ${fmtElapsed(l.elapsed_s)}</div>`;
+      } else if (l.status === 'archived') {
+        liveness = `<div class="liveness">window not running</div>`;
+      }
+    }
 
     let task = '';
     if (cur) {
@@ -92,13 +127,14 @@ async function render() {
     } else if (last) {
       task = `<div class="task"><span class="stage done">done</span> · ${last.name}` +
              (last.summary ? ` — ${last.summary}` : '') + `</div>`;
-    } else {
+    } else if (!l || l.status === 'idle') {
       task = `<div class="task muted">idle</div>`;
     }
 
     return `<div class="card">
-      <h2>${p.name}</h2>
+      <h2>${p.name}${badge}</h2>
       <div class="links">${links.join('')}</div>
+      ${liveness}
       ${task}
     </div>`;
   }).join('');

@@ -1,0 +1,5 @@
+# Claude ops cron
+# Watchdog: every minute, scan tmux panes, fire notify on >=10 min stuck, write liveness.json
+* * * * * root /usr/local/bin/claude-watchdog.sh >/dev/null 2>&1
+# Respawn: every 5 min, respawn any archived project windows
+*/5 * * * * root /usr/local/bin/claude-respawn.sh >/dev/null 2>&1
