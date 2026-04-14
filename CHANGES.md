@@ -33,6 +33,56 @@ Builder appends a per-task entry here after each build. Format:
   - Driveway wizard has a `TOTAL_TIMEOUT = 900_000` (15 min). A retry doubles the wall clock. Confirm that's still within the per-run budget the panel scheduler assumes.
   - Branch `claude/car-offers-wizards-from-debug` does NOT auto-deploy. Reviewer should merge to main only after a manual debug run against the preview service confirms each wizard passes its landing/VIN step. For CarMax specifically, preview service auto-runs a Carvana quote on every restart and serializes all three wizards on a single Chromium profile, so expect a single round to take 5 to 15 min per site.
 
+### Overnight debug-run results (2026-04-14 05:26 to 06:20 UTC, VIN 1HGCV2F9XNA008352)
+
+**CarMax: PARTIAL — wizard advances past condition page.** Run 2026-04-14 05:26 UTC. Log:
+```
+[carmax] VIN input: input[name="vin"]
+[carmax] VIN submitted via "Get My Offer"
+[carmax] wizard step 0: https://www.carmax.com/sell-my-car
+[carmax] expanded section: "Mileage and condition"
+[carmax] mileage: 42000 (sel=getByLabel(/Mileage/i))
+[carmax] email: caroffers.tool@gmail.com
+[carmax] auto-answered 15/34 radio groups: No, No, No, No, No, No, No, No, No, No, No, 2 or more, No, No, Selling only
+[carmax] clicked #ico-continue-button ("Get My Offer")
+[carmax] nav: https://www.carmax.com/sell-my-car/offers/PT2H9L2N?originPage=OfferDelivery
+[carmax] wizard step 1: https://www.carmax.com/sell-my-car/offers/PT2H9L2N?originPage=OfferDelivery
+[carmax] vehicle confirm: "Continue"
+[carmax] nav: https://www.carmax.com/appraisal-checkout?offerid=PT2H9L2N&storeId=6102
+[carmax] wizard step 2: https://www.carmax.com/appraisal-checkout?offerid=PT2H9L2N&storeId=6102
+[carmax] no progress (stuck=1)
+...
+[carmax] ERROR: Total timeout exceeded
+```
+CarMax issued a real offer ID (`PT2H9L2N`). The `/sell-my-car/offers/PT2H9L2N` URL lands on a "Select your store" interstitial which the wizard clicked through as "Continue". The subsequent `/appraisal-checkout` is a SEPARATE SPA (built from `/appraisal-checkout/assets/index-*.js`) that was still hydrating when the wizard's `scanForOffer` scanned — hence no dollar amount extracted. Next pass fix: after nav to `/appraisal-checkout`, wait 10-30s for SPA bundle then scan again. The offer ID + storeId are already in the URL; a direct API probe might be viable too.
+
+**Driveway: BLOCKED — Whoops modal persists even with fresh proxy session.** Two attempts confirm it's fingerprint-based bot detection, not IP reputation. Run 2026-04-14 06:15 UTC:
+```
+Attempt 1/2: VIN submitted → Whoops modal → retry triggered
+Attempt 2/2 [FRESH SESSION]: VIN submitted → Whoops modal
+Total 497s, clean exit with status=error, error="driveway_backend_error"
+```
+The retry loop works correctly (detects modal, closes browser, forces fresh Decodo session, re-attempts once). Both attempts hit the same modal, which means proxy IP reputation isn't the gate — Driveway is fingerprinting at the TLS/JS level. Overnight scope can't fix this. Prolific baseline is needed to establish what a real human session's fingerprint looks like, then we can adjust `fingerprint.js` / TLS params to match.
+
+**Carvana: BLOCKED — SPA doesn't hydrate for our bot.** Run 2026-04-14 06:09 UTC. Log:
+```
+[carvana] Clicked landing CTA: a[href*="/getoffer"]
+ → navigated to https://www.carvana.com/sell-my-car/getoffer/vehicle
+[carvana] VIN radio not found
+[carvana] FAIL: no VIN input element found at /getoffer/entry
+```
+Note the URL after landing CTA is `/getoffer/vehicle`, not `/getoffer/entry` as the old code expected. AND: captures at `public-debug/carvana/step-03-step3-vin-radio-state.html` show the page's visible text is literally "You need to enable JavaScript to run this app". The React bundle didn't bootstrap. Meanwhile the landing page `step-01-step1-landing.html` IS fully rendered (817KB). So the landing page works, but the authenticated-bot follow-up is blocked.
+Also: Carvana flow URL has evolved: landing → `/getoffer/vehicle` (year/make/model?) — NOT the old `/getoffer/entry` with a License-Plate/VIN toggle. Selector work is needed but can't happen until the SPA loads, which requires defeating the bot detection. Prolific baseline needed.
+
+**Summary of what's shippable tonight:**
+- CarMax fix: confirmed working end-to-end through condition submission. Reviewer can ship this as-is; the missing "extract offer from /appraisal-checkout" fix is a smaller, bounded next task.
+- Driveway fix: Whoops retry + diagnostic bail-out are sound but don't unblock the site. Merge for the infrastructure; actual offers need Prolific.
+- Carvana: no code changes other than diagnostic dumps. The dumps are what unblock the NEXT Builder. Don't merge code changes as an attempt to fix Carvana — they don't.
+
+Operational changes made to the preview runtime (NOT in git since they're droplet-local):
+- `/etc/systemd/system/car-offers-preview.service.d/override.conf` sets `SKIP_STARTUP_AUTORUN=1`. Keep this set for the duration of overnight wizard work so the startup Carvana quote doesn't contend for the shared Chromium profile. Remove it (or set 0) once the wizards are stable.
+- Offers SQLite DB at `/opt/car-offers-preview/offers.db` was corrupted on arrival and could not be recovered. It's now an empty fresh DB; schema will auto-create on first insert.
+
 ## 2026-04-13 — car-offers (/setup humanloop credentials)
 
 - **What was built:**
