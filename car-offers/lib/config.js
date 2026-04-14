@@ -12,6 +12,13 @@ const config = {
   PROXY_PASS: process.env.PROXY_PASS || '',
   PROJECT_EMAIL: process.env.PROJECT_EMAIL || '',
   PORT: parseInt(process.env.PORT, 10) || 3100,
+  // Paid human-loop (Prolific + MTurk) — credentials are sensitive, never echo back.
+  PROLIFIC_TOKEN: process.env.PROLIFIC_TOKEN || '',
+  PROLIFIC_BALANCE_USD: parseInt(process.env.PROLIFIC_BALANCE_USD, 10) || 0,
+  MTURK_ACCESS_KEY_ID: process.env.MTURK_ACCESS_KEY_ID || '',
+  MTURK_SECRET_ACCESS_KEY: process.env.MTURK_SECRET_ACCESS_KEY || '',
+  MTURK_BALANCE_USD: parseInt(process.env.MTURK_BALANCE_USD, 10) || 0,
+  HUMANLOOP_DAILY_CAP_USD: parseInt(process.env.HUMANLOOP_DAILY_CAP_USD, 10) || 50,
 };
 
 /**
@@ -34,6 +41,12 @@ config.reloadConfig = function () {
   config.PROXY_PASS = parsed.PROXY_PASS || '';
   config.PROJECT_EMAIL = parsed.PROJECT_EMAIL || '';
   config.PORT = parseInt(parsed.PORT, 10) || 3100;
+  config.PROLIFIC_TOKEN = parsed.PROLIFIC_TOKEN || '';
+  config.PROLIFIC_BALANCE_USD = parseInt(parsed.PROLIFIC_BALANCE_USD, 10) || 0;
+  config.MTURK_ACCESS_KEY_ID = parsed.MTURK_ACCESS_KEY_ID || '';
+  config.MTURK_SECRET_ACCESS_KEY = parsed.MTURK_SECRET_ACCESS_KEY || '';
+  config.MTURK_BALANCE_USD = parseInt(parsed.MTURK_BALANCE_USD, 10) || 0;
+  config.HUMANLOOP_DAILY_CAP_USD = parseInt(parsed.HUMANLOOP_DAILY_CAP_USD, 10) || 50;
 };
 
 module.exports = config;

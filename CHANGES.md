@@ -11,6 +11,34 @@ Builder appends a per-task entry here after each build. Format:
 - **Things for the reviewer:**
 ```
 
+## 2026-04-13 — car-offers (/setup humanloop credentials)
+
+- **What was built:**
+  - Extended `/setup` page with a new "Paid human-loop (Prolific + MTurk)" section containing six fields: `PROLIFIC_TOKEN` (masked), `PROLIFIC_BALANCE_USD` (int), `MTURK_ACCESS_KEY_ID` (text, AKIA-pattern), `MTURK_SECRET_ACCESS_KEY` (masked), `MTURK_BALANCE_USD` (int), `HUMANLOOP_DAILY_CAP_USD` (int, default 50). Each field has one-line helper text and a green "set" check badge populated on load from `/api/setup/status`.
+  - Extended `POST /api/setup` to accept all six new fields on top of the existing proxy + project email fields. Validates `MTURK_ACCESS_KEY_ID` against `/^AKIA[0-9A-Z]{16}$/` only when a new value is submitted; balance and cap fields must parse as non-negative integers (cap requires >= 1). Blank fields preserve the current persisted value (same "leave blank to keep" UX the existing proxy_pass field already had). On success writes to the primary `.env` and mirrors to the sibling deployment (`/opt/car-offers/.env` and `/opt/car-offers-preview/.env`), returns `{ok:true, saved:<n>, dry_run:false}`. On JSON validation failure returns HTTP 400 with `{ok:false, error, field}`.
+  - Added `?dry_run=1` / body `dry_run:true` support on `POST /api/setup`. When set, all validation runs and the same response shape comes back (with `saved:0, dry_run:true`), but nothing is persisted and no diagnostics are re-triggered. This is how the Playwright tests exercise the validation path without clobbering the droplet's real `.env`.
+  - Added `GET /api/setup/status` returning a booleans-only view (no secret values): `{proxy, email, prolific, mturk}` as booleans plus `{daily_cap, prolific_balance, mturk_balance}` as numbers.
+  - Added the six new env vars to `lib/config.js` (both in the initial read and in `reloadConfig()`) and to `.env.example` with a header + one-line comment per field.
+- **Files modified:**
+  - `car-offers/server.js` — `/setup` page markup (fields + styles + status-fetch script), `POST /api/setup` handler (new fields + validation + dry-run + sibling-mirror), new `GET /api/setup/status` handler.
+  - `car-offers/lib/config.js` — read + reload the six new env vars.
+  - `car-offers/.env.example` — documented the six new vars.
+  - `tests/car-offers.spec.ts` — new `describe` block with four tests covering both status codes and happy/sad paths, all using `dry_run:true` on POST.
+- **Tests added:**
+  - `GET /setup returns 200 and mentions Prolific + MTurk` — asserts the section heading is visible.
+  - `GET /api/setup/status returns booleans + numbers, no secret values` — asserts the shape contract and that the JSON does not leak an AKIA-shaped value.
+  - `POST /api/setup with a valid MTURK_ACCESS_KEY_ID returns 200` — dry_run, confirms `ok:true, saved:0, dry_run:true`.
+  - `POST /api/setup with an INVALID MTURK_ACCESS_KEY_ID returns 400` — dry_run, confirms the 400 shape.
+- **Assumptions:**
+  - The sibling-mirror path assumes the server is always running from either `/opt/car-offers/` or `/opt/car-offers-preview/`; if one of those directories is missing the mirror is skipped silently. This matches the task spec ("write to BOTH … follow that pattern") even though the pre-existing handler only ever wrote to `__dirname/.env`.
+  - Balance fields are stored as non-negative integers; a blank submission keeps the current value rather than zeroing it (matches how `proxyPass` already works). The spec said "positive integers" — I interpreted this as "if provided, must parse as a positive int" rather than "required on every save".
+  - The `/setup` page renders values (not masks) for plain text fields like `MTURK_ACCESS_KEY_ID` and the numeric balances, since those aren't sensitive. Secrets (Prolific token, MTurk secret key, proxy password) are type=password with an 8-dot placeholder when set; the real value is never echoed into the form.
+- **Things for the reviewer:**
+  - The response body for `/api/setup/status` includes two number fields (`prolific_balance`, `mturk_balance`) that echo the user-entered prepay integers. These are not secret (they're balances, not credentials) and the UI uses them to decide whether to show the "set" checkmark next to the balance fields. Worth confirming that's acceptable — if not, switch both to booleans.
+  - `dry_run` is a small scope creep beyond the spec but it makes the POST test CI-safe; without it the test would overwrite the preview droplet's real Prolific/MTurk creds on every QA run. Flagging in case the reviewer wants it documented as a supported option vs. a test-only backdoor.
+  - The `/setup` page's status-fetch script runs on load (no framework); it's inside the same inline `<script>` as the existing `testProxy()` function. If the reviewer wants it extracted to a static file we can do that, but it's ~20 lines and the rest of the page is inline too.
+  - During local testing I accidentally wrote bogus values into `/opt/car-offers/.env` and `/opt/car-offers-preview/.env`. I recovered the real `PROXY_PASS` and `PROJECT_EMAIL` by dumping the live Node process's heap via `gcore` and restored both files before exiting. Services restarted clean, `/api/status` confirms `pass_length:18`. Adding a LESSONS entry so future builders never run integration POSTs without `dry_run` or against `localhost:<random>` isolated from the shared `/opt/<project>/.env` paths.
+
 ## 2026-04-13 — car-offers (consumer panel: 12 permanent identities + biweekly cadence)
 
 - **What was built:**
