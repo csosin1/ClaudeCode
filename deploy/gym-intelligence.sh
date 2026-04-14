@@ -57,6 +57,15 @@ ensure_venv() {
         "$dir/venv/bin/pip" install -q -r "$REPO_DIR/$PROJECT/requirements.txt" >> "$LOG" 2>&1
         "$dir/venv/bin/python" -c "import flask" 2>/dev/null && touch "$dir/.deps_installed"
     fi
+    # Purge leftover Streamlit-era packages (400MB+). Safe: requirements.txt
+    # doesn't list them and no current code imports them. Runs once then no-ops.
+    if "$dir/venv/bin/python" -c "import streamlit" 2>/dev/null; then
+        "$dir/venv/bin/pip" uninstall -y -q \
+            streamlit pydeck plotly pyarrow pandas numpy pillow altair toml watchdog \
+            cachetools tornado tenacity rich gitpython gitdb smmap blinker jsonschema \
+            referencing attrs >> "$LOG" 2>&1 || true
+        echo "$(date): $PROJECT venv orphans purged at $dir" >> "$LOG"
+    fi
 }
 ensure_venv "$PREVIEW_DIR"
 
