@@ -96,8 +96,20 @@ If it's not linked from http://159.223.127.125/, it's not done.
 - Row-level scoping on user-data queries. Missing `WHERE user_id=…` is a critical failure.
 - Firewall: 80, 443, 22. Root SSH disabled, key auth only.
 
-## Skills Registry
-Reusable patterns live in `SKILLS/*.md`. Check there before implementing anything non-trivial. Promote any hard-won lesson into a skill so it isn't relearned.
+## Skills Registry — Search, Use, Contribute Back
+Reusable patterns live in `SKILLS/*.md`. Every non-trivial task follows a 3-step loop: **search, use, contribute**.
+
+1. **Search before building.** Before writing code, check in this order:
+   (a) `SKILLS/*.md` — our own registry.
+   (b) Existing open-source packages — npm, PyPI, system tools. Use reputable, maintained packages (recent activity, >1k weekly downloads or obvious canonical status). A well-maintained library beats 200 lines of custom code every time.
+   (c) Managed services — if a hosted tool (Auth0, Supabase, Stripe, SendGrid, etc.) solves the problem, prefer it over self-hosting.
+   If a good option exists, use it and move on. If you're unsure whether the library is reputable, name it and ask.
+
+2. **Use, don't reinvent.** Thin wrappers around battle-tested libraries are the expected output for most tasks. Custom implementations require justifying why the off-the-shelf option didn't fit.
+
+3. **Contribute back — mandatory, not optional.** Any time you (a) spent >30 min figuring out a non-obvious pattern, (b) solved something that would likely recur across projects, or (c) integrated a new external service or library for the first time, write a new `SKILLS/<topic>.md` in the same commit as the work. Include: what it does, when to use it, key gotchas, minimum working example, required env vars or setup. If the skill is a refinement of an existing one, update that file instead.
+
+Skills are high-leverage — every skill written once saves every future agent (including future-you) from relearning. Err on the side of writing one.
 
 ## State Files (read first, update as you work)
 - `TASK_STATE.md` — current task stage; the recovery lifeline if a session dies mid-task.
