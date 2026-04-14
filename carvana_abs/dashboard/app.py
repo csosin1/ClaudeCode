@@ -39,7 +39,7 @@ def get_original_balance(deal):
     if bal:
         return bal
     fp = query_df(
-        "SELECT beginning_pool_balance FROM pool_performance WHERE deal = ? ORDER BY distribution_date LIMIT 1",
+        "SELECT beginning_pool_balance FROM pool_performance WHERE deal = ? ORDER BY dist_date_iso LIMIT 1",
         (deal,))
     if not fp.empty and fp.iloc[0]["beginning_pool_balance"]:
         return fp.iloc[0]["beginning_pool_balance"]

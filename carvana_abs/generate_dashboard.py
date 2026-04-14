@@ -1098,7 +1098,7 @@ def _carvana_prime_traces(deals, color_map):
                 })
 
         # Excess spread — replicate the shifted collection-month alignment
-        pool = q("SELECT * FROM pool_performance WHERE deal=? ORDER BY distribution_date", (deal,))
+        pool = q("SELECT * FROM pool_performance WHERE deal=? ORDER BY dist_date_iso", (deal,))
         if pool.empty:
             continue
         pool["period"] = pool["distribution_date"].apply(nd)
@@ -1278,7 +1278,7 @@ def generate_deal_content(deal):
     lp["period"] = lp["reporting_period_end"].apply(nd)
     lp = lp.sort_values("period").reset_index(drop=True)
 
-    pool = q("SELECT * FROM pool_performance WHERE deal=? ORDER BY distribution_date", (deal,))
+    pool = q("SELECT * FROM pool_performance WHERE deal=? ORDER BY dist_date_iso", (deal,))
     # Log data availability for debugging
     has_pool = not pool.empty
     has_wac_pp = has_pool and "weighted_avg_apr" in pool.columns and pool["weighted_avg_apr"].notna().any()
@@ -1856,8 +1856,10 @@ def generate_comparison_content(deals, title):
         # Prefer pool_performance.weighted_avg_apr, fall back to monthly_summary.weighted_avg_coupon
         init_wac = None
         curr_wac = None
-        first_wac = q("SELECT weighted_avg_apr FROM pool_performance WHERE deal=? AND weighted_avg_apr IS NOT NULL ORDER BY distribution_date LIMIT 1", (deal,))
-        last_wac = q("SELECT weighted_avg_apr FROM pool_performance WHERE deal=? AND weighted_avg_apr IS NOT NULL ORDER BY distribution_date DESC LIMIT 1", (deal,))
+        # Use dist_date_iso (YYYY-MM-DD) — distribution_date is M/D/YYYY text
+        # and sorts lexicographically, not chronologically (audit finding #5).
+        first_wac = q("SELECT weighted_avg_apr FROM pool_performance WHERE deal=? AND weighted_avg_apr IS NOT NULL ORDER BY dist_date_iso LIMIT 1", (deal,))
+        last_wac = q("SELECT weighted_avg_apr FROM pool_performance WHERE deal=? AND weighted_avg_apr IS NOT NULL ORDER BY dist_date_iso DESC LIMIT 1", (deal,))
         if not first_wac.empty and first_wac.iloc[0]["weighted_avg_apr"]:
             init_wac = first_wac.iloc[0]["weighted_avg_apr"]
         if not last_wac.empty and last_wac.iloc[0]["weighted_avg_apr"]:
@@ -1889,7 +1891,7 @@ def generate_comparison_content(deals, title):
             notes_df = pd.DataFrame()
 
         # Build full CoD time series (same merged Method 1+2 as per-deal chart)
-        pool_all = q("SELECT * FROM pool_performance WHERE deal=? ORDER BY distribution_date", (deal,))
+        pool_all = q("SELECT * FROM pool_performance WHERE deal=? ORDER BY dist_date_iso", (deal,))
         if not pool_all.empty:
             norm_rate_lookup = {}
             if not notes_df.empty:
@@ -2149,7 +2151,7 @@ def generate_comparison_content(deals, title):
         # CoD comes from pool_performance — but those rows use the distribution
         # date, which is ~10 days after the collection period it reports on.
         # Shifting the distribution month back by one gives the collection month.
-        pool = q("SELECT * FROM pool_performance WHERE deal=? ORDER BY distribution_date", (deal,))
+        pool = q("SELECT * FROM pool_performance WHERE deal=? ORDER BY dist_date_iso", (deal,))
         if pool.empty:
             continue
         pool["period"] = pool["distribution_date"].apply(nd)

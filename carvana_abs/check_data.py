@@ -91,12 +91,12 @@ def check():
         first = conn.execute("""
             SELECT distribution_date, total_note_interest, aggregate_note_balance
             FROM pool_performance WHERE deal=? AND total_note_interest IS NOT NULL
-            AND aggregate_note_balance > 0 ORDER BY distribution_date LIMIT 1
+            AND aggregate_note_balance > 0 ORDER BY dist_date_iso LIMIT 1
         """, (deal,)).fetchone()
         last = conn.execute("""
             SELECT distribution_date, total_note_interest, aggregate_note_balance
             FROM pool_performance WHERE deal=? AND total_note_interest IS NOT NULL
-            AND aggregate_note_balance > 0 ORDER BY distribution_date DESC LIMIT 1
+            AND aggregate_note_balance > 0 ORDER BY dist_date_iso DESC LIMIT 1
         """, (deal,)).fetchone()
         if first:
             init_cod = first["total_note_interest"] / first["aggregate_note_balance"] * 12

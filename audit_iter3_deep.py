@@ -92,7 +92,7 @@ c = sqlite3.connect('/opt/abs-dashboard/carmax_abs/db/carmax_abs.db')
 rows = c.execute("""
     SELECT pp.deal, pp.distribution_date, pp.aggregate_note_balance, f.servicer_cert_url
     FROM pool_performance pp JOIN filings f USING(accession_number)
-    WHERE pp.deal = '2024-3' ORDER BY pp.distribution_date
+    WHERE pp.deal = '2024-3' ORDER BY pp.dist_date_iso
 """).fetchall()
 for r in rows:
     print(r)

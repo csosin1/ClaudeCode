@@ -76,7 +76,7 @@ def get_orig_bal():
 
 @st.cache_data(ttl=300)
 def load_pool(deal):
-    df = query_df("SELECT * FROM pool_performance WHERE deal = ? ORDER BY distribution_date", (deal,))
+    df = query_df("SELECT * FROM pool_performance WHERE deal = ? ORDER BY dist_date_iso", (deal,))
     if not df.empty:
         df["period"] = df["distribution_date"].apply(normalize_date)
         df = df.sort_values("period").reset_index(drop=True)

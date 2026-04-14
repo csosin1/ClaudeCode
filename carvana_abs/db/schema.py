@@ -15,6 +15,77 @@ def get_connection(db_path: str = DB_PATH) -> sqlite3.Connection:
     return conn
 
 
+def migrate_dist_date_iso(conn: sqlite3.Connection) -> int:
+    """Add + backfill `pool_performance.dist_date_iso` (YYYY-MM-DD).
+
+    Idempotent. Root-cause fix for AUDIT_FINDINGS #5: `distribution_date`
+    is stored as `MM/DD/YYYY` text, so `ORDER BY distribution_date` gives
+    lex — not chronological — order. This adds a parallel ISO column that
+    is safe to sort and a covering index. Dashboard queries use this column;
+    raw `distribution_date` is preserved untouched so ingestion/parser code
+    and the (deal, distribution_date) primary key remain intact.
+    """
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(pool_performance)")}
+    if "dist_date_iso" not in cols:
+        conn.execute("ALTER TABLE pool_performance ADD COLUMN dist_date_iso TEXT")
+    # Backfill: handles 'M/D/YYYY', 'MM/DD/YYYY', 'YYYY-MM-DD'. Uses CASE to
+    # detect the 'YYYY-'-prefixed variant and pass through; otherwise splits
+    # on '/' and zero-pads month/day with printf.
+    n = conn.execute("""
+        UPDATE pool_performance
+           SET dist_date_iso = CASE
+               WHEN distribution_date IS NULL OR distribution_date = '' THEN NULL
+               WHEN substr(distribution_date,5,1) = '-' THEN substr(distribution_date,1,10)
+               WHEN instr(distribution_date,'/') > 0 THEN
+                   substr(distribution_date, instr(distribution_date,'/')
+                       + instr(substr(distribution_date, instr(distribution_date,'/')+1),'/') + 1, 4)
+                   || '-'
+                   || printf('%02d', CAST(substr(distribution_date, 1, instr(distribution_date,'/')-1) AS INTEGER))
+                   || '-'
+                   || printf('%02d', CAST(substr(
+                       distribution_date,
+                       instr(distribution_date,'/')+1,
+                       instr(substr(distribution_date, instr(distribution_date,'/')+1),'/')-1
+                     ) AS INTEGER))
+               ELSE NULL
+           END
+         WHERE dist_date_iso IS NULL OR dist_date_iso = ''
+    """).rowcount
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_pool_deal_iso "
+        "ON pool_performance(deal, dist_date_iso)"
+    )
+    # Trigger: keep dist_date_iso in sync on future inserts from the parser
+    # (parser untouched per surgical-fix constraint; trigger handles it).
+    conn.execute("DROP TRIGGER IF EXISTS trg_pool_dist_date_iso_ins")
+    conn.execute("""
+        CREATE TRIGGER trg_pool_dist_date_iso_ins
+        AFTER INSERT ON pool_performance
+        WHEN NEW.dist_date_iso IS NULL AND NEW.distribution_date IS NOT NULL
+        BEGIN
+            UPDATE pool_performance
+               SET dist_date_iso = CASE
+                   WHEN substr(NEW.distribution_date,5,1) = '-' THEN substr(NEW.distribution_date,1,10)
+                   WHEN instr(NEW.distribution_date,'/') > 0 THEN
+                       substr(NEW.distribution_date, instr(NEW.distribution_date,'/')
+                           + instr(substr(NEW.distribution_date, instr(NEW.distribution_date,'/')+1),'/') + 1, 4)
+                       || '-'
+                       || printf('%02d', CAST(substr(NEW.distribution_date, 1, instr(NEW.distribution_date,'/')-1) AS INTEGER))
+                       || '-'
+                       || printf('%02d', CAST(substr(
+                           NEW.distribution_date,
+                           instr(NEW.distribution_date,'/')+1,
+                           instr(substr(NEW.distribution_date, instr(NEW.distribution_date,'/')+1),'/')-1
+                         ) AS INTEGER))
+                   ELSE NULL
+               END
+             WHERE deal = NEW.deal AND distribution_date = NEW.distribution_date;
+        END
+    """)
+    conn.commit()
+    return n
+
+
 def init_db(db_path: str = DB_PATH) -> None:
     """Create all tables if they don't exist."""
     conn = get_connection(db_path)
@@ -235,6 +306,12 @@ def init_db(db_path: str = DB_PATH) -> None:
     """)
 
     conn.commit()
+    # Migration for AUDIT_FINDINGS #5 (dist_date_iso)
+    try:
+        migrate_dist_date_iso(conn)
+    except sqlite3.OperationalError:
+        # Table may not exist yet on very first init; safe to skip.
+        pass
     conn.close()
 
 

@@ -1,5 +1,22 @@
 # Lessons Learned
 
+## 2026-04-14 `ORDER BY distribution_date` sorted lex — silently stale "latest" values
+- **What went wrong:** `pool_performance.distribution_date` is stored as `M/D/YYYY` / `MM/DD/YYYY` text. Every SQL `ORDER BY distribution_date DESC LIMIT 1` returned a row picked by lex order, not chronological (`'9/12/2022' > '9/10/2025'` lex). "Current WAC", "Initial WAC", "Current CoD" summary fields, and any "latest pool row" lookup silently showed stale data on 14/16 Carvana deals and 47/49 CarMax deals. Invisible because the returned value was real — just from the wrong period (often years off).
+- **Root cause:** Text storage in a `%m/%d/%Y` format that isn't lex-sortable. Fine for display, catastrophic for SQL sort. Python-side `.sort_values("period")` in some code paths masked it — but any direct `SELECT … ORDER BY distribution_date LIMIT 1` bypassed Python re-sorting and returned the lex-latest row.
+- **What to do differently:**
+  - Never sort date text unless the format is ISO-8601 (`YYYY-MM-DD`). If the raw column exists in a non-sortable format, add a parallel `*_iso` column via `ALTER TABLE`, backfill with `substr` + `printf('%02d', CAST(...))` in SQL, index it, and route `ORDER BY` to the ISO column.
+  - Use a trigger, not parser changes, when ingestion must stay frozen. An `AFTER INSERT` trigger on the table auto-populates the ISO column on every write, with zero parser-code risk.
+  - Preventive rule: `grep -rn 'ORDER BY [a-z_]*date' --include='*.py'` on any codebase where dates are stored as text; every hit that isn't ISO is suspect.
+  - Test signal: if `SELECT … ORDER BY date_col DESC LIMIT 1` returns a different row than Python-parsed `max()`, you have a lex-sort bug.
+
+## 2026-04-14 Python scripts in /tmp can load `/tmp/inspect.py` instead of stdlib
+- **What went wrong:** A reparse script at `/tmp/cmx_reparse.py` failed at `from bs4 import BeautifulSoup` with `AttributeError: module 'inspect' has no attribute 'signature'`. ~15 min debugging an apparently impossible stdlib error.
+- **Root cause:** CPython prepends the script's own directory to `sys.path[0]`. There was a stray `/tmp/inspect.py` from another project, which shadowed the standard library's `inspect` module when Python resolved imports during `typing_extensions` load. bs4 → typing_extensions → `inspect.signature` → not in the shadowing module → crash.
+- **What to do differently:**
+  - **Never put Python scripts in `/tmp`.** Put one-shot helpers in the repo root (`/opt/<project>/`) so `sys.path[0]` is a directory you control.
+  - If you must run from `/tmp`, invoke with `PYTHONSAFEPATH=1` (Python 3.11+) or `python -I` to disable prepending the script dir, or use `cwd=/opt/<project>` in the launcher — BUT `sys.path[0]` is script-dir not cwd, so `cwd` alone doesn't help unless you also move the script.
+  - Preventive rule: `pgrep -l "/tmp/.*\.py"` in health checks — flag any long-running Python process whose script lives in `/tmp`.
+
 ## 2026-04-12 SEC servicer-cert PDFs were rendering empty — image-based EDGAR filings
 - **What went wrong:** After fixing the routing, tapping a servicer-certificate PDF showed what looked like a bare exhibit reference ("EX-99.1 2 crvna….htm EX-99.1") and no report data. The PDFs themselves were ~16KB — all "content" but no content.
 - **Root cause:** Carvana's servicer certs on EDGAR are image-based filings: each page is a JPG (`crvna<deal>servicerrepo001.jpg`, `002.jpg`, …) referenced by relative URL inside the HTML, with a 1pt white hidden OCR text layer overlaid for accessibility. `generate_pdfs.py` fed the cached HTML straight to weasyprint, which had no way to resolve the JPG relative paths (we never downloaded them). Result: PDFs contained only the invisible OCR text plus the `<DOCUMENT>`/`<TYPE>` header — looked like an exhibit reference page.

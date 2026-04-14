@@ -116,7 +116,7 @@ def validate(db_path=None):
                    note_balance_a1, note_balance_a2, note_balance_a3, note_balance_a4,
                    note_balance_b, note_balance_c, note_balance_d, note_balance_n,
                    total_note_interest, overcollateralization_amount
-            FROM pool_performance WHERE deal=? ORDER BY distribution_date
+            FROM pool_performance WHERE deal=? ORDER BY dist_date_iso
         """, (deal,)).fetchall()
         if not rows:
             continue
@@ -159,7 +159,7 @@ def validate(db_path=None):
         """, (deal,)).fetchall()
         pp_rows = conn.execute("""
             SELECT distribution_date, ending_pool_balance FROM pool_performance
-            WHERE deal=? AND ending_pool_balance IS NOT NULL ORDER BY distribution_date
+            WHERE deal=? AND ending_pool_balance IS NOT NULL ORDER BY dist_date_iso
         """, (deal,)).fetchall()
         if not ms_rows or not pp_rows:
             continue
@@ -198,7 +198,7 @@ def validate(db_path=None):
                         "D": "note_balance_d", "N": "note_balance_n"}
             # First and last period
             for label, order in [("INIT", "ASC"), ("CURR", "DESC")]:
-                pp = conn.execute(f"SELECT * FROM pool_performance WHERE deal=? ORDER BY distribution_date {order} LIMIT 1", (deal,)).fetchone()
+                pp = conn.execute(f"SELECT * FROM pool_performance WHERE deal=? ORDER BY dist_date_iso {order} LIMIT 1", (deal,)).fetchone()
                 if pp:
                     w_sum, t_bal = 0, 0
                     for cls, col in bal_cols.items():

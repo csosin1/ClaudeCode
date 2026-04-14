@@ -139,7 +139,7 @@ def bonus():
             SELECT pp.deal, pp.distribution_date, pp.{metric}, f.servicer_cert_url
             FROM pool_performance pp JOIN filings f USING(accession_number)
             WHERE pp.deal = ? AND f.servicer_cert_url IS NOT NULL
-            ORDER BY pp.distribution_date DESC LIMIT 1
+            ORDER BY pp.dist_date_iso DESC LIMIT 1
             """,
             (deal,),
         ).fetchone()

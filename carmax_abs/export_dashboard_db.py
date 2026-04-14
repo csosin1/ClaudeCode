@@ -21,6 +21,7 @@ import logging
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from carmax_abs.config import DB_PATH
+from carmax_abs.db.schema import migrate_dist_date_iso
 
 DASHBOARD_DB = os.path.join(os.path.dirname(DB_PATH), "dashboard.db")
 
@@ -54,6 +55,11 @@ def main():
     dst = sqlite3.connect(DASHBOARD_DB)
 
     src.execute("PRAGMA journal_mode=WAL")
+
+    # Ensure the source DB has the dist_date_iso column populated — so the
+    # CREATE-TABLE-from-sqlite_master snapshot copied to dst includes it and
+    # every exported row carries a chronological sort key (audit finding #5).
+    migrate_dist_date_iso(src)
 
     for table in TABLES_TO_EXPORT:
         try:
