@@ -213,10 +213,14 @@ def extract_metrics_by_period(cf: dict) -> dict[str, dict[str, float]]:
                 except (TypeError, ValueError):
                     continue
                 bucket = out.setdefault(pk, {})
-                # First candidate tag to populate the metric wins (ordering in
-                # XBRL_TAG_MAP["tags"]). Don't overwrite on later candidates.
+                # First candidate tag to populate the metric for THIS period
+                # wins (ordering in XBRL_TAG_MAP["tags"]). We intentionally do
+                # NOT break across candidates: a legacy tag may cover only
+                # ancient periods while the preferred tag covers current
+                # periods (e.g. TNL's "FinancingReceivable" has 2011 data,
+                # and "NotesReceivableGross" has 2019-2025). Letting later
+                # candidates fill gaps keeps coverage across the full range.
                 bucket.setdefault(metric_key, scaled)
-            break  # found a candidate; don't try the rest for this metric
 
     # Derived: allowance_coverage_pct = allowance / gross when both present.
     for pk, bucket in out.items():
