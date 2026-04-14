@@ -1,0 +1,18 @@
+[Unit]
+Description=Spawn all expected Claude project chats on boot
+After=claude-tmux.service network-online.target
+Requires=claude-tmux.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Environment=HOME=/root
+Environment=TERM=xterm-256color
+# Wait briefly for tmux session to settle before spawning windows
+ExecStartPre=/bin/sleep 15
+ExecStart=/usr/local/bin/claude-respawn.sh
+RemainAfterExit=no
+
+[Install]
+WantedBy=multi-user.target
