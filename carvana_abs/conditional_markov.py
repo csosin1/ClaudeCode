@@ -175,17 +175,25 @@ def build_aggregates(conn, deals, covariates):
             paidoff.add((deal, asset))
     logger.info(f"  defaulted: {len(defaulted):,}  paid-off: {len(paidoff):,}")
 
-    # Aggregates
-    # Transitions: trans[(tier, state, age_b, fico_b, ltv_b, mod, orig_q)][to_state] = count
-    # Vintage (orig_q) added so the macro environment at origination is a
-    # first-class covariate. Sparse-cell fallback drops FICO/LTV before
-    # vintage — see cell_transition_matrix() ladder.
-    trans = defaultdict(lambda: defaultdict(int))
-    # Paydown: paydown[(tier, term_bucket, age_int)][0]=sum_ratio, [1]=count
+    # Deal-weighted training: each pool votes equally in cell probability
+    # estimation regardless of loan count.  Without this, 2022 vintages
+    # (big pools) would dominate over 2020 vintages (small pools) even
+    # though each pool is equally informative about Carvana's underwriting.
+    # Weight per transition = 1 / n_loans_in_that_deal.
+    loans_per_deal = {}
+    for d in deals:
+        n = conn.execute("SELECT COUNT(DISTINCT asset_number) FROM loan_performance WHERE deal=?", (d,)).fetchone()[0]
+        loans_per_deal[d] = n if n else 1
+    logger.info(f"  loans per deal: {loans_per_deal}")
+
+    # Aggregates.  Both unweighted raw counts (for MIN_CELL_OBS fallback
+    # gate) and deal-weighted sums (for cell probability computation).
+    trans = defaultdict(lambda: defaultdict(float))      # weighted
+    trans_n = defaultdict(lambda: defaultdict(int))      # raw counts
     paydown_perf = defaultdict(lambda: [0.0, 0])
     paydown_mod  = defaultdict(lambda: [0.0, 0])
-    # LGD samples per defaulted loan: keyed by (tier, age_b, fico_b, ltv_b)
-    lgd_samples = defaultdict(lambda: [0.0, 0.0, 0])  # [sum_co, sum_rec, count]
+    # LGD samples: [weighted_sum_co, weighted_sum_rec, raw_count]
+    lgd_samples = defaultdict(lambda: [0.0, 0.0, 0])
 
     # Also record current snapshot per loan = latest state + balance + age,
     # for the forecast pass.
@@ -224,6 +232,9 @@ def build_aggregates(conn, deals, covariates):
         ltv_b = _bucket(cov["ltv"] or 0, LTV_BUCKETS)
         is_modified = _modified(mod_ind)
 
+        # Deal weight for this observation
+        w = 1.0 / loans_per_deal.get(deal, 1)
+
         # Loan crossover: flush previous loan terminal
         if key != prev_key:
             if prev_key is not None and prev_state is not None:
@@ -234,7 +245,9 @@ def build_aggregates(conn, deals, covariates):
                     if pcov:
                         pcell = (pcov["tier"], prev_state, prev_age_b,
                                  prev_fico_b, prev_ltv_b, prev_mod, pcov["orig_q"])
-                        trans[pcell][t] += 1
+                        prev_w = 1.0 / loans_per_deal.get(prev_key[0], 1)
+                        trans[pcell][t] += prev_w
+                        trans_n[pcell][t] += 1
             prev_key = key
             prev_state = None
 
@@ -246,8 +259,8 @@ def build_aggregates(conn, deals, covariates):
             # If charged-off this row: record LGD sample (chargeoff value is in coa)
             if (key in defaulted) and (coa is not None and coa > 0):
                 lgd_key = (cov["tier"], age_b, fico_b, ltv_b)
-                lgd_samples[lgd_key][0] += float(coa)
-                lgd_samples[lgd_key][1] += float(rec or 0)
+                lgd_samples[lgd_key][0] += float(coa) * w
+                lgd_samples[lgd_key][1] += float(rec or 0) * w
                 lgd_samples[lgd_key][2] += 1
             # don't advance state from this row
             continue
@@ -273,7 +286,9 @@ def build_aggregates(conn, deals, covariates):
             pcov = covariates.get(prev_key) or cov
             pcell = (pcov["tier"], prev_state, prev_age_b, prev_fico_b,
                      prev_ltv_b, prev_mod, pcov["orig_q"])
-            trans[pcell][cur_state] += 1
+            prev_w = 1.0 / loans_per_deal.get(prev_key[0], 1)
+            trans[pcell][cur_state] += prev_w
+            trans_n[pcell][cur_state] += 1
 
         # Save last snapshot (used for the per-loan forecast pass).
         # Keeping for ALL loans (active + terminated) — terminated loans
@@ -308,7 +323,9 @@ def build_aggregates(conn, deals, covariates):
             if pcov:
                 pcell = (pcov["tier"], prev_state, prev_age_b, prev_fico_b,
                          prev_ltv_b, prev_mod, pcov["orig_q"])
-                trans[pcell][t] += 1
+                prev_w = 1.0 / loans_per_deal.get(prev_key[0], 1)
+                trans[pcell][t] += prev_w
+                trans_n[pcell][t] += 1
 
     # Tag each loan with its terminal status (used downstream).
     for key, snap in latest_state.items():
@@ -324,28 +341,33 @@ def build_aggregates(conn, deals, covariates):
                 f"{len(paydown_perf):,}  LGD cells: {len(lgd_samples):,}")
     logger.info(f"  loans tracked: {len(latest_state):,} "
                 f"(active={n_active:,} defaulted={n_def:,} paidoff={n_paid:,})")
-    return trans, paydown_perf, paydown_mod, lgd_samples, latest_state
+    return trans, trans_n, paydown_perf, paydown_mod, lgd_samples, latest_state
 
 
 # ── Cell-level transition matrix with smoothing fallback ──────────────
 
+TRANS_N = None   # raw (unweighted) counts, set in run() — gates MIN_CELL_OBS
+
+
 def cell_transition_matrix(trans, tier, state, age_b, fico_b, ltv_b, mod, orig_q="any"):
     """Try fully-stratified cell. Fall back to coarser strata if too sparse.
 
-    Baseline is vintage-blind — orig_q is accepted for backward compat with
-    other call sites but is always collapsed to "any" in the ladder. The
-    vintage effect comes through the per-deal calibration overlay in run(),
-    not through the transition cells, so same-features loans start from the
-    same expected trajectory regardless of origination quarter.
+    Baseline is vintage-blind — orig_q always collapsed to "any".  Cell
+    probabilities come from deal-weighted transition sums (`trans`); the
+    MIN_CELL_OBS sparsity gate uses raw counts (`TRANS_N`, module-global).
     """
     orig_q = "any"  # force vintage collapse at the cell lookup
     def _make(cell):
         d = trans.get(cell)
         if not d:
             return None, 0
+        # Gate on RAW observation count, not weighted sum
+        raw_n = sum((TRANS_N or {}).get(cell, {}).values()) if TRANS_N else sum(d.values())
+        if raw_n < MIN_CELL_OBS:
+            return None, raw_n
         total = sum(d.values())
-        if total < MIN_CELL_OBS:
-            return None, total
+        if total <= 0:
+            return None, raw_n
         row = np.zeros(N_STATES + 2)  # 6 states + Default + Payoff
         for k, v in d.items():
             if isinstance(k, int):
@@ -354,7 +376,7 @@ def cell_transition_matrix(trans, tier, state, age_b, fico_b, ltv_b, mod, orig_q
                 row[N_STATES] = v
             elif k == "Payoff":
                 row[N_STATES + 1] = v
-        return row / total, total
+        return row / total, raw_n
 
     # Order: try specific (with vintage), fall through credit dims while
     # keeping age + vintage. Then drop vintage WHILE KEEPING AGE — never
@@ -393,7 +415,8 @@ def _resolve_ladder(trans, ladder, _make):
                 if row is not None and n >= MIN_CELL_OBS:
                     return row, n
                 continue
-            agg = defaultdict(int)
+            agg_w = defaultdict(float)   # deal-weighted sums (for probs)
+            agg_n = defaultdict(int)     # raw counts (for MIN_CELL_OBS)
             tier, state, age_b, fico_b, ltv_b, mod, orig_q = cell
             for k, d in trans.items():
                 kt, ks, kab, kfb, klb, km, kq = k
@@ -404,18 +427,23 @@ def _resolve_ladder(trans, ladder, _make):
                 if mod != "any" and km != mod: continue
                 if orig_q != "any" and kq != orig_q: continue
                 for outk, v in d.items():
-                    agg[outk] += v
-            total = sum(agg.values())
-            if total >= MIN_CELL_OBS:
+                    agg_w[outk] += v
+                if TRANS_N:
+                    dn = TRANS_N.get(k, {})
+                    for outk, v in dn.items():
+                        agg_n[outk] += v
+            raw_total = sum(agg_n.values()) if TRANS_N else sum(int(v) for v in agg_w.values())
+            w_total = sum(agg_w.values())
+            if raw_total >= MIN_CELL_OBS and w_total > 0:
                 row = np.zeros(N_STATES + 2)
-                for k, v in agg.items():
+                for k, v in agg_w.items():
                     if isinstance(k, int): row[k] = v
                     elif k == "Default": row[N_STATES] = v
                     elif k == "Payoff": row[N_STATES + 1] = v
-                row = row / total
-                _AGG_CACHE[cell] = (row, total)
-                return row, total
-            _AGG_CACHE[cell] = (None, total)
+                row = row / w_total
+                _AGG_CACHE[cell] = (row, raw_total)
+                return row, raw_total
+            _AGG_CACHE[cell] = (None, raw_total)
     return None, 0
 
 
@@ -574,8 +602,11 @@ def run(carvana_db=CARVANA_DB, dashboard_db=DASHBOARD_DB):
     logger.info(f"  loaded {len(covariates):,} loan covariates")
 
     logger.info("Building empirical aggregates (transitions, paydown, LGD)...")
-    trans, paydown_perf, paydown_mod, lgd_samples, latest = build_aggregates(
+    trans, trans_n, paydown_perf, paydown_mod, lgd_samples, latest = build_aggregates(
         conn, deals, covariates)
+    # Publish raw counts so cell_transition_matrix can gate on them.
+    global TRANS_N
+    TRANS_N = trans_n
     perf_curve, mod_curve = build_paydown_curves(paydown_perf, paydown_mod)
     lgd_lookup = build_lgd_lookup(lgd_samples)
     logger.info(f"  perf paydown bins: {sum(len(v) for v in perf_curve.values()):,}  "

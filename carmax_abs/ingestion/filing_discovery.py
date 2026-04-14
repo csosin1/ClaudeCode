@@ -195,11 +195,30 @@ def link_absee_to_10d(deal: str = DEFAULT_DEAL, db_path: Optional[str] = None) -
         items = _get_index_json(cik, acc)
         xml_url = None
         if items:
+            # Find the main loan-tape XML. Carvana names it with "ex102" /
+            # "ex-102"; CarMax names it "cart<deal>.xml" (e.g. cart20201.xml).
+            # The loan-tape is always the largest .xml in the ABS-EE filing —
+            # other .xmls in the filing are tiny exhibit schedules. Fall back
+            # to "pick the biggest .xml that isn't an exhibit-103" if the
+            # ex-102 pattern misses.
+            best = None; best_size = 0
             for item in items:
                 name = item.get("name", "").lower()
-                if name.endswith(".xml") and ("ex102" in name or "ex-102" in name):
+                if not name.endswith(".xml"): continue
+                if "ex102" in name or "ex-102" in name:
                     xml_url = _build_doc_url(cik, acc, item["name"])
                     break
+                if "103" in name or "ex103" in name:
+                    continue  # skip small exhibit-103 asset-rep schedules
+                try:
+                    size = int(item.get("size") or 0)
+                except (TypeError, ValueError):
+                    size = 0
+                if size > best_size:
+                    best_size = size
+                    best = item["name"]
+            if xml_url is None and best is not None:
+                xml_url = _build_doc_url(cik, acc, best)
 
         if not xml_url:
             logger.debug(f"No XML found in ABS-EE {acc}")

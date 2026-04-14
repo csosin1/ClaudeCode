@@ -10,3 +10,6 @@ __pycache__/
 *.db
 .playwright-mcp/
 carvana_abs/filing_cache/
+
+# CarMax ABS-EE XMLs (large loan-level data — 13GB+)
+carmax_abs/filing_cache/*.xml
