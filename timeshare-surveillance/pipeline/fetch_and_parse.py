@@ -409,6 +409,33 @@ def _dry_run_process(ticker: str) -> int:
 # ---------------------------------------------------------------------------
 
 
+def _log_xbrl_coverage(ticker: str, xbrl_by_period: dict[str, dict]) -> None:
+    """Log a one-line summary of XBRL coverage per key metric across periods.
+
+    Helps diagnose gaps (e.g. allowance=0/36) at a glance in the log without
+    needing to re-query the DB after extraction.
+    """
+    if not xbrl_by_period:
+        log.info("xbrl coverage %s: (no periods loaded)", ticker)
+        return
+    total = len(xbrl_by_period)
+    tracked = [
+        ("gross", "gross_receivables_total_mm"),
+        ("allowance", "allowance_for_loan_losses_mm"),
+        ("provision", "provision_for_loan_losses_mm"),
+        ("originations", "originations_mm"),
+        ("vintages", "vintage_pools"),
+    ]
+    parts = []
+    for label, key in tracked:
+        hits = sum(
+            1 for b in xbrl_by_period.values()
+            if b.get(key) not in (None, [], "")
+        )
+        parts.append(f"{label}={hits}/{total}")
+    log.info("xbrl coverage %s: %s", ticker, " ".join(parts))
+
+
 def _merge_xbrl_and_narrative(
     xbrl_slice: dict,
     narrative: dict,
@@ -416,15 +443,34 @@ def _merge_xbrl_and_narrative(
     """XBRL wins for scalar fields it covers; narrative fills the rest.
 
     `segments` is narrative-only (XBRL doesn't express segment breakdowns
-    reliably), so we always take it from narrative when present.
+    reliably). `vintage_pools` is narrative-preferred when it includes a
+    non-null cumulative_default_rate_pct (the static-pool table is the
+    authoritative source for default rates); otherwise fall back to the
+    XBRL-derived balances.
     """
     rec = null_record()
     for k, v in narrative.items():
         if v not in (None, [], ""):
             rec[k] = v
     for k, v in xbrl_slice.items():
-        if v is not None and k != "segments":
-            rec[k] = v
+        if v is None or k in ("segments", "vintage_pools"):
+            continue
+        rec[k] = v
+
+    # vintage_pools selection — narrative wins if it has default-rate data.
+    narr_vp = narrative.get("vintage_pools") or []
+    xbrl_vp = xbrl_slice.get("vintage_pools") or []
+    narrative_has_defaults = any(
+        isinstance(p, dict) and p.get("cumulative_default_rate_pct") is not None
+        for p in narr_vp
+    )
+    if narrative_has_defaults:
+        rec["vintage_pools"] = narr_vp
+    elif xbrl_vp:
+        rec["vintage_pools"] = xbrl_vp
+    elif narr_vp:
+        rec["vintage_pools"] = narr_vp
+
     # Narrative wins for the segments array unconditionally.
     if narrative.get("segments"):
         rec["segments"] = narrative["segments"]
@@ -456,6 +502,8 @@ def process_ticker(ticker: str, dry_run: bool = False) -> int:
     except Exception as e:
         log.error("xbrl fetch failed for %s: %s; continuing with narrative-only", ticker, e)
         xbrl_by_period = {}
+
+    _log_xbrl_coverage(ticker, xbrl_by_period)
 
     # 2. Filing list.
     try:

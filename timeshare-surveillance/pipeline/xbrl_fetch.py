@@ -228,7 +228,69 @@ def extract_metrics_by_period(cf: dict) -> dict[str, dict[str, float]]:
             except (TypeError, ValueError, ZeroDivisionError):
                 pass
 
+    # Derived: vintage_pools from the FinancingReceivableOriginated* tag family.
+    _attach_xbrl_vintage_pools(out, tag_index)
+
     return out
+
+
+def _attach_xbrl_vintage_pools(
+    out: dict[str, dict],
+    tag_index: dict[str, tuple[str, list[dict], str]],
+) -> None:
+    """Stitch the FinancingReceivableOriginated* tags into vintage_pools.
+
+    Each tag covers a vintage-year offset from the period's fiscal year. We
+    produce one vintage_pools entry per (period_end, offset) where a value
+    exists. cumulative_default_rate_pct is left None — XBRL doesn't carry it.
+    The narrative extractor fills it in when a static-pool table is disclosed.
+    """
+    from datetime import date
+
+    offsets = getattr(settings, "XBRL_VINTAGE_TAG_OFFSETS", [])
+    if not offsets:
+        return
+
+    # Collect per-period per-offset the best (latest-filed) row.
+    per_period: dict[str, dict[int, dict]] = {}
+    for tag_name, offset in offsets:
+        if tag_name not in tag_index:
+            continue
+        unit, rows, _ns = tag_index[tag_name]
+        if unit != "USD":
+            continue
+        period_best: dict[str, dict] = {}
+        for r in rows:
+            pk = _period_key(r)
+            if not pk or "val" not in r:
+                continue
+            inc = period_best.get(pk)
+            if inc is None or r.get("filed", "") > inc.get("filed", ""):
+                period_best[pk] = r
+        for pk, row in period_best.items():
+            per_period.setdefault(pk, {})[offset] = row
+
+    for pk, offset_rows in per_period.items():
+        try:
+            fy_year = date.fromisoformat(pk).year
+        except ValueError:
+            continue
+        pools: list[dict] = []
+        for offset, row in sorted(offset_rows.items()):
+            try:
+                bal_mm = round(float(row["val"]) * 1e-6, 3)
+            except (TypeError, ValueError):
+                continue
+            pools.append({
+                "vintage_year": fy_year - offset,
+                "original_balance_mm": bal_mm,
+                "cumulative_default_rate_pct": None,
+                "as_of_period": pk,
+            })
+        if pools:
+            # Keep most-recent vintages first for display stability.
+            pools.sort(key=lambda p: p["vintage_year"], reverse=True)
+            out.setdefault(pk, {})["vintage_pools"] = pools
 
 
 def fetch_metrics(

@@ -43,19 +43,66 @@ def _strip_html(raw: str) -> str:
     return text.strip()
 
 
-# Window around the first keyword hit, in chars. Tuned so the capped excerpt
-# plus the schema/prompt stays well under ~3k tokens per Claude call.
+# Window around the best-scoring keyword hit, in chars. Wider than v1
+# because real delinquency/FICO/vintage tables often sit 300k+ chars deep
+# in a 10-K, past forward-looking-statements boilerplate that would grab the
+# first match but contains no numbers.
 _SECTION_WINDOW_BEFORE = 600
-_SECTION_WINDOW_AFTER = 11_400  # ~12k total incl. the "before" window
+_SECTION_WINDOW_AFTER = 19_400  # ~20k total incl. the "before" window
 
 # Segment tables often sit deep inside MD&A; widen the window so we catch
 # the full per-brand / per-cohort breakout, not just the anchor sentence.
 _SEGMENT_WINDOW_BEFORE = 2_000
 _SEGMENT_WINDOW_AFTER = 18_000
 
+# Windows that overlap the first BOILERPLATE_ZONE chars of the doc are
+# penalized — SEC filings open with forward-looking-statements / risk-factor
+# prose that matches keywords like "delinqu" and "credit" without containing
+# the actual disclosure tables.
+_BOILERPLATE_ZONE = 20_000
+
+# Regex for "digit-ish" tokens — used as a cheap proxy for "window contains a
+# table or numeric disclosure" when picking among candidate keyword hits.
+_DIGIT_RUN_RE = re.compile(r"\d[\d,\.]*")
+
+
+def _score_window(
+    text: str,
+    anchor_start: int,
+    before: int,
+    after: int,
+    keyword_re: re.Pattern,
+) -> tuple[float, int, int, str]:
+    """Return (score, start, end, excerpt) for a candidate anchor position.
+
+    Scoring prioritises windows with real numeric content and multiple
+    keyword hits, while penalising the first ~20k chars (boilerplate).
+    """
+    start = max(0, anchor_start - before)
+    end = min(len(text), anchor_start + after)
+    window = text[start:end]
+    digits = len(_DIGIT_RUN_RE.findall(window))
+    keywords = len(keyword_re.findall(window))
+    # Penalty proportional to how much of the window falls inside the
+    # boilerplate zone; anchors past 20k get no penalty.
+    if anchor_start < _BOILERPLATE_ZONE:
+        penalty = 40.0 * (1.0 - anchor_start / _BOILERPLATE_ZONE)
+    else:
+        penalty = 0.0
+    # Weights: digit runs dominate (we want tables), keyword-count adds
+    # signal for keyword-dense disclosure sections.
+    score = digits + 5 * keywords - penalty
+    return score, start, end, window
+
 
 def locate_sections(html: str) -> dict[str, str]:
     """Find the named sections in a filing; return {section: excerpt}.
+
+    For each section we enumerate every keyword hit, score the candidate
+    window by digit-run count + keyword-hit count minus a boilerplate-zone
+    penalty, and keep the highest-scoring window. This stops us from
+    extracting forward-looking-statements prose at char ~2k when the real
+    delinquency table is at char ~400k.
 
     Sections that never match any keyword are omitted entirely.
     """
@@ -65,8 +112,9 @@ def locate_sections(html: str) -> dict[str, str]:
 
     for section_name, patterns in settings.NARRATIVE_SECTION_PATTERNS.items():
         combined = "|".join(f"(?:{p})" for p in patterns)
-        m = re.search(combined, text, flags=re.I)
-        if not m:
+        keyword_re = re.compile(combined, flags=re.I)
+        matches = list(keyword_re.finditer(text))
+        if not matches:
             continue
         if section_name == "portfolio_segments":
             before, after = _SEGMENT_WINDOW_BEFORE, _SEGMENT_WINDOW_AFTER
@@ -74,8 +122,15 @@ def locate_sections(html: str) -> dict[str, str]:
         else:
             before, after = _SECTION_WINDOW_BEFORE, _SECTION_WINDOW_AFTER
             section_cap = cap
-        start = max(0, m.start() - before)
-        end = min(len(text), m.start() + after)
+
+        best: tuple[float, int, int, str] | None = None
+        for m in matches:
+            cand = _score_window(text, m.start(), before, after, keyword_re)
+            if best is None or cand[0] > best[0]:
+                best = cand
+        if best is None:
+            continue
+        _score, start, end, _window = best
         excerpt = text[start:end].strip()
         if len(excerpt) > section_cap:
             excerpt = excerpt[:section_cap]

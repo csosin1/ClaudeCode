@@ -67,8 +67,10 @@ CHUNK_CHAR_LIMIT = 75_000 * 4
 CHUNK_OVERLAP_CHARS = 5_000 * 4
 FULL_DOC_CHAR_LIMIT = 80_000 * 4
 
-# Narrative excerpt budget — cap per section handed to Claude (~3k tokens).
-NARRATIVE_EXCERPT_CHAR_LIMIT = 12_000
+# Narrative excerpt budget — cap per section handed to Claude (~5k tokens).
+# Wider window helps us capture real delinquency/FICO/vintage tables that
+# often sit deep in MD&A after forward-looking-statements boilerplate.
+NARRATIVE_EXCERPT_CHAR_LIMIT = 20_000
 
 # ----- XBRL tag mapping -----
 #
@@ -85,8 +87,10 @@ NARRATIVE_EXCERPT_CHAR_LIMIT = 12_000
 XBRL_TAG_MAP: dict[str, dict] = {
     "gross_receivables_total_mm": {
         "tags": [
+            "FinancingReceivableBeforeAllowanceForCreditLosses",
             "FinancingReceivableBeforeAllowanceForCreditLoss",
             "TimeshareFinancingReceivable",
+            "FinancingReceivable",
             "NotesReceivableGross",
         ],
         "unit": "USD",
@@ -94,14 +98,23 @@ XBRL_TAG_MAP: dict[str, dict] = {
     },
     "allowance_for_loan_losses_mm": {
         "tags": [
+            # Plural is the spelling HGV/TNL actually use in practice.
+            "FinancingReceivableAllowanceForCreditLosses",
             "FinancingReceivableAllowanceForCreditLoss",
+            "TimeSharingTransactionsAllowanceForUncollectibleAccounts",
             "AllowanceForLoanAndLeaseLossesReceivablesNetReportedAmount",
+            "LoansAndLeasesReceivableAllowance",
+            "AllowanceForLoanAndLeaseLossesProvisionForLossNet",
+            "AllowanceForNotesAndLoansReceivableCurrent",
+            "AllowanceForNotesAndLoansReceivableNoncurrent",
+            "AllowanceForDoubtfulAccountsReceivable",
         ],
         "unit": "USD",
         "scale": 1e-6,
     },
     "net_receivables_mm": {
         "tags": [
+            "FinancingReceivableAfterAllowanceForCreditLosses",
             "FinancingReceivableAfterAllowanceForCreditLoss",
             "NotesReceivableNet",
         ],
@@ -112,6 +125,7 @@ XBRL_TAG_MAP: dict[str, dict] = {
         "tags": [
             "ProvisionForLoanAndLeaseLosses",
             "ProvisionForLoanLossesExpensed",
+            "FinancingReceivableAllowanceForCreditLossesPeriodIncreaseDecrease",
             "ProvisionForDoubtfulAccounts",
         ],
         "unit": "USD",
@@ -120,6 +134,7 @@ XBRL_TAG_MAP: dict[str, dict] = {
     "originations_mm": {
         "tags": [
             "TimeshareFinancingReceivableOriginations",
+            "FinancingReceivableOriginatedInCurrentFiscalYear",
             "PaymentsToAcquireNotesReceivable",
         ],
         "unit": "USD",
@@ -142,6 +157,23 @@ XBRL_TAG_MAP: dict[str, dict] = {
         "scale": 1e-6,
     },
 }
+
+# ----- XBRL vintage-pool tag family -----
+#
+# Timeshare issuers disclose current-year and prior-year origination balances
+# as a family of us-gaap tags, one per vintage-year offset from the latest
+# fiscal year. When present we stitch them into the structured vintage_pools
+# array so the dashboard has at least the original_balance_mm axis even when
+# the narrative table is missing (cumulative default rate stays null — that
+# lives in the narrative static-pool table only).
+XBRL_VINTAGE_TAG_OFFSETS: list[tuple[str, int]] = [
+    ("FinancingReceivableOriginatedInCurrentFiscalYear", 0),
+    ("FinancingReceivableOriginatedInFiscalYearBeforeLatestFiscalYear", 1),
+    ("FinancingReceivableOriginatedTwoYearsBeforeLatestFiscalYear", 2),
+    ("FinancingReceivableOriginatedThreeYearsBeforeLatestFiscalYear", 3),
+    ("FinancingReceivableOriginatedFourYearsBeforeLatestFiscalYear", 4),
+    ("FinancingReceivableOriginatedFiveOrMoreYearsBeforeLatestFiscalYear", 5),
+]
 
 # ----- Narrative section locator patterns -----
 #

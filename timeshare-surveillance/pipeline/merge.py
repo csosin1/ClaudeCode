@@ -37,6 +37,19 @@ def _as_date_key(rec: dict) -> str:
     return rec.get("period_end") or ""
 
 
+def _ratio(num, denom):
+    """Safe ratio: None if either side is missing or denom is zero."""
+    if num is None or denom is None:
+        return None
+    try:
+        d = float(denom)
+        if d == 0:
+            return None
+        return round(float(num) / d, 6)
+    except (TypeError, ValueError):
+        return None
+
+
 def _derive(records: list[dict]) -> list[dict]:
     """Compute QoQ / YoY deltas per ticker. Mutates and returns records."""
     by_ticker: dict[str, list[dict]] = {}
@@ -46,6 +59,15 @@ def _derive(records: list[dict]) -> list[dict]:
     for ticker, seq in by_ticker.items():
         seq.sort(key=_as_date_key)
         for i, r in enumerate(seq):
+            # Derive allowance_coverage_pct from allowance/gross when the
+            # upstream extractors didn't fill it in (common when XBRL
+            # provides both scalars but no pre-computed ratio).
+            if r.get("allowance_coverage_pct") is None:
+                r["allowance_coverage_pct"] = _ratio(
+                    r.get("allowance_for_loan_losses_mm"),
+                    r.get("gross_receivables_total_mm"),
+                )
+
             prev_q = seq[i - 1] if i >= 1 else None
             prev_y = seq[i - 4] if i >= 4 else None
 
