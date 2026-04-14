@@ -25,12 +25,52 @@ log = logging.getLogger("merge")
 
 
 def _load_records() -> list[dict]:
-    """Pull every filing from SQLite. Legacy data/raw/*.json is ignored."""
+    """Pull every filing from SQLite. Legacy data/raw/*.json is ignored.
+
+    Fixture/dry-run rows are filtered out here — they have no place in the
+    production combined.json and have historically leaked in via accidental
+    --dry-run invocations against the live DB.
+    """
     try:
-        return pdb.export_combined(settings.SQLITE_DB_PATH)
+        rows = pdb.export_combined(settings.SQLITE_DB_PATH)
     except Exception as e:
         log.error("failed to export from %s: %s", settings.SQLITE_DB_PATH, e)
         return []
+    clean = [
+        r for r in rows
+        if not (r.get("source_url") or "").startswith("fixture:")
+        and not r.get("dry_run")
+    ]
+    dropped = len(rows) - len(clean)
+    if dropped:
+        log.warning("merge: dropped %d fixture/dry-run row(s) from combined.json", dropped)
+    return clean
+
+
+def _check_receivable_arithmetic(records: list[dict]) -> None:
+    """Warn on records where gross - allowance ≠ net beyond tolerance.
+
+    Catches the class of bug where we're sourcing the wrong XBRL tag (e.g.,
+    the non-timeshare "AllowanceForDoubtfulAccountsReceivable" tag standing
+    in for a timeshare ACL that the issuer doesn't tag in us-gaap). Warning
+    only — does not drop the record — so the dashboard still shows the
+    disclosure-level truth and an operator can see the divergence in logs.
+    """
+    for r in records:
+        gross = r.get("gross_receivables_total_mm")
+        allow = r.get("allowance_for_loan_losses_mm")
+        net = r.get("net_receivables_mm")
+        if gross is None or allow is None or net is None:
+            continue
+        expected = gross - allow
+        tol = max(5.0, 0.005 * abs(gross))
+        if abs(expected - net) > tol:
+            log.warning(
+                "xbrl cross-check %s %s: gross=%s allow=%s net=%s "
+                "(|gross-allow-net|=%.1f > tol=%.1f) — suspect wrong allowance tag",
+                r.get("ticker"), r.get("period_end"),
+                gross, allow, net, abs(expected - net), tol,
+            )
 
 
 def _as_date_key(rec: dict) -> str:
@@ -123,6 +163,7 @@ def _write_atomic(path: Path, data) -> None:
 def build_combined() -> list[dict]:
     records = _load_records()
     records = _derive(records)
+    _check_receivable_arithmetic(records)
     # Stable sort: ticker asc, period_end asc
     records.sort(key=lambda r: (r.get("ticker", ""), _as_date_key(r)))
     _write_atomic(settings.COMBINED_JSON, records)
