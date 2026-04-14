@@ -281,6 +281,52 @@ test.describe('Car-offers /setup (humanloop credentials)', () => {
   });
 });
 
+test.describe('Car-offers human-loop routes', () => {
+  // NOTE: these tests never call Prolific or MTurk — they only verify the
+  // server's own behaviour (shape of responses, guardrails when no
+  // credentials are configured). Real posts cost real money and flake.
+
+  test('GET /api/humanloop/jobs returns 200 with an array', async ({ request }) => {
+    const resp = await request.get('/car-offers/preview/api/humanloop/jobs');
+    if (resp.status() === 404) {
+      // Fall back to live if preview isn't wired on this droplet.
+      const live = await request.get('/car-offers/api/humanloop/jobs');
+      if (live.status() === 404) test.skip(true, 'humanloop routes not deployed yet');
+      expect(live.ok()).toBeTruthy();
+      const body = await live.json();
+      expect(Array.isArray(body.jobs)).toBeTruthy();
+      return;
+    }
+    expect(resp.ok()).toBeTruthy();
+    const body = await resp.json();
+    expect(Array.isArray(body.jobs)).toBeTruthy();
+  });
+
+  test('POST /api/humanloop/fire-baseline/carvana returns 503 when no credentials', async ({ request }) => {
+    const resp = await request.post('/car-offers/preview/api/humanloop/fire-baseline/carvana', {
+      data: { confirm: true },
+    });
+    if (resp.status() === 404) test.skip(true, 'humanloop routes not deployed yet');
+    // Either 503 (no creds — expected in dev) or 402 (creds present but no
+    // declared balance) are acceptable. A 200 here would mean the test ran
+    // on a droplet with live creds — which should never happen in CI.
+    expect([402, 503]).toContain(resp.status());
+    const body = await resp.json();
+    expect(typeof body.error).toBe('string');
+  });
+
+  test('POST /api/humanloop/fire-baseline/:site rejects unknown sites', async ({ request }) => {
+    const resp = await request.post('/car-offers/preview/api/humanloop/fire-baseline/bogus', {
+      data: { confirm: true },
+    });
+    if (resp.status() === 404 && !(await resp.text()).includes('unknown brief')) {
+      test.skip(true, 'humanloop routes not deployed yet');
+    }
+    // Expect 404 with {error:"unknown brief: bogus"}.
+    expect(resp.status()).toBe(404);
+  });
+});
+
 test.describe('Car-offers security', () => {
   test('.env is not served', async ({ request }) => {
     const resp = await request.get('/car-offers/.env');

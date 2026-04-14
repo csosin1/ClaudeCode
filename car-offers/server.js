@@ -1915,6 +1915,97 @@ app.post('/api/panel/run/:id', async (req, res) => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// Human-loop routes (Prolific + MTurk orchestrator). See lib/humanloop.js.
+// Credentials come from /setup; if neither platform is configured we 503.
+// ---------------------------------------------------------------------------
+
+const HUMANLOOP_BRIEFS = {
+  carvana: () => require('./lib/briefs/carvana-baseline'),
+  carmax: () => require('./lib/briefs/carmax-baseline'),
+  driveway: () => require('./lib/briefs/driveway-baseline'),
+  'mturk-audit': () => require('./lib/briefs/mturk-audit'),
+};
+
+function humanloopConfigured() {
+  try { config.reloadConfig(); } catch (_) {}
+  return !!(config.PROLIFIC_TOKEN || config.MTURK_ACCESS_KEY_ID);
+}
+
+/**
+ * POST /api/humanloop/fire-baseline/:site
+ * Body: { confirm: true }  -- belt-and-suspenders, makes it hard to fire by mistake
+ *
+ * Loads the baseline brief for :site, posts via humanloop.postBriefedJob,
+ * persists the job row, returns the platform + platform id + local job id.
+ */
+app.post('/api/humanloop/fire-baseline/:site', async (req, res) => {
+  const site = String(req.params.site || '').toLowerCase();
+  if (!HUMANLOOP_BRIEFS[site]) {
+    return res.status(404).json({ error: `unknown brief: ${site}` });
+  }
+  if (!humanloopConfigured()) {
+    return res.status(503).json({ error: 'humanloop not configured (no PROLIFIC_TOKEN or MTURK_ACCESS_KEY_ID)' });
+  }
+  const body = req.body || {};
+  if (body.confirm !== true) {
+    return res.status(400).json({ error: 'must pass {"confirm": true} to spend money' });
+  }
+  try {
+    const brief = HUMANLOOP_BRIEFS[site]();
+    const hl = require('./lib/humanloop');
+    const platform = hl.pickPlatform(brief);
+    // Refuse per-spec if chosen platform has $0 declared balance.
+    const balance = platform === 'prolific' ? config.PROLIFIC_BALANCE_USD : config.MTURK_BALANCE_USD;
+    if (!balance || balance <= 0) {
+      return res.status(402).json({
+        error: 'insufficient funds',
+        platform,
+        detail: `declared ${platform} balance is $${balance || 0}; update /setup after funding`,
+      });
+    }
+    const result = await hl.postBriefedJob(brief, {
+      autoPublish: body.publish === true,
+    });
+    return res.json({ ok: true, ...result });
+  } catch (e) {
+    console.error(`[humanloop/fire ${site}]`, e.message);
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+/** GET /api/humanloop/jobs — list jobs, newest first. */
+app.get('/api/humanloop/jobs', (_req, res) => {
+  try {
+    const hl = require('./lib/humanloop');
+    const db = hl.openHumanloopDb();
+    const jobs = hl.listJobs(db);
+    return res.json({ jobs });
+  } catch (e) {
+    console.error('[humanloop/jobs]', e.message);
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+/** POST /api/humanloop/harvest/:jobId — pull latest submissions + persist. */
+app.post('/api/humanloop/harvest/:jobId', async (req, res) => {
+  const jobId = parseInt(req.params.jobId, 10);
+  if (!Number.isFinite(jobId) || jobId <= 0) {
+    return res.status(400).json({ error: 'invalid jobId' });
+  }
+  if (!humanloopConfigured()) {
+    return res.status(503).json({ error: 'humanloop not configured' });
+  }
+  try {
+    const hl = require('./lib/humanloop');
+    const submissions = await hl.harvestSubmissions(jobId);
+    return res.json({ ok: true, job_id: jobId, submissions });
+  } catch (e) {
+    console.error(`[humanloop/harvest ${jobId}]`, e.message);
+    return res.status(500).json({ error: e.message });
+  }
+});
+
 /** GET /panel — mobile-first HTML view of the panel. */
 app.get('/panel', (_req, res) => {
   res.set('Content-Type', 'text/html; charset=utf-8');

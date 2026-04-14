@@ -11,6 +11,37 @@ Builder appends a per-task entry here after each build. Format:
 - **Things for the reviewer:**
 ```
 
+## 2026-04-14 — car-offers (humanloop clients + orchestrator + briefs)
+
+- **What was built:**
+  - `lib/prolific-client.js` — zero-dep wrapper over Prolific's REST API using Node's built-in `fetch`. Methods: `createStudy`, `publishStudy`, `listSubmissions`, `approveSubmission`, `rejectSubmission`, `downloadSubmissionData`, `getBalance`. Module-local running-spend counter gates every spend call against `balanceCapUsd`; throws a clear error before any HTTP request when the call would exceed cap. Prolific "Token" auth header; monetary values in USD cents.
+  - `lib/mturk-client.js` — same shape, backed by `@aws-sdk/client-mturk` v3. Methods: `createHit` (ExternalQuestion XML), `listAssignments` (paginated), `approveAssignment`, `rejectAssignment`, `getBalance`. Defaults to prod endpoint; `sandbox: true` switches to the sandbox host. Same cap guardrail. Cents → `X.XX` USD-string conversion for the SDK's Reward field.
+  - `lib/humanloop.js` — orchestrator. `postBriefedJob(brief)` routes by `prefer` (quality→Prolific, volume→MTurk, auto→Prolific if reward≥$8 else MTurk), persists to a new `humanloop_jobs` SQLite table in `/opt/car-offers/offers.db`. `harvestSubmissions(jobId)` pulls latest from the platform and upserts into `humanloop_submissions`. `approveSubmission`/`rejectSubmission` delegate to the right platform client. `ensureSchema(db)` creates both tables idempotently.
+  - `lib/briefs/carvana-baseline.js`, `carmax-baseline.js`, `driveway-baseline.js` — $10 Prolific quality briefs, 5 participants each, 20 min max, narrated screen-recording walkthroughs that stop before account creation.
+  - `lib/briefs/mturk-audit.js` — $3 MTurk volume brief, 1 participant, 10 min, ongoing-validation spot check ("visit site, type final offer + final URL").
+  - `server.js` additions (no existing routes removed): `POST /api/humanloop/fire-baseline/:site` (requires `{confirm:true}`; 503 if no creds, 402 if chosen platform's declared balance is $0, 404 for unknown site), `GET /api/humanloop/jobs`, `POST /api/humanloop/harvest/:jobId`.
+  - `package.json` — added `@aws-sdk/client-mturk: ^3.1030.0` (npm resolved from `^3.637.0`). `npm install` pulled 79 new transitive packages in; audit shows 0 vulnerabilities.
+- **Files modified:**
+  - `car-offers/lib/prolific-client.js` (new), `car-offers/lib/mturk-client.js` (new), `car-offers/lib/humanloop.js` (new)
+  - `car-offers/lib/briefs/carvana-baseline.js` (new), `carmax-baseline.js` (new), `driveway-baseline.js` (new), `mturk-audit.js` (new)
+  - `car-offers/server.js` — new human-loop routes inserted before the `GET /panel` HTML route; no existing routes modified.
+  - `car-offers/package.json` + `package-lock.json` — added AWS SDK dep.
+  - `tests/car-offers.spec.ts` — added a `Car-offers human-loop routes` describe block.
+  - `SKILLS/paid-human-loop.md` (new) — reusable-pattern doc.
+- **Tests added:**
+  - `GET /api/humanloop/jobs` returns 200 + `{jobs:[]}` on a fresh DB.
+  - `POST /api/humanloop/fire-baseline/carvana` with no credentials returns 503 (or 402 if creds are configured but balance was left at 0 — both are sensible refusals).
+  - `POST /api/humanloop/fire-baseline/bogus` returns 404 with an unknown-brief error. No test ever calls Prolific or MTurk (cost + flake).
+- **Assumptions:**
+  - The wizard-rebuild Builder owns `lib/{carvana,carmax,driveway,wizard-common}.js` — I did not touch any of those files.
+  - Prolific API base is `https://api.prolific.com` (per the 2024+ rebrand; the older `api.prolific.co` still 301s). If the user's token was issued against the old host we'll see a 401 and can flip the BASE constant.
+  - MTurk endpoint defaults to prod. No sandbox toggle exposed via config — if the user wants to smoke-test in sandbox first, pass `sandbox: true` directly from humanloop.js (open issue; noted in SKILL).
+  - Budget guardrail counts only the process-local running spend. A server restart resets the counter — the real protection is the funded balance on each platform.
+- **Things for the reviewer:**
+  - Prolific's `createStudy` payload has several required fields that vary by account type; if the first real call errors, read `err.body` (attached by the client) to see which field Prolific is complaining about.
+  - The humanloop DB writes target `/opt/car-offers/offers.db` by default — the live port's DB, not preview's. If we want preview isolation, set `HUMANLOOP_DB_PATH` in preview's .env.
+  - `POST /api/humanloop/fire-baseline` auto-publish is OFF by default (study stays in DRAFT on prolific.com) so a human can sanity-check before spend. Pass `{confirm:true, publish:true}` to auto-publish.
+
 ## 2026-04-13 — car-offers (/setup humanloop credentials)
 
 - **What was built:**

@@ -11,6 +11,12 @@ Append an entry when something breaks in a way that wasn't obvious from the code
 - **What to do differently:**
 ```
 
+## 2026-04-14 — humanloop-client spend guardrails must gate BEFORE the network call
+
+- **What went wrong:** First draft of `lib/prolific-client.js` updated the running-spend counter *after* awaiting `createStudy`. If the call succeeded but the next call was the one that would breach the cap, the order was: HTTP request fires → response → bump counter → then the next call throws. By then money has already been committed on Prolific's side.
+- **Root cause:** A guardrail that runs after the spend is not a guardrail, it's a journal. The moment the HTTP request leaves the process, the spend is real — Prolific/MTurk don't care that we later decided we shouldn't have.
+- **What to do differently:** In both `prolific-client.js` and `mturk-client.js`, the cap check (`assertBudget`) runs BEFORE the `await client.send(...)` / `await fetch(...)`. We only bump `_runningSpendCents` after the call succeeds. A failed call does not count against the cap (no spend happened). If a call ambiguously succeeded-but-errored (network timeout after the server committed), we will under-count — safe direction, but worth tracking if we see it in logs.
+
 ## 2026-04-13 — never POST to /api/setup from a builder without dry_run
 
 - **What went wrong:** While testing the new /setup extension I ran a local Node instance in the worktree and POSTed a fake `{mturkAccessKeyId, ...}` body to `/api/setup`. The handler's sibling-mirror logic then wrote my fake values into `/opt/car-offers/.env` AND `/opt/car-offers-preview/.env`, wiping the real 18-char `PROXY_PASS` and the real `PROJECT_EMAIL` on both instances. When systemd restarted the services they booted with blank credentials.

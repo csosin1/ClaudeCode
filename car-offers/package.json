@@ -9,6 +9,7 @@
     "test:unit": "node lib/offers-db.test.js && node lib/fingerprint.test.js"
   },
   "dependencies": {
+    "@aws-sdk/client-mturk": "^3.1030.0",
     "better-sqlite3": "^12.9.0",
     "dotenv": "^16.4.5",
     "express": "^4.21.0",
