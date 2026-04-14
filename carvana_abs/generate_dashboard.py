@@ -6,6 +6,12 @@ from datetime import datetime
 from urllib.parse import urlparse
 import pandas as pd
 
+# Ensure the repository root is on sys.path so sibling packages (carmax_abs,
+# carvana_abs) resolve when this file is invoked as a script.
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
@@ -13,6 +19,18 @@ DB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "db")
 DASH_DB = os.path.join(DB_DIR, "dashboard.db")
 FULL_DB = os.path.join(DB_DIR, "carvana_abs.db")
 ACTIVE_DB = DASH_DB if os.path.exists(DASH_DB) else FULL_DB
+
+# CarMax (CARMX) database paths. CarMax is Prime-only; when the dashboard DB
+# doesn't exist yet (e.g. CI without the export step), we fall back to the raw
+# ingestion DB. Both may be missing in a Carvana-only environment — every
+# CarMax code path guards on `os.path.exists(CARMAX_DB)` before running.
+CARMAX_DB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "carmax_abs", "db")
+CARMAX_DASH_DB = os.path.join(CARMAX_DB_DIR, "dashboard.db")
+CARMAX_FULL_DB = os.path.join(CARMAX_DB_DIR, "carmax_abs.db")
+CARMAX_DB = (CARMAX_DASH_DB if os.path.exists(CARMAX_DASH_DB)
+             else CARMAX_FULL_DB if os.path.exists(CARMAX_FULL_DB)
+             else None)
+
 OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static_site")
 os.makedirs(OUT_DIR, exist_ok=True)
 
@@ -26,13 +44,83 @@ DASHBOARD_DEALS = [
 ]
 PRIME_DEALS = [d for d in DASHBOARD_DEALS if "-P" in d]
 NONPRIME_DEALS = [d for d in DASHBOARD_DEALS if "-N" in d]
+
+# CarMax deals. Loaded dynamically from the CARMX DB so new vintages picked up
+# by the ingestion pipeline flow through without a code change. Falls back to
+# the config registry if the DB isn't available (e.g. during unit tests).
+def _load_carmax_deals():
+    if not CARMAX_DB:
+        return []
+    try:
+        conn = sqlite3.connect(CARMAX_DB)
+        rows = conn.execute(
+            "SELECT DISTINCT deal FROM pool_performance ORDER BY deal"
+        ).fetchall()
+        conn.close()
+        return [r[0] for r in rows]
+    except Exception:
+        return []
+
+CARMAX_DEALS = _load_carmax_deals()
+# CarMax sells sub-prime receivables rather than securitizing them, so every
+# CARMX trust is Prime. Keep a CARMAX_PRIME_DEALS alias for consistency with
+# the Carvana naming even though the filter is a no-op today.
+CARMAX_PRIME_DEALS = list(CARMAX_DEALS)
+
 COLORS = ["#1976D2","#D32F2F","#388E3C","#FF9800","#7B1FA2",
           "#00BCD4","#795548","#E91E63","#607D8B","#CDDC39","#FF5722","#3F51B5"]
+
+# Carvana's chart colors already lean blue. For cross-issuer comparisons we
+# need a second visually-distinct family. CarMax's brand palette is orange
+# (#F47920) and yellow (#FFD200); we shade around those two hues so every
+# CarMax deal on a chart is a CarMax-branded color.
+CARMAX_COLORS = [
+    "#F47920",  # CarMax brand orange
+    "#FFD200",  # CarMax brand yellow
+    "#E65100",  # deep orange
+    "#F9A825",  # amber
+    "#FF6F00",  # orange 900
+    "#FBC02D",  # yellow 700
+    "#BF360C",  # orange darkest
+    "#FFB300",  # amber 600
+    "#F57F17",  # amber 900
+    "#FFEB3B",  # yellow
+    "#D84315",  # deep orange 800
+    "#FFCA28",  # amber 400
+]
+# Blue family for the Carvana leg of the cross-issuer tab — keeps every
+# Carvana deal clearly distinguishable from every CarMax deal on one chart.
+CARVANA_CROSS_COLORS = [
+    "#0D47A1",  # blue 900
+    "#1565C0",  # blue 800
+    "#1976D2",  # blue 700 (the Carvana anchor color used elsewhere)
+    "#1E88E5",  # blue 600
+    "#2196F3",  # blue 500
+    "#42A5F5",  # blue 400
+    "#64B5F6",  # blue 300
+    "#1A237E",  # indigo 900
+    "#283593",  # indigo 800
+    "#3949AB",  # indigo 600
+    "#5C6BC0",  # indigo 400
+    "#00838F",  # cyan/teal 700 (blue-adjacent)
+    "#0097A7",  # cyan 700
+    "#00ACC1",  # cyan 600
+    "#26C6DA",  # cyan 400
+    "#4FC3F7",  # light blue 300
+]
+
 _chart_id = 0
 
 
-def q(sql, params=()):
-    conn = sqlite3.connect(ACTIVE_DB)
+def q(sql, params=(), db=None):
+    """Run a query and return a DataFrame.
+
+    By default reads from the Carvana dashboard/raw DB (ACTIVE_DB). Pass
+    db=CARMAX_DB to pull from the CarMax DB instead. All pre-existing call
+    sites use the default and remain Carvana-scoped.
+    """
+    target = db if db is not None else ACTIVE_DB
+    conn = sqlite3.connect(target)
     df = pd.read_sql_query(sql, conn, params=params)
     conn.close()
     for col in df.select_dtypes(include=["object"]).columns:
@@ -329,6 +417,853 @@ def get_cum_net_loss_rate(deal, orig_bal):
         return None
     net = (loss.iloc[0]["co"] or 0) - (loss.iloc[0]["rec"] or 0)
     return net / orig_bal
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# CarMax (CARMX) helpers
+#
+# CarMax pool_performance has the same schema as Carvana's, but distribution
+# dates are stored in M/D/YYYY string form — which does not string-sort in
+# chronological order. All CarMax helpers normalize via `nd()` (→ YYYY/MM/DD)
+# before sorting. Loan-level tables (loans, monthly_summary, loan_loss_summary)
+# exist in the schema but are empty today; anything that depends on them
+# degrades to a "loan-level data not yet ingested" message.
+# ────────────────────────────────────────────────────────────────────────────
+
+def carmax_available():
+    """True if the CarMax dashboard DB exists and has pool data."""
+    return CARMAX_DB is not None and bool(CARMAX_DEALS)
+
+
+def _carmax_pool(deal):
+    """Return CarMax pool_performance for a deal, normalized and chrono-sorted."""
+    if not carmax_available():
+        return pd.DataFrame()
+    pool = q("SELECT * FROM pool_performance WHERE deal=?", (deal,), db=CARMAX_DB)
+    if pool.empty:
+        return pool
+    pool["period"] = pool["distribution_date"].apply(nd)
+    pool = pool.sort_values("period").reset_index(drop=True)
+    # Derive cum_net_losses when the reporting cert populated only period flows.
+    # CarMax ingestion fills cumulative_net_losses for some deals and leaves it
+    # NULL for others; net_charged_off_amount is similarly sparse. We compute a
+    # derived column `cum_net_loss_derived` that falls back to cumsum of
+    # period net charge-offs so every deal has *something* to plot.
+    if "cumulative_net_losses" in pool.columns and pool["cumulative_net_losses"].notna().any():
+        pool["cum_net_loss_derived"] = pool["cumulative_net_losses"].ffill()
+    elif "net_charged_off_amount" in pool.columns and pool["net_charged_off_amount"].notna().any():
+        pool["cum_net_loss_derived"] = pool["net_charged_off_amount"].fillna(0).cumsum()
+    else:
+        pool["cum_net_loss_derived"] = pd.NA
+    return pool
+
+
+def get_carmax_orig_bal(deal):
+    """Return the deal's original cutoff pool balance for CarMax.
+
+    CarMax ingestion populates `initial_pool_balance` on every pool row for the
+    deals where the servicer cert reports it; we also fall back to the first
+    beginning_pool_balance we have on file. (We don't have servicer-cert HTML
+    cached for CarMax the way we do for Carvana, so the cert-parse fallback
+    used in get_orig_bal() doesn't apply here.)
+    """
+    if not carmax_available():
+        return None
+    df = q(
+        "SELECT initial_pool_balance FROM pool_performance "
+        "WHERE deal=? AND initial_pool_balance IS NOT NULL LIMIT 1",
+        (deal,), db=CARMAX_DB,
+    )
+    if not df.empty and df.iloc[0]["initial_pool_balance"]:
+        return float(df.iloc[0]["initial_pool_balance"])
+    df = q(
+        "SELECT MAX(beginning_pool_balance) AS m FROM pool_performance "
+        "WHERE deal=? AND beginning_pool_balance > 0",
+        (deal,), db=CARMAX_DB,
+    )
+    if not df.empty and df.iloc[0]["m"]:
+        return float(df.iloc[0]["m"])
+    return None
+
+
+def generate_carmax_deal_content(deal):
+    """Per-deal CarMax tab content. Mirrors generate_deal_content() layout
+    (Pool Summary / Delinquencies / Losses / Documents) but reads from the
+    CarMax DB and degrades gracefully where loan-level data is absent.
+
+    Returns (metrics_html, tabs_content) or None.
+    """
+    pool = _carmax_pool(deal)
+    if pool.empty:
+        logger.warning(f"[CARMX {deal}] No pool_performance, skipping")
+        return None
+
+    ORIG_BAL = get_carmax_orig_bal(deal)
+    x = pool["period"].tolist()
+    last = pool.iloc[-1]
+
+    # Last row may have stale/NULL values for some columns (e.g. cum_net_loss
+    # isn't reported on every cert). Pick the last non-null value instead.
+    def _last_nn(col):
+        if col not in pool.columns:
+            return None
+        s = pool[col].dropna()
+        return s.iloc[-1] if not s.empty else None
+
+    last_bal = _last_nn("ending_pool_balance")
+    last_count = _last_nn("ending_pool_count")
+    last_cum_loss = _last_nn("cum_net_loss_derived")
+    last_dq_bal = _last_nn("total_delinquent_balance")
+
+    sections = {}
+
+    # ── POOL SUMMARY ──
+    h = ""
+    bal = pool["ending_pool_balance"].ffill()
+    if bal.notna().any():
+        bal_m = [round(v / 1e6, 1) if pd.notna(v) else None for v in bal.tolist()]
+        h += chart(
+            [{"x": x, "y": bal_m, "type": "scatter", "fill": "tozeroy",
+              "line": {"color": "#F47920"}, "name": "Balance"}],
+            {"title": "Remaining Pool Balance ($M)",
+             "yaxis": {"ticksuffix": "M", "tickprefix": "$"},
+             "hovermode": "x unified"},
+        )
+    if "ending_pool_count" in pool.columns and pool["ending_pool_count"].notna().any():
+        h += chart(
+            [{"x": x, "y": [int(v) if pd.notna(v) else None for v in pool["ending_pool_count"].tolist()],
+              "type": "scatter", "line": {"color": "#FFD200"}, "name": "Loans"}],
+            {"title": "Active Loan Count", "hovermode": "x unified"},
+        )
+    if "weighted_avg_apr" in pool.columns and pool["weighted_avg_apr"].notna().any():
+        h += chart(
+            [{"x": x, "y": pool["weighted_avg_apr"].tolist(), "type": "scatter",
+              "line": {"color": "#F47920"}, "name": "Avg Consumer Rate"}],
+            {"title": "Avg Consumer Rate (Weighted APR)",
+             "yaxis": {"tickformat": ".2%"}, "hovermode": "x unified"},
+        )
+    if not h:
+        h = "<p>No pool performance data available.</p>"
+    sections["Pool Summary"] = h
+
+    # ── DELINQUENCIES ──
+    # CarMax reports dollar balances and counts by bucket on the servicer
+    # certificate. We plot the rate (balance / ending_pool_balance) as a
+    # stacked area, matching the Carvana layout.
+    h = ""
+    dq_cols = [
+        ("delinquent_31_60_balance", "31-60d", "#FFC107"),
+        ("delinquent_61_90_balance", "61-90d", "#FF9800"),
+        ("delinquent_91_120_balance", "91-120d", "#FF5722"),
+        ("delinquent_121_plus_balance", "121+d", "#D32F2F"),
+    ]
+    traces = []
+    have_any_dq = False
+    for col, label, color in dq_cols:
+        if col in pool.columns and pool[col].notna().any():
+            rates = [
+                (float(b) / float(e)) if (pd.notna(b) and pd.notna(e) and e)
+                else None
+                for b, e in zip(pool[col].tolist(), pool["ending_pool_balance"].tolist())
+            ]
+            traces.append({
+                "x": x, "y": rates, "name": label,
+                "stackgroup": "dq", "line": {"color": color},
+            })
+            have_any_dq = True
+    if have_any_dq:
+        h += chart(traces, {
+            "title": "Delinquency Rates (% of Pool)",
+            "yaxis": {"tickformat": ".2%"}, "hovermode": "x unified",
+        })
+    # Trigger vs actual (CarMax reports delinquency_trigger_actual; trigger
+    # level may be absent on many certs)
+    if "delinquency_trigger_actual" in pool.columns and pool["delinquency_trigger_actual"].notna().any():
+        trig = pool.dropna(subset=["delinquency_trigger_actual"])
+        t_traces = [{
+            "x": trig["period"].tolist(),
+            "y": trig["delinquency_trigger_actual"].tolist(),
+            "name": "Actual", "line": {"color": "#F47920"},
+        }]
+        if "delinquency_trigger_level" in pool.columns and pool["delinquency_trigger_level"].notna().any():
+            tg = pool.dropna(subset=["delinquency_trigger_level"])
+            t_traces.append({
+                "x": tg["period"].tolist(),
+                "y": tg["delinquency_trigger_level"].tolist(),
+                "name": "Trigger", "line": {"dash": "dash", "color": "red"},
+            })
+        h += chart(t_traces, {
+            "title": "Delinquency Trigger vs Actual",
+            "yaxis": {"tickformat": ".2%"}, "hovermode": "x unified",
+        })
+    # Latest-period DQ table
+    if last_bal:
+        dq_tbl_rows = []
+        for col, label, _ in dq_cols:
+            cnt_col = col.replace("_balance", "_count")
+            b = last.get(col)
+            c = last.get(cnt_col) if cnt_col in pool.columns else None
+            if pd.notna(b):
+                pct = f"{float(b) / float(last_bal):.2%}" if last_bal else "-"
+                dq_tbl_rows.append({
+                    "Bucket": label,
+                    "Count": f"{int(c):,}" if pd.notna(c) else "-",
+                    "Balance": fm(float(b)),
+                    "% Pool": pct,
+                })
+        total_b = last.get("total_delinquent_balance")
+        if pd.notna(total_b):
+            dq_tbl_rows.append({
+                "Bucket": "Total",
+                "Count": f"{int(last.get('delinquent_31_60_count') or 0) + int(last.get('delinquent_61_90_count') or 0) + int(last.get('delinquent_91_120_count') or 0) + int(last.get('delinquent_121_plus_count') or 0):,}",
+                "Balance": fm(float(total_b)),
+                "% Pool": f"{float(total_b) / float(last_bal):.2%}" if last_bal else "-",
+            })
+        if dq_tbl_rows:
+            h += "<h3>Latest Period</h3>" + table_html(pd.DataFrame(dq_tbl_rows))
+
+    if not h:
+        h = "<p>No delinquency data available.</p>"
+    sections["Delinquencies"] = h
+
+    # ── LOSSES ──
+    h = ""
+    if ORIG_BAL and pool["cum_net_loss_derived"].notna().any():
+        loss_rate = [
+            (float(v) / ORIG_BAL) if pd.notna(v) else None
+            for v in pool["cum_net_loss_derived"].tolist()
+        ]
+        h += chart(
+            [{"x": x, "y": loss_rate, "type": "scatter", "fill": "tozeroy",
+              "line": {"color": "#D32F2F"}}],
+            {"title": f"Cumulative Net Loss Rate (% of {fm(ORIG_BAL)})",
+             "yaxis": {"tickformat": ".2%"}, "hovermode": "x unified"},
+        )
+    # Gross / net / recoveries (cumulative) — use cumulative_gross_losses and
+    # cumulative_liquidation_proceeds where reported, cumsum of period flows
+    # otherwise.
+    cum_gross = pool.get("cumulative_gross_losses")
+    cum_rec = pool.get("cumulative_liquidation_proceeds")
+    if cum_gross is None or not cum_gross.notna().any():
+        if "gross_charged_off_amount" in pool.columns and pool["gross_charged_off_amount"].notna().any():
+            cum_gross = pool["gross_charged_off_amount"].fillna(0).cumsum()
+    if cum_rec is None or not cum_rec.notna().any():
+        if "recoveries" in pool.columns and pool["recoveries"].notna().any():
+            cum_rec = pool["recoveries"].fillna(0).cumsum()
+
+    gross_vals = cum_gross.tolist() if cum_gross is not None and cum_gross.notna().any() else None
+    rec_vals = cum_rec.tolist() if cum_rec is not None and cum_rec.notna().any() else None
+    net_vals = pool["cum_net_loss_derived"].tolist() if pool["cum_net_loss_derived"].notna().any() else None
+    if any([gross_vals, rec_vals, net_vals]):
+        traces = []
+        if gross_vals:
+            traces.append({"x": x, "y": gross_vals, "name": "Gross Chargeoffs",
+                           "line": {"color": "#D32F2F"}})
+        if rec_vals:
+            traces.append({"x": x, "y": rec_vals, "name": "Liquidation Proceeds",
+                           "line": {"color": "#4CAF50"}})
+        if net_vals:
+            traces.append({"x": x, "y": net_vals, "name": "Net Losses",
+                           "line": {"color": "#FF9800", "dash": "dash"}})
+        h += chart(traces, {
+            "title": "Cumulative Gross Losses vs Recoveries",
+            "yaxis": {"tickformat": "$,.0f"}, "hovermode": "x unified",
+        })
+    # Monthly flows
+    co_flow = pool.get("gross_charged_off_amount")
+    rec_flow = pool.get("recoveries")
+    if ((co_flow is not None and co_flow.notna().any())
+            or (rec_flow is not None and rec_flow.notna().any())):
+        traces = []
+        if co_flow is not None and co_flow.notna().any():
+            traces.append({"x": x, "y": co_flow.tolist(), "name": "Chargeoffs",
+                           "type": "bar", "marker": {"color": "#D32F2F"}})
+        if rec_flow is not None and rec_flow.notna().any():
+            traces.append({"x": x, "y": rec_flow.tolist(), "name": "Recoveries",
+                           "type": "bar", "marker": {"color": "#4CAF50"}})
+        h += chart(traces, {
+            "title": "Monthly Chargeoffs vs Recoveries", "barmode": "group",
+            "yaxis": {"tickformat": "$,.0f"}, "hovermode": "x unified",
+        })
+
+    h += ('<p style="font-size:.75rem;color:#666;margin-top:8px;">'
+          "Loan-level loss breakdowns (by credit score, interest rate) require "
+          "ABS-EE loan tape ingestion which is not yet complete for CarMax. "
+          "Pool-level losses above are parsed from the servicer certificate.</p>")
+    sections["Losses"] = h
+
+    # ── DOCUMENTS ──
+    h = ""
+    try:
+        certs = q(
+            "SELECT filing_date, servicer_cert_url, accession_number FROM filings "
+            "WHERE deal=? AND servicer_cert_url IS NOT NULL ORDER BY filing_date DESC",
+            (deal,), db=CARMAX_DB,
+        )
+        if not certs.empty:
+            h += "<h3>Servicer Certificates</h3>"
+            cert_rows = []
+            for _, row in certs.iterrows():
+                fd = row["filing_date"]
+                try:
+                    dt_obj = datetime.strptime(str(fd).strip()[:10], "%Y-%m-%d")
+                    date_display = dt_obj.strftime("%b %Y")
+                except (ValueError, TypeError):
+                    date_display = str(fd)[:10] if fd else "Unknown"
+                link = f'<a href="{row["servicer_cert_url"]}" target="_blank" rel="noopener">SEC&nbsp;Filing</a>'
+                cert_rows.append({"Date": date_display, "Download": link})
+            h += table_html(pd.DataFrame(cert_rows), cls="compare")
+    except Exception as e:
+        logger.warning(f"[CARMX {deal}] Error building servicer cert links: {e}")
+
+    try:
+        from carmax_abs.config import DEALS as CARMAX_DEAL_REGISTRY
+        deal_info = CARMAX_DEAL_REGISTRY.get(deal, {})
+        cik = deal_info.get("cik", "")
+        entity = deal_info.get("entity_name", f"CarMax Auto Owner Trust {deal}")
+        if cik:
+            h += "<h3>Prospectus &amp; Other Filings</h3>"
+            edgar_base = f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK={cik}"
+            filing_links = [
+                {"Document": "All SEC Filings",
+                 "Description": f"Complete filing history for {entity}",
+                 "Link": f'<a href="{edgar_base}&type=&dateb=&owner=include&count=40" target="_blank" rel="noopener">EDGAR</a>'},
+                {"Document": "Prospectus (424B)",
+                 "Description": "Offering prospectus and supplements",
+                 "Link": f'<a href="{edgar_base}&type=424B&dateb=&owner=include&count=10" target="_blank" rel="noopener">EDGAR</a>'},
+                {"Document": "Annual Reports (10-K)",
+                 "Description": "Annual reports filed with SEC",
+                 "Link": f'<a href="{edgar_base}&type=10-K&dateb=&owner=include&count=10" target="_blank" rel="noopener">EDGAR</a>'},
+                {"Document": "Current Reports (8-K)",
+                 "Description": "Material event disclosures",
+                 "Link": f'<a href="{edgar_base}&type=8-K&dateb=&owner=include&count=10" target="_blank" rel="noopener">EDGAR</a>'},
+            ]
+            h += table_html(pd.DataFrame(filing_links), cls="compare")
+    except Exception as e:
+        logger.warning(f"[CARMX {deal}] Error building prospectus links: {e}")
+
+    if not h:
+        h = "<p>No documents available for this deal.</p>"
+    sections["Documents"] = h
+
+    # ── Metric strip ──
+    pool_factor_display = (f"{float(last_bal) / ORIG_BAL:.1%}"
+                           if (last_bal and ORIG_BAL and ORIG_BAL > 0) else "-")
+    cum_loss_display = (f"{float(last_cum_loss) / ORIG_BAL:.2%}"
+                        if (last_cum_loss is not None and ORIG_BAL and ORIG_BAL > 0) else "-")
+    dq_display = (f"{float(last_dq_bal) / float(last_bal):.2%}"
+                  if (last_dq_bal is not None and last_bal) else "-")
+
+    loan_count_display = f"{int(last_count):,}" if (last_count is not None and pd.notna(last_count)) else "-"
+    metrics_html = f"""<div class="metrics">
+<div class="metric"><div class="mv">{fm(ORIG_BAL) if ORIG_BAL else '-'}</div><div class="ml">Original Balance</div></div>
+<div class="metric"><div class="mv">{fm(last_bal) if last_bal else '-'}</div><div class="ml">Current Balance</div></div>
+<div class="metric"><div class="mv">{pool_factor_display}</div><div class="ml">Pool Factor</div></div>
+<div class="metric"><div class="mv">{loan_count_display}</div><div class="ml">Active Loans</div></div>
+<div class="metric"><div class="mv">{cum_loss_display}</div><div class="ml">Cum Loss Rate</div></div>
+<div class="metric"><div class="mv">{dq_display}</div><div class="ml">Total DQ Rate</div></div>
+</div>"""
+
+    # Deal slugs must not collide with Carvana deal slugs. Carvana deals look
+    # like "2021-P1" and already slugify to "2021_P1"; CarMax deals look like
+    # "2021-1" which would slugify to "2021_1" — no collision with Carvana's
+    # "-P"/"-N" suffixed names, but we prefix with "cm_" to remove any doubt.
+    deal_safe = f"cm_{deal.replace('-', '_')}"
+    tabs_html = ""; content_html = ""; first = True
+    for name, body in sections.items():
+        tid = f"{deal_safe}_{name.replace(' ','_').replace('&','and')}"
+        tabs_html += f'<button class="tab{" active" if first else ""}" onclick="showTab(\'{tid}\',this)">{name}</button>\n'
+        content_html += f'<div id="{tid}" class="tc" style="display:{"block" if first else "none"}">{body}</div>\n'
+        first = False
+
+    return metrics_html, f'<div class="tabs">{tabs_html}</div>\n{content_html}'
+
+
+def _carmax_pool_time_series(deal):
+    """Return normalized pool_performance for a CarMax deal with derived columns
+    needed by the comparison tabs. Returns an empty frame if no data."""
+    return _carmax_pool(deal)
+
+
+def _carmax_traces(deals, color_map=None):
+    """Compute comparison traces (pool factor by age, cum net loss by age,
+    loss vs pool factor, excess spread (stub), 30+ DQ by age, annualized CO
+    rate by age) for a list of CarMax deals. Returns a dict with keys:
+
+        pf, pf_loss, cum_loss_age, dq, co, spread
+
+    each a list of Plotly trace dicts. color_map is {deal: hex}; if None, the
+    CARMAX_COLORS palette is cycled.
+    """
+    out = {"pf": [], "pf_loss": [], "cum_loss_age": [], "dq": [], "co": [], "spread": []}
+    if not carmax_available():
+        return out
+    for i, deal in enumerate(deals):
+        color = color_map[deal] if color_map else CARMAX_COLORS[i % len(CARMAX_COLORS)]
+        pool = _carmax_pool(deal)
+        if pool.empty:
+            continue
+        orig_bal = get_carmax_orig_bal(deal)
+        if not orig_bal or orig_bal <= 0:
+            continue
+        age = list(range(1, len(pool) + 1))
+
+        # Pool factor by age — ending balance / initial pool balance
+        if "ending_pool_balance" in pool.columns and pool["ending_pool_balance"].notna().any():
+            pf = [(float(v) / orig_bal) if pd.notna(v) else None
+                  for v in pool["ending_pool_balance"].tolist()]
+            out["pf"].append({
+                "x": age, "y": pf, "type": "scatter", "mode": "lines",
+                "name": f"CARMX {deal}", "line": {"color": color},
+            })
+
+        # Cum net loss rate by age
+        if pool["cum_net_loss_derived"].notna().any():
+            cr = [(float(v) / orig_bal) if pd.notna(v) else None
+                  for v in pool["cum_net_loss_derived"].tolist()]
+            out["cum_loss_age"].append({
+                "x": age, "y": cr, "type": "scatter", "mode": "lines",
+                "name": f"CARMX {deal}", "line": {"color": color},
+            })
+
+            # Loss vs pool factor — x=pool factor, y=cum net loss rate
+            if "ending_pool_balance" in pool.columns and pool["ending_pool_balance"].notna().any():
+                xs, ys = [], []
+                for epb, cn in zip(pool["ending_pool_balance"].tolist(),
+                                   pool["cum_net_loss_derived"].tolist()):
+                    if pd.notna(epb) and pd.notna(cn) and epb > 0:
+                        xs.append(float(epb) / orig_bal)
+                        ys.append(float(cn) / orig_bal)
+                if xs:
+                    out["pf_loss"].append({
+                        "x": xs, "y": ys, "type": "scatter",
+                        "mode": "lines+markers", "name": f"CARMX {deal}",
+                        "line": {"color": color}, "marker": {"size": 4},
+                    })
+
+        # 30+ DQ rate by age
+        if (
+            "total_delinquent_balance" in pool.columns
+            and pool["total_delinquent_balance"].notna().any()
+            and "ending_pool_balance" in pool.columns
+        ):
+            dq = []
+            for tdq, epb in zip(pool["total_delinquent_balance"].tolist(),
+                                pool["ending_pool_balance"].tolist()):
+                if pd.notna(tdq) and pd.notna(epb) and epb > 0:
+                    dq.append(float(tdq) / float(epb))
+                else:
+                    dq.append(None)
+            out["dq"].append({
+                "x": age, "y": dq, "type": "scatter", "mode": "lines",
+                "name": f"CARMX {deal}", "line": {"color": color},
+            })
+
+        # Annualized net charge-off rate by age — uses net_charged_off_amount
+        # where populated; requires a prior-period balance as the denominator.
+        if (
+            "net_charged_off_amount" in pool.columns
+            and pool["net_charged_off_amount"].notna().any()
+            and "beginning_pool_balance" in pool.columns
+        ):
+            co_x, co_y = [], []
+            for j, row in pool.iterrows():
+                nco = row.get("net_charged_off_amount")
+                pb = row.get("beginning_pool_balance")
+                if pd.notna(nco) and pd.notna(pb) and float(pb) > 0:
+                    co_x.append(j + 1)
+                    co_y.append((float(nco) * 12.0) / float(pb))
+            if co_x:
+                out["co"].append({
+                    "x": co_x, "y": co_y, "type": "scatter", "mode": "lines",
+                    "name": f"CARMX {deal}", "line": {"color": color},
+                })
+
+        # Excess spread — WAC minus cost-of-debt. CarMax pool has
+        # weighted_avg_apr and total_note_interest + aggregate_note_balance
+        # on (some) rows, matching the Carvana definition.
+        wac_col = pool.get("weighted_avg_apr")
+        ni_col = pool.get("total_note_interest")
+        nb_col = pool.get("aggregate_note_balance")
+        if (
+            wac_col is not None and wac_col.notna().any()
+            and ni_col is not None and ni_col.notna().any()
+            and nb_col is not None and nb_col.notna().any()
+        ):
+            xs, ys = [], []
+            for j, row in pool.iterrows():
+                w = row.get("weighted_avg_apr")
+                ni = row.get("total_note_interest")
+                nb = row.get("aggregate_note_balance")
+                if pd.notna(w) and pd.notna(ni) and pd.notna(nb) and float(nb) > 0 and float(ni) > 0:
+                    cod = float(ni) / float(nb) * 12.0
+                    if 0 < cod < 0.25:
+                        xs.append(j + 1)
+                        ys.append(float(w) - cod)
+            # Drop first point (partial-accrual artifact) to match Carvana chart
+            if len(xs) > 1:
+                xs, ys = xs[1:], ys[1:]
+            if xs:
+                out["spread"].append({
+                    "x": xs, "y": ys, "type": "scatter", "mode": "lines",
+                    "name": f"CARMX {deal}", "line": {"color": color},
+                })
+    return out
+
+
+def generate_carmax_comparison_content(deals, title):
+    """CarMax Prime comparison tab. Mirrors generate_comparison_content() but
+    pulls from the CarMax DB and uses the CARMAX_COLORS palette. Where CarMax
+    lacks data (loan tapes, cert text), sections degrade gracefully."""
+    if not carmax_available() or not deals:
+        return "<p>CarMax data not available.</p>"
+    h = ""
+
+    # Summary table — minimal, pool-level only
+    rows = []
+    for deal in deals:
+        orig = get_carmax_orig_bal(deal)
+        pool = _carmax_pool(deal)
+        last_bal = None
+        if "ending_pool_balance" in pool.columns and pool["ending_pool_balance"].notna().any():
+            last_bal = float(pool["ending_pool_balance"].dropna().iloc[-1])
+        pf = (last_bal / orig) if (last_bal and orig) else None
+        last_cn = None
+        if pool["cum_net_loss_derived"].notna().any():
+            last_cn = float(pool["cum_net_loss_derived"].dropna().iloc[-1])
+        cum_loss = (last_cn / orig) if (last_cn is not None and orig) else None
+        init_wac = curr_wac = None
+        if "weighted_avg_apr" in pool.columns and pool["weighted_avg_apr"].notna().any():
+            nonnull = pool["weighted_avg_apr"].dropna()
+            init_wac = float(nonnull.iloc[0])
+            curr_wac = float(nonnull.iloc[-1])
+        rows.append({
+            "Deal": f"CARMX {deal}",
+            "Initial Avg Consumer Rate": f"{init_wac:.2%}" if init_wac is not None else "-",
+            "Current Avg Consumer Rate": f"{curr_wac:.2%}" if curr_wac is not None else "-",
+            "Init Balance": fm(orig) if orig else "-",
+            "Pool Factor": f"{pf:.1%}" if pf is not None else "-",
+            "Cum Loss": f"{cum_loss:.2%}" if cum_loss is not None else "-",
+        })
+    if rows:
+        h += f"<h3>{title} — Summary</h3>" + table_html(pd.DataFrame(rows), cls="compare")
+
+    t = _carmax_traces(deals)
+
+    def _plot(bucket, layout):
+        if t.get(bucket):
+            return chart(t[bucket], layout, height=450)
+        return ""
+
+    h += _plot("pf", {
+        "title": f"{title} — Pool Factor by Deal Age",
+        "xaxis": {"title": "Deal Age (Months)"},
+        "yaxis": {"tickformat": ".0%", "title": "Pool Factor (Remaining / Original)"},
+        "hovermode": "x unified", "legend": {"orientation": "h", "y": -0.3},
+    })
+    h += _plot("cum_loss_age", {
+        "title": f"{title} — Cumulative Net Loss Rate by Deal Age",
+        "xaxis": {"title": "Deal Age (Months)"},
+        "yaxis": {"tickformat": ".2%", "title": "Cum Net Loss (% of Orig Bal)"},
+        "hovermode": "x unified", "legend": {"orientation": "h", "y": -0.3},
+    })
+    h += _plot("pf_loss", {
+        "title": f"{title} — Cumulative Net Loss vs Pool Factor",
+        "xaxis": {"title": "Pool Factor (Remaining / Original)",
+                  "tickformat": ".0%", "autorange": "reversed"},
+        "yaxis": {"tickformat": ".2%", "title": "Cum Net Loss (% of Orig Bal)"},
+        "hovermode": "closest", "legend": {"orientation": "h", "y": -0.3},
+    })
+    h += _plot("dq", {
+        "title": f"{title} — Total Delinquency Rate by Deal Age",
+        "xaxis": {"title": "Deal Age (Months)"},
+        "yaxis": {"tickformat": ".2%", "title": "Total DQ Balance / Pool Balance"},
+        "hovermode": "x unified", "legend": {"orientation": "h", "y": -0.3},
+    })
+    h += _plot("co", {
+        "title": f"{title} — Annualized Net Charge-Off Rate by Deal Age",
+        "xaxis": {"title": "Deal Age (Months)"},
+        "yaxis": {"tickformat": ".2%",
+                  "title": "Net Charge-Offs × 12 / Prior Month Balance"},
+        "hovermode": "x unified", "legend": {"orientation": "h", "y": -0.3},
+    })
+    h += _plot("spread", {
+        "title": f"{title} — Excess Spread by Deal Age (Consumer Rate − Trust Cost of Debt)",
+        "xaxis": {"title": "Deal Age (Months)"},
+        "yaxis": {"tickformat": ".2%", "title": "Excess Spread"},
+        "hovermode": "x unified", "legend": {"orientation": "h", "y": -0.3},
+    })
+
+    return h or "<p>No comparison data available.</p>"
+
+
+def _carvana_prime_traces(deals, color_map):
+    """Re-derive the Carvana Prime comparison traces using an explicit per-deal
+    color map so the cross-issuer tab can put every Carvana deal in the blue
+    family. Returns dict with same keys as _carmax_traces().
+
+    This duplicates the trace-building logic from generate_comparison_content()
+    — we can't reuse that function directly because it assembles a full HTML
+    block with headings and a summary table, and because the color assignment
+    there is positional via the COLORS palette.
+    """
+    out = {"pf": [], "pf_loss": [], "cum_loss_age": [], "dq": [], "co": [], "spread": []}
+    note_bal_cols = {"A1": "note_balance_a1", "A2": "note_balance_a2", "A3": "note_balance_a3",
+                     "A4": "note_balance_a4", "B": "note_balance_b", "C": "note_balance_c",
+                     "D": "note_balance_d", "N": "note_balance_n"}
+
+    for deal in deals:
+        color = color_map.get(deal, "#1976D2")
+        orig_bal = get_orig_bal(deal)
+        if not orig_bal or orig_bal <= 0:
+            continue
+
+        # Cum net loss rate by age (cert-authoritative)
+        series = _cum_net_loss_series(deal)
+        if series:
+            months = list(range(1, len(series) + 1))
+            rates = [round(cn / orig_bal, 6) for _, cn in series]
+            out["cum_loss_age"].append({
+                "x": months, "y": rates, "type": "scatter", "mode": "lines",
+                "name": f"Carvana {deal}", "line": {"color": color},
+            })
+
+        # Pool factor by age — from monthly_summary
+        ms = q("SELECT reporting_period_end, total_balance, period_chargeoffs, period_recoveries "
+               "FROM monthly_summary WHERE deal=? ORDER BY reporting_period_end", (deal,))
+        if not ms.empty:
+            ms["period"] = ms["reporting_period_end"].apply(nd)
+            ms = ms.sort_values("period").reset_index(drop=True)
+            ms["pool_factor"] = ms["total_balance"].astype(float) / orig_bal
+            out["pf"].append({
+                "x": list(range(1, len(ms) + 1)),
+                "y": [round(v, 6) for v in ms["pool_factor"].tolist()],
+                "type": "scatter", "mode": "lines", "name": f"Carvana {deal}",
+                "line": {"color": color},
+            })
+
+            # Loss vs Pool Factor
+            loss_series = _cum_net_loss_series(deal)
+            if loss_series:
+                pool_bal = q("SELECT distribution_date, ending_pool_balance FROM pool_performance "
+                             "WHERE deal=?", (deal,))
+                bal_by_dt = {}
+                for _, r in pool_bal.iterrows():
+                    if r["ending_pool_balance"]:
+                        for fmt in ("%m/%d/%Y", "%Y-%m-%d"):
+                            try:
+                                bal_by_dt[datetime.strptime(str(r["distribution_date"]).strip()[:10], fmt)] = float(r["ending_pool_balance"])
+                                break
+                            except (ValueError, TypeError):
+                                pass
+                pf_x, pf_y = [], []
+                for dt, cn in loss_series:
+                    bal = bal_by_dt.get(dt)
+                    if bal is None:
+                        continue
+                    pf_x.append(round(bal / orig_bal, 6))
+                    pf_y.append(round(cn / orig_bal, 6))
+                if pf_x:
+                    out["pf_loss"].append({
+                        "x": pf_x, "y": pf_y, "type": "scatter",
+                        "mode": "lines+markers", "name": f"Carvana {deal}",
+                        "line": {"color": color}, "marker": {"size": 4},
+                    })
+
+            # 30+ DQ from cert series
+            dq_series = _cert_dq_series(deal)
+            if dq_series:
+                out["dq"].append({
+                    "x": list(range(1, len(dq_series) + 1)),
+                    "y": [round(dq / epb, 6) if epb else 0 for _, dq, epb in dq_series],
+                    "type": "scatter", "mode": "lines", "name": f"Carvana {deal}",
+                    "line": {"color": color},
+                })
+
+            # Annualized net CO rate
+            bal = ms["total_balance"].astype(float)
+            prev_bal = bal.shift(1)
+            net_co = (ms["period_chargeoffs"].fillna(0) - ms["period_recoveries"].fillna(0)).astype(float)
+            co_rate = (net_co * 12.0) / prev_bal.where(prev_bal > 0)
+            co_x, co_y = [], []
+            for idx, v in enumerate(co_rate.tolist()):
+                if idx == 0 or v is None or pd.isna(v):
+                    continue
+                co_x.append(idx + 1)
+                co_y.append(round(float(v), 6))
+            if co_x:
+                out["co"].append({
+                    "x": co_x, "y": co_y, "type": "scatter", "mode": "lines",
+                    "name": f"Carvana {deal}", "line": {"color": color},
+                })
+
+        # Excess spread — replicate the shifted collection-month alignment
+        pool = q("SELECT * FROM pool_performance WHERE deal=? ORDER BY distribution_date", (deal,))
+        if pool.empty:
+            continue
+        pool["period"] = pool["distribution_date"].apply(nd)
+        pool = pool.sort_values("period").reset_index(drop=True)
+
+        def _ym(s):
+            s = str(s).strip()
+            if len(s) >= 7 and s[4] in "-/":
+                try:
+                    return (int(s[:4]), int(s[5:7]))
+                except ValueError:
+                    return None
+            return None
+
+        wac_by_col = {}
+        if "weighted_avg_apr" in pool.columns and pool["weighted_avg_apr"].notna().any():
+            for _, row in pool.iterrows():
+                ym = _ym(row["period"])
+                w = row["weighted_avg_apr"]
+                if ym and pd.notna(w):
+                    col_ym = (ym[0], ym[1] - 1) if ym[1] > 1 else (ym[0] - 1, 12)
+                    wac_by_col[col_ym] = float(w)
+        else:
+            wac_ms = q("SELECT reporting_period_end, weighted_avg_coupon FROM monthly_summary "
+                       "WHERE deal=? AND weighted_avg_coupon IS NOT NULL ORDER BY reporting_period_end", (deal,))
+            for _, row in wac_ms.iterrows():
+                ym = _ym(nd(row["reporting_period_end"]))
+                if ym:
+                    wac_by_col[ym] = float(row["weighted_avg_coupon"])
+
+        try:
+            notes_df = q("SELECT class, coupon_rate FROM notes WHERE deal=? AND coupon_rate IS NOT NULL", (deal,))
+        except Exception:
+            notes_df = pd.DataFrame()
+        norm_rate_lookup = {}
+        if not notes_df.empty:
+            for cls, rate in zip(notes_df["class"], notes_df["coupon_rate"]):
+                norm = cls.upper().replace("-", "").replace(" ", "").replace("CLASS", "")
+                norm_rate_lookup[norm] = rate
+        for col in note_bal_cols.values():
+            if col in pool.columns:
+                pool[col] = pool[col].ffill()
+
+        cod_by_col = {}
+        has_ni = "total_note_interest" in pool.columns
+        has_nb = "aggregate_note_balance" in pool.columns
+        for _, row in pool.iterrows():
+            ym = _ym(row["period"])
+            if not ym:
+                continue
+            col_ym = (ym[0], ym[1] - 1) if ym[1] > 1 else (ym[0] - 1, 12)
+            cod_val = None
+            if has_ni and has_nb:
+                ni = row.get("total_note_interest")
+                nb = row.get("aggregate_note_balance")
+                if pd.notna(ni) and pd.notna(nb) and float(nb) > 0 and float(ni) > 0:
+                    v = float(ni) / float(nb) * 12
+                    if 0 < v < 0.25:
+                        cod_val = v
+            if cod_val is None and norm_rate_lookup:
+                w_sum, t_bal = 0.0, 0.0
+                for cls, col in note_bal_cols.items():
+                    if col in pool.columns and cls in norm_rate_lookup:
+                        bal = row.get(col)
+                        if pd.notna(bal) and float(bal) > 0:
+                            w_sum += norm_rate_lookup[cls] * float(bal)
+                            t_bal += float(bal)
+                if t_bal > 0:
+                    cod_val = w_sum / t_bal
+            if cod_val is not None:
+                cod_by_col[col_ym] = cod_val
+
+        keys = sorted(set(wac_by_col) & set(cod_by_col))
+        if len(keys) > 1:
+            keys = keys[1:]
+        if keys:
+            out["spread"].append({
+                "x": list(range(1, len(keys) + 1)),
+                "y": [round(wac_by_col[k] - cod_by_col[k], 6) for k in keys],
+                "type": "scatter", "mode": "lines", "name": f"Carvana {deal}",
+                "line": {"color": color},
+            })
+
+    return out
+
+
+def generate_cross_issuer_comparison():
+    """Carvana Prime + CarMax Prime on the same axes. Blue family for Carvana,
+    orange/yellow family for CarMax. Every deal on the same five/six charts,
+    indexed to deal age. Plotly's default legend-click-to-toggle lets users
+    show/hide individual deals.
+    """
+    if not carmax_available():
+        return "<p>CarMax data not available — cross-issuer tab disabled.</p>"
+
+    carvana_prime = [d for d in PRIME_DEALS]
+    carmax_prime = list(CARMAX_DEALS)
+
+    # Color assignment: per-deal map so _carvana_prime_traces and _carmax_traces
+    # pick the right color for each series.
+    cv_map = {d: CARVANA_CROSS_COLORS[i % len(CARVANA_CROSS_COLORS)]
+              for i, d in enumerate(carvana_prime)}
+    cm_map = {d: CARMAX_COLORS[i % len(CARMAX_COLORS)]
+              for i, d in enumerate(carmax_prime)}
+
+    cv = _carvana_prime_traces(carvana_prime, cv_map)
+    cm = _carmax_traces(carmax_prime, cm_map)
+
+    # Merge each bucket — Carvana first so they render under CarMax
+    merged = {k: cv.get(k, []) + cm.get(k, []) for k in ("pf", "cum_loss_age", "pf_loss", "spread", "dq", "co")}
+
+    h = ('<p style="font-size:.75rem;color:#666;margin:8px 12px;">'
+         "Every Carvana Prime deal (blue family) and every CarMax CARMX deal "
+         "(orange/yellow family) on the same axes, indexed to deal age. "
+         "Click a legend entry to hide/show that deal; double-click to isolate.</p>")
+
+    def _plot(bucket, layout):
+        if merged.get(bucket):
+            return chart(merged[bucket], layout, height=500)
+        return ""
+
+    h += _plot("pf", {
+        "title": "Carvana vs CarMax (Prime) — Pool Factor by Deal Age",
+        "xaxis": {"title": "Deal Age (Months)"},
+        "yaxis": {"tickformat": ".0%", "title": "Pool Factor (Remaining / Original)"},
+        "hovermode": "closest", "legend": {"orientation": "h", "y": -0.4},
+    })
+    h += _plot("cum_loss_age", {
+        "title": "Carvana vs CarMax (Prime) — Cumulative Net Loss Rate by Deal Age",
+        "xaxis": {"title": "Deal Age (Months)"},
+        "yaxis": {"tickformat": ".2%", "title": "Cum Net Loss (% of Orig Bal)"},
+        "hovermode": "closest", "legend": {"orientation": "h", "y": -0.4},
+    })
+    h += _plot("pf_loss", {
+        "title": "Carvana vs CarMax (Prime) — Cumulative Net Loss vs Pool Factor",
+        "xaxis": {"title": "Pool Factor (Remaining / Original)",
+                  "tickformat": ".0%", "autorange": "reversed"},
+        "yaxis": {"tickformat": ".2%", "title": "Cum Net Loss (% of Orig Bal)"},
+        "hovermode": "closest", "legend": {"orientation": "h", "y": -0.4},
+    })
+    h += _plot("dq", {
+        "title": "Carvana vs CarMax (Prime) — Delinquency Rate by Deal Age",
+        "xaxis": {"title": "Deal Age (Months)"},
+        "yaxis": {"tickformat": ".2%", "title": "DQ Balance / Pool Balance"},
+        "hovermode": "closest", "legend": {"orientation": "h", "y": -0.4},
+    })
+    h += _plot("co", {
+        "title": "Carvana vs CarMax (Prime) — Annualized Net Charge-Off Rate by Deal Age",
+        "xaxis": {"title": "Deal Age (Months)"},
+        "yaxis": {"tickformat": ".2%",
+                  "title": "Net Charge-Offs × 12 / Prior Month Balance"},
+        "hovermode": "closest", "legend": {"orientation": "h", "y": -0.4},
+    })
+    h += _plot("spread", {
+        "title": "Carvana vs CarMax (Prime) — Excess Spread by Deal Age",
+        "xaxis": {"title": "Deal Age (Months)"},
+        "yaxis": {"tickformat": ".2%", "title": "Consumer Rate − Trust Cost of Debt"},
+        "hovermode": "closest", "legend": {"orientation": "h", "y": -0.4},
+    })
+    h += ('<p style="font-size:.7rem;color:#888;margin-top:12px;">'
+          "Carvana DQ series here is cert-parsed 31–120 day buckets divided by ending pool balance. "
+          "CarMax DQ series is total delinquent balance (31+ days) divided by ending pool balance. "
+          "The two are slightly different definitions — CarMax includes a 121+ bucket; Carvana charges "
+          "those loans off. Treat cross-issuer DQ comparisons with that caveat in mind.</p>")
+    return h
 
 
 def generate_deal_content(deal):
@@ -1625,6 +2560,21 @@ def main():
         logger.error("No deals with data found.")
         return
 
+    # Generate CarMax per-deal content (only if the CarMax DB is available)
+    carmax_deal_contents = {}
+    if carmax_available():
+        for deal in CARMAX_DEALS:
+            logger.info(f"Generating CARMX {deal}...")
+            try:
+                result = generate_carmax_deal_content(deal)
+            except Exception as e:
+                logger.error(f"[CARMX {deal}] Failed: {e}")
+                result = None
+            if result:
+                carmax_deal_contents[deal] = result
+    else:
+        logger.info("CarMax DB not found — skipping CarMax deal tabs.")
+
     # Generate comparison sections
     logger.info("Generating Prime comparison...")
     prime_html = generate_comparison_content(
@@ -1633,6 +2583,16 @@ def main():
     nonprime_html = generate_comparison_content(
         [d for d in NONPRIME_DEALS if d in deal_contents], "Non-Prime Deals")
 
+    carmax_prime_html = ""
+    cross_issuer_html = ""
+    if carmax_available() and carmax_deal_contents:
+        logger.info("Generating CarMax Prime comparison...")
+        carmax_prime_html = generate_carmax_comparison_content(
+            [d for d in CARMAX_PRIME_DEALS if d in carmax_deal_contents],
+            "CarMax Prime Deals")
+        logger.info("Generating cross-issuer (Carvana vs CarMax) comparison...")
+        cross_issuer_html = generate_cross_issuer_comparison()
+
     # Generate default model analysis
     logger.info("Generating Default Model analysis...")
     model_html = generate_model_content()
@@ -1640,10 +2600,22 @@ def main():
     # Build deal selector dropdown with comparison entries at top
     first_deal = list(deal_contents.keys())[0]
     options = '<option value="__model__">--- Default Model ---</option>\n'
-    options += '<option value="__prime__">--- Prime Comparison ---</option>\n'
-    options += '<option value="__nonprime__">--- Non-Prime Comparison ---</option>\n'
+    options += '<option value="__prime__">--- Prime Comparison (Carvana) ---</option>\n'
+    options += '<option value="__nonprime__">--- Non-Prime Comparison (Carvana) ---</option>\n'
+    if carmax_prime_html:
+        options += '<option value="__carmax_prime__">--- CarMax Prime Comparison ---</option>\n'
+    if cross_issuer_html:
+        options += '<option value="__cross__">--- Carvana vs CarMax — Prime ---</option>\n'
     options += '<option disabled>──────────────────</option>\n'
-    options += "\n".join(f'<option value="{d}" {"selected" if d == first_deal else ""}>{d}</option>' for d in deal_contents)
+    options += "\n".join(
+        f'<option value="{d}" {"selected" if d == first_deal else ""}>Carvana {d}</option>'
+        for d in deal_contents)
+    # CarMax per-deal entries — prefix "cm_" in the value to keep them in a
+    # disjoint namespace from Carvana deal IDs.
+    if carmax_deal_contents:
+        options += "\n" + "\n".join(
+            f'<option value="cm_{d}">CarMax {d}</option>'
+            for d in carmax_deal_contents)
     deal_selector = f'<div class="deal-select"><select id="dealSelect" onchange="switchDeal(this.value)">{options}</select></div>'
 
     # Build per-deal content divs
@@ -1652,10 +2624,22 @@ def main():
     all_deal_html += f'<div id="deal-__model__" class="deal-block" style="display:none">\n{model_html}\n</div>\n'
     all_deal_html += f'<div id="deal-__prime__" class="deal-block" style="display:none">\n{prime_html}\n</div>\n'
     all_deal_html += f'<div id="deal-__nonprime__" class="deal-block" style="display:none">\n{nonprime_html}\n</div>\n'
+    if carmax_prime_html:
+        all_deal_html += f'<div id="deal-__carmax_prime__" class="deal-block" style="display:none">\n{carmax_prime_html}\n</div>\n'
+    if cross_issuer_html:
+        all_deal_html += f'<div id="deal-__cross__" class="deal-block" style="display:none">\n{cross_issuer_html}\n</div>\n'
     # Add individual deal sections
     for deal, (metrics, tabs) in deal_contents.items():
         display = "block" if deal == first_deal else "none"
         all_deal_html += f'<div id="deal-{deal}" class="deal-block" style="display:{display}">\n{metrics}\n{tabs}\n</div>\n'
+    # CarMax per-deal sections. Div id prefix matches the option value above.
+    for deal, (metrics, tabs) in carmax_deal_contents.items():
+        all_deal_html += (
+            f'<div id="deal-cm_{deal}" class="deal-block" style="display:none">\n'
+            f'<h2 style="padding:8px 12px 0;font-size:1rem;color:#333">'
+            f'CarMax Auto Owner Trust {deal}</h2>\n'
+            f'{metrics}\n{tabs}\n</div>\n'
+        )
 
     page = f"""<!DOCTYPE html><html lang="en"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
