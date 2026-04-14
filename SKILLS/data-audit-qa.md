@@ -58,22 +58,47 @@ Total data points in scope: <N>
 Total sampled: <M>
 ```
 
-## The Change Queue (how findings become fixes)
+## Halt-Fix-Rerun Loop (how findings become fixes)
 
-**Checking is parallel. Fixing is orchestrated.** A parallel agent finding an error does NOT fix it — that creates race conditions and untraceable changes. Instead:
+**Don't find the same root cause fifty times.** A single upstream defect typically produces many symptoms. Finding all fifty symptoms in one pass and then fixing is wasteful — the fix invalidates the already-completed verification, and you spent compute cataloguing duplicates.
 
-Each finding appends one entry to `AUDIT_FINDINGS.md` at the project root:
+Instead, the audit runs as a **halt-fix-rerun loop**:
+
+```
+while iteration < MAX_ITERATIONS (default: 10):
+    run Phase 1 (outlier scan, 100%)  →  if any: halt immediately
+    run Phase 2 (risk-weighted random sample, parallel batches)
+    as soon as the first batch reports a finding:
+        stop dispatching new batches
+        let in-flight batches finish their current point (graceful halt, not abort)
+        collect all findings that naturally surface in the drain
+    if no findings:
+        AUDIT PASSES — record and exit
+    group findings by probable root cause
+    fix the highest-severity group first
+    mark symptoms in AUDIT_FINDINGS.md as "resolved pending re-audit"
+    iteration += 1
+
+if iteration == MAX_ITERATIONS:
+    audit stops, flag to user — a fix isn't actually fixing and needs human review
+```
+
+### Finding format
+
+Each finding — whether it triggers the halt or surfaces in the drain — appends one entry to `AUDIT_FINDINGS.md` at the project root:
 
 ```markdown
 ## F-<nnn> — <one-line symptom>
 - **Location:** <file / dashboard tab / dataset field>
 - **Observed:** <reported value>
-- **Expected:** <your re-derived value, with calculation>
+- **Expected:** <re-derived value, with calculation>
 - **Source chain:** <trace>
 - **Stopping condition:** <if verification couldn't reach primary source>
 - **Severity:** critical / high / medium / low
+- **Iteration:** <which pass found it>
 - **Flagged by:** <agent id / date>
 - **Status:** open
+- **Root-cause group:** <identifier, filled in during grouping>
 ```
 
 Severity rubric:
@@ -82,14 +107,38 @@ Severity rubric:
 - **Medium**: cosmetic but noticeable (off-by-cent rounding, slightly wrong timestamp).
 - **Low**: audit noise, self-consistent minor quirk.
 
-Once checking completes, the **orchestrator** (the chat running the audit, not a subagent) walks the queue and plans the fix pass:
+### Grouping by root cause
 
-1. Group findings by root cause — many findings often trace to one upstream defect.
-2. For each root cause, spawn one Builder subagent (per `SKILLS/parallel-execution.md`) to fix at the source — not patch the output. Per `SKILLS/root-cause-analysis.md`, never suppress the symptom.
-3. After the fix lands, **re-run the audit against the previously-failed data points only** — the change queue's `F-*` entries get marked `verified` (with date) or `failed-after-fix` (which escalates severity and files an RCA task).
-4. Sync the `AUDIT_FINDINGS.md` to append a `## Resolution` block under each fixed finding with commit SHA + verification result.
+Before fixing, the orchestrator asks: "could these findings share an upstream cause?" Common patterns:
+- Same column across different rows → likely a formula or ingestion bug affecting that column.
+- Same row across different columns → likely a single bad input record.
+- Same time bucket across ticker/entity → likely a timestamp parsing or period-alignment bug.
+- Numerical offsets that look like unit mismatches (factor of 1000, factor of 100, currency) → likely a units-of-measure bug.
 
-Only when every critical and high finding is `verified` is the audit considered passing.
+If the pattern is clear, fix all findings with one change to the upstream code. If findings look genuinely independent, they get fixed in severity order, one group per iteration.
+
+### Fixing (serial, root-caused)
+
+Per `SKILLS/root-cause-analysis.md`:
+1. Spawn one Builder subagent per root-cause group. Each fix ships with a `LESSONS.md` entry explaining the upstream defect and a preventive rule if applicable.
+2. Mark the symptoms this fix resolves: `Status: resolved pending re-audit` in `AUDIT_FINDINGS.md`.
+3. Next iteration: the rerun either confirms `resolved → verified` or escalates to `failed-after-fix` (the fix didn't work; RCA task filed).
+
+### Pass criteria
+
+One full iteration completes with zero findings → AUDIT PASSES. The `AUDIT_FINDINGS.md` reflects every finding from every iteration, with resolution blocks showing what fixed what. Users and future auditors can read the history.
+
+### Why halt on first finding?
+
+- **Compute efficiency.** Finding duplicates of the same root cause is wasted work.
+- **Correctness.** Findings collected *after* a fix are stale — they're about an obsolete version of the code.
+- **Forces RCA.** You can't chain "just fix them all" band-aids; every iteration commits a real upstream fix.
+
+### When NOT to halt
+
+- **Low-severity findings** (purely cosmetic): the orchestrator may choose to continue the pass and batch-fix lows at the end, IF the user has indicated tolerance for this. Default is halt-on-any.
+- **Outlier scan is fast enough** that it usually completes before a halt decision matters.
+- **If the user specifies "run to completion and show me everything"** (useful for a scoping pass before deciding on a sample rate). In that mode the halt is suppressed and all findings are reported as advisory.
 
 ## Parallelization Mechanics
 
@@ -102,21 +151,24 @@ Before fan-out, the orchestrator checks `/capacity.json`. If warn/urgent, cap co
 
 ## Output Artifact
 
-At the end of the audit, the project's `AUDIT_FINDINGS.md` is the canonical record, and a one-page summary goes into the user-facing response:
+At the end of the audit loop, the project's `AUDIT_FINDINGS.md` is the canonical record, and a one-page summary goes into the user-facing response:
 
 ```
 Audit: <project>
 Date: <YYYY-MM-DD>
 Scope: <what was in scope>
-Sample: <total points> checked against <population>
-Pass rate: <N> verified / <M> sampled
-Findings: <critical> critical, <high> high, <medium> medium, <low> low
-Unreachable sources: <count> (verification stopped before primary source)
-Status: PASS | PASS-WITH-ISSUES | FAIL
-Next: <what the orchestrator is doing about the findings>
+Iterations run: <N>   (halt-fix-rerun loop; clean pass required to exit)
+Total findings across all iterations: <F>
+  - <critical> critical, <high> high, <medium> medium, <low> low
+Root-cause groups fixed: <G> (one commit per group)
+Unreachable sources: <count> (honest stopping conditions recorded)
+Final sample (clean pass): <M> points checked, 0 findings
+Status: PASS | FAIL-MAX-ITER
 ```
 
-The full finding list lives in `AUDIT_FINDINGS.md` with URLs/line refs.
+`FAIL-MAX-ITER` means the loop hit `MAX_ITERATIONS` without a clean pass — typically a fix that isn't actually fixing the root cause. This is a human-review signal, not a platform decision.
+
+The full finding list lives in `AUDIT_FINDINGS.md` with URLs/line refs and resolution blocks showing which commit resolved which finding. Future audits re-read this file as prior-art.
 
 ## Anti-Patterns
 
@@ -126,6 +178,9 @@ The full finding list lives in `AUDIT_FINDINGS.md` with URLs/line refs.
 - **Glossing over stopping conditions.** "Couldn't find the filing, moving on" is a finding, not a pass. Record where verification stopped and why.
 - **Uniform sampling on non-uniform risk.** If a user looks at 5 headline numbers on a dashboard, those 5 should get near-100% coverage regardless of the overall sample rate.
 - **Auditing once and calling it done.** Data changes; re-audit on a cadence. Quarterly is typical for live pipelines.
+- **Finding everything, then fixing in bulk.** This is what the halt-fix-rerun loop avoids. Finding N symptoms of one root cause wastes N-1 agent-runs of compute AND produces stale findings once the fix lands.
+- **Fix-and-move-on within an iteration.** After a fix, the loop *reruns* — do not mark findings resolved without re-audit verification. A "fix" that doesn't pass re-audit is a worse bug than the original (false confidence).
+- **Infinite looping.** `MAX_ITERATIONS` exists. If the loop can't converge, stop and escalate to the user — the fix is probably touching a symptom, not the cause.
 
 ## Integration
 

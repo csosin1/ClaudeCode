@@ -184,7 +184,7 @@ Before heavy work (batch scraping, concurrent builders, big model runs), check `
 Weekly per-chat pass — and on-demand whenever `/capacity.html` goes `warn`. Basic flossing only: streaming queries, closed handles, closed browsers, SQLite WAL checkpoint + VACUUM, bounded caches, log rotation, gzipped raw caches. Anything that needs a schema change, a new library, or a real perf tradeoff files a separate task instead. See `SKILLS/memory-hygiene.md`.
 
 ## Data Audit & QA
-For number-intensive projects, every load-bearing dataset or dashboard passes a skeptical-auditor audit before it's trusted: 100% outlier scan + user-specified-% risk-weighted random sample, each sampled point traced to its external primary source and each calculation re-derived from first principles (never copied from the code). Findings go to `AUDIT_FINDINGS.md`; fixes are orchestrated serially and root-caused, never patched. Checking is massively parallel. See `SKILLS/data-audit-qa.md`.
+For number-intensive projects, every load-bearing dataset or dashboard passes a skeptical-auditor audit before it's trusted. Checks run as a **halt-fix-rerun loop**: many agents in parallel, but on the first finding they halt gracefully, the orchestrator groups findings by root cause and ships an upstream fix, then the audit reruns. Loop exits only on a clean pass. Outlier scan + risk-weighted random sample; each point traced to primary source; calculations re-derived from first principles (never copied from the code); honest stopping conditions when sources are unreachable. See `SKILLS/data-audit-qa.md`.
 
 ## Never Idle — Gather Blockers Upfront, Work Around the Rest
 The user's time is the scarce resource. Do not end a turn waiting for permission when any useful work remains.
