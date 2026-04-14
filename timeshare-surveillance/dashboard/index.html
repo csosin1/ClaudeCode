@@ -55,11 +55,17 @@
   .scroll-x { overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .pill {
     display: inline-flex; align-items: center; justify-content: center;
-    padding: 4px 10px; border-radius: 9999px; font-size: 11px;
+    padding: 10px 14px; border-radius: 9999px; font-size: 11px;
     cursor: pointer; user-select: none;
     border: 1px solid #1F2937; background: transparent; color: #94A3B8;
+    min-height: 44px; min-width: 44px;
   }
   .pill.active { background: #00A3FF22; border-color: #00A3FF; color: #5bd0ff; }
+  .switch-wrap {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-height: 44px; min-width: 44px;
+    padding: 12px 4px; cursor: pointer;
+  }
   .switch {
     position: relative; width: 36px; height: 20px;
     background: #1F2937; border-radius: 9999px; cursor: pointer;
@@ -107,6 +113,31 @@ const HGV_SEG_DASH = {
   originated: "0",
   acquired_at_fv: "4 4",
 };
+
+// Title Case labels for segment keys, used in legends and HGV-breakdown UI.
+const SEGMENT_LABELS = {
+  consolidated:   "Consolidated",
+  legacy_hgv:     "Legacy HGV",
+  diamond:        "Diamond",
+  bluegreen:      "Bluegreen",
+  originated:     "Originated",
+  acquired_at_fv: "Acquired (fair value)",
+  marriott:       "Marriott",
+  vistana:        "Vistana",
+  welk:           "Welk",
+  club_wyndham:   "Club Wyndham",
+  margaritaville: "Margaritaville",
+};
+function toTitleCase(key) {
+  if (!key) return "";
+  return String(key)
+    .split("_")
+    .map(p => p.length ? p[0].toUpperCase() + p.slice(1).toLowerCase() : p)
+    .join(" ");
+}
+function segmentLabel(key) {
+  return SEGMENT_LABELS[key] || toTitleCase(key);
+}
 
 const EDGAR_URLS = {
   HGV: "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0001674168&type=10-Q&dateb=&owner=include&count=40",
@@ -180,6 +211,37 @@ function tickerSeverity(rec) {
   }
   return worst;
 }
+// Returns { triggered: [rule keys that fired at CRITICAL or WARNING, excluding
+// the management-flag narrative rule], management_flag: bool }.
+function evaluateTriggers(rec) {
+  const triggered = [];
+  let management_flag = false;
+  if (!rec) return { triggered, management_flag };
+  for (const tier of ["CRITICAL", "WARNING"]) {
+    const rules = THRESHOLDS[tier] || {};
+    for (const [metric, spec] of Object.entries(rules)) {
+      const [op, target] = spec;
+      const val = rec[metric];
+      if (!cmp(op, val, target)) continue;
+      if (metric === "management_flagged_credit_concerns") {
+        management_flag = true;
+      } else if (!triggered.includes(metric)) {
+        triggered.push(metric);
+      }
+    }
+  }
+  if (rec.management_flagged_credit_concerns === true) management_flag = true;
+  return { triggered, management_flag };
+}
+function severitySuffix(rec) {
+  const { triggered, management_flag } = evaluateTriggers(rec);
+  const hasQuant = triggered.length > 0;
+  if (hasQuant && management_flag) return " · Threshold + Narrative";
+  if (hasQuant) return " · Threshold";
+  if (management_flag) return " · Narrative";
+  return "";
+}
+
 function fmtPct(v, digits = 2) {
   if (v === null || v === undefined || Number.isNaN(v)) return "—";
   return (v * 100).toFixed(digits) + "%";
@@ -334,6 +396,8 @@ function SnapshotStrip({ latest }) {
         const sev = tickerSeverity(r);
         const sevColor = sev === "CRITICAL" ? SEV.CRITICAL : sev === "WARNING" ? SEV.WARNING : SEV.CLEAN;
         const flagged = !!(r && r.management_flagged_credit_concerns);
+        const sevSuffix = sev === "CLEAN" ? "" : severitySuffix(r);
+        const sevLabel = sev + sevSuffix;
         return (
           <div
             key={t}
@@ -350,9 +414,10 @@ function SnapshotStrip({ latest }) {
                     Mgmt flagged
                   </span>
                 )}
-                <span className="mono text-[10px] font-semibold px-2 py-0.5 rounded"
+                <span data-testid="sev-badge" data-ticker-sev={t}
+                      className="mono text-[10px] font-semibold px-2 py-0.5 rounded"
                       style={{ background: `${sevColor}22`, border: `1px solid ${sevColor}55`, color: sevColor }}>
-                  {sev}
+                  {sevLabel}
                 </span>
               </div>
             </div>
@@ -380,6 +445,15 @@ function SnapshotStrip({ latest }) {
   );
 }
 
+// Returns true iff at least one row carries a non-null value under `key`.
+function seriesHasData(data, key) {
+  for (const row of data) {
+    const v = row[key];
+    if (v !== null && v !== undefined && !Number.isNaN(v)) return true;
+  }
+  return false;
+}
+
 function MetricChart({ metric, records, range, latestDate, hgvBreakdown, cohortMode }) {
   const filtered = useMemo(
     () => records.filter(r => withinRange(r.period_end, range, latestDate)),
@@ -401,6 +475,27 @@ function MetricChart({ metric, records, range, latestDate, hgvBreakdown, cohortM
       : buildBaseSeries(filtered, metric.key)
   ), [filtered, metric.key, hasHgvSegment, brandKeys.join(",")]);
 
+  // Determine which series keys actually have non-null data in the active
+  // range. Ghost legend entries and ghost Lines get filtered out here.
+  const activeSeries = useMemo(() => {
+    const seriesKeys = hasHgvSegment
+      ? [...brandKeys.map(sk => "HGV_" + sk), "VAC", "TNL"]
+      : [...TICKERS];
+    return seriesKeys.filter(k => seriesHasData(data, k));
+  }, [data, hasHgvSegment, brandKeys.join(",")]);
+
+  // A per-series, null-filtered dataset. Recharts draws continuous lines off
+  // these slim datasets, so intermediate nulls no longer break the line.
+  const seriesData = useMemo(() => {
+    const out = {};
+    for (const k of activeSeries) {
+      out[k] = data
+        .filter(row => row[k] !== null && row[k] !== undefined && !Number.isNaN(row[k]))
+        .map(row => ({ period_end: row.period_end, label: row.label, value: row[k] }));
+    }
+    return out;
+  }, [data, activeSeries.join(",")]);
+
   const yFmt = pickYFmt(metric.fmt);
   const axisProps = {
     stroke: "#475569",
@@ -409,28 +504,54 @@ function MetricChart({ metric, records, range, latestDate, hgvBreakdown, cohortM
     axisLine: { stroke: "#1F2937" }
   };
 
-  const empty = data.length === 0;
+  const noActive = activeSeries.length === 0;
   const noHgvSeg = hgvBreakdown && !hasHgvSegment;
+
+  // Human label for a series key (HGV_legacy_hgv -> "HGV Legacy HGV"; TNL -> "TNL").
+  const seriesLabel = (k) => {
+    if (k.startsWith("HGV_")) return "HGV " + segmentLabel(k.slice(4));
+    return k;
+  };
+  const seriesStroke = (k) => {
+    if (k.startsWith("HGV_")) return HGV_SEG_COLORS[k.slice(4)] || COLORS.HGV;
+    return COLORS[k] || "#94A3B8";
+  };
+  const seriesDash = (k) => {
+    if (k.startsWith("HGV_")) return HGV_SEG_DASH[k.slice(4)] || "0";
+    return "0";
+  };
 
   return (
     <div data-chart={metric.key} data-testid="chart-card" className="rounded-lg p-3"
          style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-      <div className="flex items-baseline justify-between mb-2 px-1">
+      <div
+        data-testid="chart-title-row"
+        className={`flex items-baseline justify-between mb-2 px-1 ${noActive ? "opacity-50" : ""}`}
+      >
         <div className="mono text-[11px] uppercase tracking-widest text-slate-400">{metric.label}</div>
-        {noHgvSeg && (
+        {noHgvSeg && !noActive && (
           <div className="mono text-[10px] text-slate-500">HGV: n/a</div>
         )}
       </div>
       <div className="chart-wrap">
-        {empty ? (
-          <div className="h-full w-full flex items-center justify-center text-[11px] text-slate-500">
-            No data in range.
+        {noActive ? (
+          <div
+            data-testid="chart-empty"
+            className="h-full w-full flex items-center justify-center text-slate-500 italic text-sm"
+          >
+            No data in this range
           </div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={data} margin={{ top: 5, right: 12, left: 0, bottom: 0 }}>
+            <LineChart margin={{ top: 5, right: 12, left: 0, bottom: 0 }}>
               <CartesianGrid stroke="#1F2937" vertical={false} />
-              <XAxis dataKey="label" {...axisProps} minTickGap={20} />
+              <XAxis
+                dataKey="label"
+                type="category"
+                allowDuplicatedCategory={false}
+                {...axisProps}
+                minTickGap={20}
+              />
               <YAxis {...axisProps} tickFormatter={yFmt} width={56} />
               <Tooltip
                 contentStyle={{ background: "#0A0E1A", border: "1px solid #1F2937", fontFamily: "ui-monospace, monospace", fontSize: 12 }}
@@ -438,33 +559,22 @@ function MetricChart({ metric, records, range, latestDate, hgvBreakdown, cohortM
                 formatter={(v, name) => [v === null || v === undefined ? "—" : yFmt(v), name]}
               />
               <Legend wrapperStyle={{ fontSize: 10, fontFamily: "ui-monospace, monospace", color: "#94A3B8" }} />
-              {hasHgvSegment ? (
-                <>
-                  {brandKeys.map(sk => (
-                    <Line
-                      key={"HGV_" + sk}
-                      data-line={"HGV_" + sk}
-                      type="monotone"
-                      dataKey={"HGV_" + sk}
-                      name={"HGV " + sk.replace(/_/g, " ")}
-                      stroke={HGV_SEG_COLORS[sk] || COLORS.HGV}
-                      strokeDasharray={HGV_SEG_DASH[sk] || "0"}
-                      strokeWidth={2}
-                      dot={{ r: 1.5 }}
-                      connectNulls
-                    />
-                  ))}
-                  {["VAC", "TNL"].map(t => (
-                    <Line key={t} type="monotone" dataKey={t} name={t}
-                      stroke={COLORS[t]} strokeWidth={2} dot={{ r: 1.5 }} connectNulls />
-                  ))}
-                </>
-              ) : (
-                TICKERS.map(t => (
-                  <Line key={t} type="monotone" dataKey={t} name={t}
-                    stroke={COLORS[t]} strokeWidth={2} dot={{ r: 1.5 }} connectNulls />
-                ))
-              )}
+              {activeSeries.map(k => (
+                <Line
+                  key={k}
+                  data-line={k}
+                  data={seriesData[k]}
+                  type="monotone"
+                  dataKey="value"
+                  name={seriesLabel(k)}
+                  stroke={seriesStroke(k)}
+                  strokeDasharray={seriesDash(k)}
+                  strokeWidth={2}
+                  dot={{ r: 1.5 }}
+                  connectNulls
+                  isAnimationActive={false}
+                />
+              ))}
             </LineChart>
           </ResponsiveContainer>
         )}
@@ -587,11 +697,15 @@ function App() {
             <div className="flex items-center gap-2 ml-2" data-testid="hgv-toggle">
               <span className="text-[11px] text-slate-400 mono">HGV breakdown</span>
               <div
-                role="switch"
-                aria-checked={hgvBreakdown}
-                className={`switch ${hgvBreakdown ? "on" : ""}`}
+                className="switch-wrap"
                 onClick={() => setHgvBreakdown(v => !v)}
-              />
+              >
+                <div
+                  role="switch"
+                  aria-checked={hgvBreakdown}
+                  className={`switch ${hgvBreakdown ? "on" : ""}`}
+                />
+              </div>
             </div>
             {hgvBreakdown && (
               <div className="flex items-center gap-1" data-testid="cohort-mode">
