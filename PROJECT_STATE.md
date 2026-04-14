@@ -5,6 +5,9 @@ _Last updated: 2026-04-14 (pre-resize checkpoint)_
 ## Current focus
 **Halted overnight CarMax integration work for droplet resize (4GB → 16GB RAM).** Everything should resume cleanly on reboot. Carvana side is fully live; CarMax side is partially live (pool-level for all 49 deals, loan-level for 4 of 33 post-2017 deals).
 
+## Memory hygiene 2026-04-14
+Found 2 wins: (1) `export_dashboard_db.py` in both issuers materialized 417k-row `loans` table via `fetchall()` → converted to chunked cursor iteration (10k/batch). Peak RSS on export dropped to ~38MB. (2) WAL checkpoint on both 3GB source DBs — already clean (0 frames). Deferred as separate tasks: `.copy()` chains in `generate_dashboard.py` (intentional chart-data isolation, needs careful audit); `pd.read_sql_query` full-table load in `default_model.py:206` (417k-row loan frame — chunksize conversion is a small refactor, not hygiene); no `lru_cache` anywhere (cache-layer add, out of scope).
+
 ## Last decisions
 - **Deal-weighted Markov training** + Bayesian log-normal conjugate calibration shipped for Carvana (commit `8e5e5f1` on branch `claude/carvana-loan-dashboard-4QMPM`, plus `8c84143` for Bayesian). Vintage-blind baseline; vintage effect emerges through calibration overlay.
 - **CarMax pool-level parser fully label-anchored** (handles 2014-era, 2017-era, 2024-era variants + late-period format drift). Pool-level reparse hit 100% `cumulative_net_losses` coverage (was 7% before). Pending commit in this checkpoint.

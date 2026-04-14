@@ -66,13 +66,24 @@ def main():
 
             dst.execute(schema_row[0])
 
-            rows = src.execute(f"SELECT * FROM {table}").fetchall()
-            if rows:
-                placeholders = ",".join(["?"] * len(rows[0]))
-                dst.executemany(f"INSERT INTO {table} VALUES ({placeholders})", rows)
-                logger.info(f"  {table}: {len(rows):,} rows")
-            else:
+            # Chunked cursor iteration — avoids materializing the whole
+            # loan_performance/loans table in a Python list.
+            cur = src.execute(f"SELECT * FROM {table}")
+            first = cur.fetchmany(1)
+            if not first:
                 logger.info(f"  {table}: 0 rows (empty — table created for forward-compatibility)")
+                continue
+            placeholders = ",".join(["?"] * len(first[0]))
+            insert_sql = f"INSERT INTO {table} VALUES ({placeholders})"
+            dst.executemany(insert_sql, first)
+            total = 1
+            while True:
+                chunk = cur.fetchmany(10000)
+                if not chunk:
+                    break
+                dst.executemany(insert_sql, chunk)
+                total += len(chunk)
+            logger.info(f"  {table}: {total:,} rows")
         except Exception as e:
             logger.error(f"  Error exporting {table}: {e}")
 

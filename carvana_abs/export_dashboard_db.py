@@ -61,14 +61,24 @@ def main():
             # Create table in destination
             dst.execute(schema_row[0])
 
-            # Copy data
-            rows = src.execute(f"SELECT * FROM {table}").fetchall()
-            if rows:
-                placeholders = ",".join(["?"] * len(rows[0]))
-                dst.executemany(f"INSERT INTO {table} VALUES ({placeholders})", rows)
-                logger.info(f"  {table}: {len(rows):,} rows")
-            else:
+            # Copy data in chunks — fetchall() on 250k-row `loans` loads the
+            # whole table into a Python list. Stream via cursor instead.
+            cur = src.execute(f"SELECT * FROM {table}")
+            first = cur.fetchmany(1)
+            if not first:
                 logger.info(f"  {table}: 0 rows")
+                continue
+            placeholders = ",".join(["?"] * len(first[0]))
+            insert_sql = f"INSERT INTO {table} VALUES ({placeholders})"
+            dst.executemany(insert_sql, first)
+            total = 1
+            while True:
+                chunk = cur.fetchmany(10000)
+                if not chunk:
+                    break
+                dst.executemany(insert_sql, chunk)
+                total += len(chunk)
+            logger.info(f"  {table}: {total:,} rows")
         except Exception as e:
             logger.error(f"  Error exporting {table}: {e}")
 
