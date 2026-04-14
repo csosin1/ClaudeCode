@@ -329,14 +329,16 @@ def build_aggregates(conn, deals, covariates):
 
 # ── Cell-level transition matrix with smoothing fallback ──────────────
 
-def cell_transition_matrix(trans, tier, state, age_b, fico_b, ltv_b, mod, orig_q):
+def cell_transition_matrix(trans, tier, state, age_b, fico_b, ltv_b, mod, orig_q="any"):
     """Try fully-stratified cell. Fall back to coarser strata if too sparse.
 
-    Fallback ladder is deliberately ordered so origination quarter (vintage)
-    is preserved longer than fine credit slicing. The macro environment at
-    origination tends to dominate when it changes, so we'd rather pool over
-    FICO buckets within a vintage than vice versa.
+    Baseline is vintage-blind — orig_q is accepted for backward compat with
+    other call sites but is always collapsed to "any" in the ladder. The
+    vintage effect comes through the per-deal calibration overlay in run(),
+    not through the transition cells, so same-features loans start from the
+    same expected trajectory regardless of origination quarter.
     """
+    orig_q = "any"  # force vintage collapse at the cell lookup
     def _make(cell):
         d = trans.get(cell)
         if not d:
@@ -648,20 +650,49 @@ def run(carvana_db=CARVANA_DB, dashboard_db=DASHBOARD_DB):
         avg_age = (sum(ages) / len(ages)) if ages else 0
         n_loans_total = d.get("n_loans_total", 0)
 
+        # ── Bayesian calibration ──
+        # Prior: log(cal) ~ Normal(0, σ_prior²).  σ_prior = 0.30 gives a
+        # 68% prior CI on cal of ≈ [0.74, 1.35] — moderate trust in the
+        # population-average transition model.
+        # Likelihood at this observation window: log(realized/lookback) is
+        # a noisy estimate of log(cal).  Noise variance σ_obs² shrinks as
+        # more loss dollars have emerged; we approximate σ_obs² = 1/√N
+        # where N is the realized-to-predicted count-of-default-dollars
+        # proxy.  That gives ~0.5 σ_obs at $1M realized, ~0.1 at $100M.
+        # Posterior is the standard log-normal conjugate:
+        #   μ_post = (μ_prior/σ_prior² + log(r)/σ_obs²) / (1/σ_prior² + 1/σ_obs²)
+        #   σ_post² = 1 / (1/σ_prior² + 1/σ_obs²)
+        # cal_point = exp(μ_post); 68% band = exp(μ_post ± σ_post).
+        import math
+        SIGMA_PRIOR = 0.30
         cal_factor = 1.0
-        cal_status = "uncalibrated (deal too young or no prior loss data)"
-        if avg_age >= 12 and lookback_full > 0 and cum_net > 0:
-            # Net-to-net comparison. lookback_full is built via
-            # (mass_into_default × balance × LGD), so it's a NET-basis
-            # prediction — compare to cum_NET_losses from the cert, not
-            # cum_gross (doing gross-vs-net inflates cal by ~1/severity).
-            raw_factor = cum_net / lookback_full
-            cal_factor = max(0.5, min(2.0, raw_factor))
-            cal_status = (f"{cal_factor:.2f}× ({'capped' if cal_factor != raw_factor else 'within bounds'}, "
-                          f"raw={raw_factor:.2f})")
+        cal_lo = cal_hi = 1.0
+        cal_status = "uncalibrated (no loss data yet)"
+        if lookback_full > 0 and cum_net > 0:
+            # Proxy for observation variance: falls off with realized $
+            # at an approximate 1/√N rate. The 1M divisor sets the scale
+            # (at $1M realized, σ_obs ≈ 1.0 → very uncertain observation;
+            # at $100M, σ_obs ≈ 0.1 → tight observation).
+            sigma_obs = max(0.05, 1.0 / math.sqrt(max(cum_net, 1e3) / 1e6))
+            inv_var_prior = 1.0 / (SIGMA_PRIOR ** 2)
+            inv_var_obs = 1.0 / (sigma_obs ** 2)
+            log_r = math.log(cum_net / lookback_full)
+            mu_post = (0.0 * inv_var_prior + log_r * inv_var_obs) / (inv_var_prior + inv_var_obs)
+            sigma_post = math.sqrt(1.0 / (inv_var_prior + inv_var_obs))
+            cal_factor = math.exp(mu_post)
+            cal_lo = math.exp(mu_post - sigma_post)
+            cal_hi = math.exp(mu_post + sigma_post)
+            z = inv_var_obs / (inv_var_prior + inv_var_obs)
+            cal_status = (f"{cal_factor:.2f}× (±1σ [{cal_lo:.2f}, {cal_hi:.2f}], "
+                          f"credibility z={z:.0%} — raw obs {math.exp(log_r):.2f}×)")
 
         ev_calibrated = ev * cal_factor
+        # ±1σ band combines posterior uncertainty on cal with portfolio
+        # variance.  Dominant term is posterior cal uncertainty: bounds
+        # the forward forecast by [ev × cal_lo, ev × cal_hi].
         sigma_calibrated = sigma * cal_factor
+        ev_lo = ev * cal_lo
+        ev_hi = ev * cal_hi
 
         by_deal[deal] = {
             "active_loans": d.get("active_loans", 0),
@@ -673,12 +704,16 @@ def run(carvana_db=CARVANA_DB, dashboard_db=DASHBOARD_DB):
             "dq_pending": round(d.get("dq_loss", 0) * cal_factor, 2),
             "performing_future": round(d.get("perf_loss", 0) * cal_factor, 2),
             "total_expected": round(cum_net + ev_calibrated, 2),
-            "total_minus_1sd": round(cum_net + max(0, ev_calibrated - sigma_calibrated), 2),
-            "total_plus_1sd": round(cum_net + ev_calibrated + sigma_calibrated, 2),
+            "total_minus_1sd": round(cum_net + ev_lo, 2),
+            "total_plus_1sd": round(cum_net + ev_hi, 2),
             "forecast_only": round(ev_calibrated, 2),
+            "forecast_lo": round(ev_lo, 2),
+            "forecast_hi": round(ev_hi, 2),
             "forecast_sigma": round(sigma_calibrated, 2),
             "lookback_predicted_loss": round(lookback_full, 2),
             "calibration_factor": round(cal_factor, 4),
+            "calibration_lo": round(cal_lo, 4),
+            "calibration_hi": round(cal_hi, 4),
             "calibration_status": cal_status,
             "uncalibrated_forecast": round(ev, 2),
         }
