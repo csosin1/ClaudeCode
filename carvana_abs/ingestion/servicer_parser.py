@@ -541,26 +541,34 @@ def _parse_from_numbered_text(text: str) -> dict:
         # Fallback to field 76 only if individual balances unavailable
         data["aggregate_note_balance"] = _parse_numbered_value(fields[76]["raw"])["value"]
 
-    # --- Overcollateralization & Reserve (fields 63, 65, 78, 81) ---
+    # --- Overcollateralization & Reserve ---
     if 63 in fields:
         data["overcollateralization_amount"] = _parse_numbered_value(fields[63]["raw"])["value"]
-    if 78 in fields:
+
+    # Reserve account: field numbers for "Ending Reserve Account Balance" shift
+    # across vintages (field 78 on some Workiva, field 80 on 2022-P1 Donnelley,
+    # field 36 on 2021-N* non-prime). Prefer label-based lookup — _by_label
+    # returns the FIRST match in insertion order, and the pool-level field
+    # always appears before the Class N field, so "Ending Reserve Account
+    # Balance" matches the pool reserve (never the "Ending Class N Reserve
+    # Account Balance" section). Prior code hard-coded field 78 first AND then
+    # overwrote with field 81 ("Specified Class N Reserve Account Amount"),
+    # which: (a) read 0.00 on 2022-P1 (field 78 there is "Amount withdrawn"),
+    # and (b) clobbered the pool reserve with the Class N threshold.
+    end_raw = _by_label("Ending Reserve Account Balance")
+    if end_raw is not None:
+        data["reserve_account_balance"] = _parse_numbered_value(end_raw)["value"]
+    elif 78 in fields:
+        # Final fallback: bare field 78 (old Workiva layouts where the label
+        # parser couldn't recover a clean label)
         data["reserve_account_balance"] = _parse_numbered_value(fields[78]["raw"])["value"]
-    if 81 in fields:
-        data["reserve_account_balance"] = _parse_numbered_value(fields[81]["raw"])["value"]
-    if 77 in fields:
+
+    # Specified reserve: similar logic — prefer label, fall back to field 77
+    spec_raw = _by_label("Specified Reserve Amount") or _by_label("Specified Reserve Account Amount")
+    if spec_raw is not None:
+        data["specified_reserve_amount"] = _parse_numbered_value(spec_raw)["value"]
+    elif 77 in fields:
         data["specified_reserve_amount"] = _parse_numbered_value(fields[77]["raw"])["value"]
-    # Label-based fallback — non-prime certs use different field numbers
-    # for the reserve rollforward. "Ending Reserve Account Balance" (field 36
-    # in 2021-N* certs) is the authoritative ending balance.
-    if data.get("reserve_account_balance") is None:
-        end_raw = _by_label("Ending Reserve Account Balance")
-        if end_raw:
-            data["reserve_account_balance"] = _parse_numbered_value(end_raw)["value"]
-    if data.get("specified_reserve_amount") is None:
-        spec_raw = _by_label("Specified Reserve Amount") or _by_label("Specified Reserve Account Amount")
-        if spec_raw:
-            data["specified_reserve_amount"] = _parse_numbered_value(spec_raw)["value"]
     if data.get("overcollateralization_amount") is None:
         oc_raw = _by_label("Overcollateralization in Dollars")
         if oc_raw:
