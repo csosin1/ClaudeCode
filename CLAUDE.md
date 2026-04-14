@@ -37,6 +37,9 @@ The main session orchestrates — it does not write code directly.
 ## Parallel Execution
 **Never do work sequentially that can run in parallel** — tool calls, subagents, builders, research queries. Independent tool calls go in a single assistant message with multiple tool-use blocks. See `SKILLS/parallel-execution.md` for when to parallelize, when to serialize, and how to dispatch.
 
+## Non-Blocking Prompt Intake
+**The main thread is a coordinator, not an executor.** When a new user prompt arrives while other work is in flight, hand it off to a fresh subagent immediately (if independent) — don't make the user wait for the in-flight stack to drain. Read-only status questions and independent asks always spawn; corrections interrupt; clarifications refine in place. See `SKILLS/non-blocking-prompt-intake.md`.
+
 ## Spec Before Any Code
 Surface to the user and wait for "go":
 - What will be built (1–2 sentences)
