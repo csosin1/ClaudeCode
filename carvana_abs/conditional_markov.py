@@ -650,11 +650,12 @@ def run(carvana_db=CARVANA_DB, dashboard_db=DASHBOARD_DB):
 
         cal_factor = 1.0
         cal_status = "uncalibrated (deal too young or no prior loss data)"
-        if avg_age >= 12 and lookback_full > 0 and cum_gross > 0:
-            # Direct comparison — lookback_full is the model's predicted
-            # cum gross loss across ALL loans in the deal from origination
-            # through their current age (or termination age for closed loans).
-            raw_factor = cum_gross / lookback_full
+        if avg_age >= 12 and lookback_full > 0 and cum_net > 0:
+            # Net-to-net comparison. lookback_full is built via
+            # (mass_into_default × balance × LGD), so it's a NET-basis
+            # prediction — compare to cum_NET_losses from the cert, not
+            # cum_gross (doing gross-vs-net inflates cal by ~1/severity).
+            raw_factor = cum_net / lookback_full
             cal_factor = max(0.5, min(2.0, raw_factor))
             cal_status = (f"{cal_factor:.2f}× ({'capped' if cal_factor != raw_factor else 'within bounds'}, "
                           f"raw={raw_factor:.2f})")
