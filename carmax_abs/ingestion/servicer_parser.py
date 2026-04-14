@@ -121,19 +121,55 @@ def parse_servicer_certificate(html: str) -> dict:
         data["initial_pool_balance"] = _clean_number(m_init.group(1))
 
     # Note balance — each row has Beginning $ End $; we want the End column.
-    # Pattern allows arbitrary chars (e.g. "(sum a - g)") between the label
-    # and the first $ amount.
+    # Letter prefixes shifted in 2021-3+ when A-2 was split into A-2a + A-2b
+    # Floating (class count went from 7 to 8), moving the aggregate sum line
+    # from "h." to "i." and pushing every class after A-2 down one letter.
+    # Match by CLASS NAME, not by letter prefix.
     def _note_end(label):
-        m = re.search(rf"{label}[^\n]*?\$\s*([\d,]+(?:\.\d+)?)\s+\$\s*([\d,]+(?:\.\d+)?)", text)
+        # Require a letter-prefix marker before the class name so we don't
+        # accidentally pick up "Class A-1 Note Pool Factor" or other
+        # non-balance rows that happen to mention the class.
+        pat = rf"[a-z]\.\s+{label}[^\n]*?\$\s*([\d,]+(?:\.\d+)?)\s+\$\s*([\d,]+(?:\.\d+)?)"
+        m = re.search(pat, text)
         return _clean_number(m.group(2)) if m else None
-    data["note_balance_a1"] = _note_end(r"a\.\s+Class A-1 Note Balance")
-    data["note_balance_a2"] = _note_end(r"b\.\s+Class A-2 Note Balance")
-    data["note_balance_a3"] = _note_end(r"c\.\s+Class A-3 Note Balance")
-    data["note_balance_a4"] = _note_end(r"d\.\s+Class A-4 Note Balance")
-    data["note_balance_b"]  = _note_end(r"e\.\s+Class B Note Balance")
-    data["note_balance_c"]  = _note_end(r"f\.\s+Class C Note Balance")
-    data["note_balance_d"]  = _note_end(r"g\.\s+Class D Note Balance")
-    data["aggregate_note_balance"] = _note_end(r"h\.\s+Note Balance")
+
+    # Class A-2 renders as either "Class A-2 Note Balance" (pre-split) or as
+    # two separate rows "Class A-2a Note Balance" + "Class A-2b Floating Rate
+    # Note Balance" (2021-3 onward). When split, sum the two halves into the
+    # single note_balance_a2 column to keep the schema stable.
+    a2_single = _note_end(r"Class A-2 Note Balance")
+    if a2_single is not None:
+        data["note_balance_a2"] = a2_single
+    else:
+        a2a = _note_end(r"Class A-2a Note Balance")
+        a2b = _note_end(r"Class A-2b Floating Rate Note Balance")
+        if a2a is not None or a2b is not None:
+            data["note_balance_a2"] = (a2a or 0) + (a2b or 0)
+
+    data["note_balance_a1"] = _note_end(r"Class A-1 Note Balance")
+    data["note_balance_a3"] = _note_end(r"Class A-3 Note Balance")
+    data["note_balance_a4"] = _note_end(r"Class A-4 Note Balance")
+    data["note_balance_b"]  = _note_end(r"Class B Note Balance")
+    data["note_balance_c"]  = _note_end(r"Class C Note Balance")
+    data["note_balance_d"]  = _note_end(r"Class D Note Balance")
+
+    # Aggregate: explicit "Note Balance (sum a - g/h)" row. Letter prefix
+    # differs by vintage (h. pre-split, i. post-split) so match on the label
+    # body, not the prefix. Falls back to class-sum if the aggregate row is
+    # missing or malformed.
+    m_agg = re.search(
+        r"[a-z]\.\s+Note Balance\s*\(sum a\s*-\s*[a-z]\)[^\n]*?\$\s*[\d,]+(?:\.\d+)?\s+\$\s*([\d,]+(?:\.\d+)?)",
+        text,
+    )
+    if m_agg:
+        data["aggregate_note_balance"] = _clean_number(m_agg.group(1))
+    else:
+        parts = [data.get(k) for k in ("note_balance_a1", "note_balance_a2",
+                                       "note_balance_a3", "note_balance_a4",
+                                       "note_balance_b", "note_balance_c",
+                                       "note_balance_d")]
+        if any(p is not None for p in parts):
+            data["aggregate_note_balance"] = sum(p or 0 for p in parts)
 
     data["overcollateralization_amount"] = _grab_amount(text, r"\d+\s*\.\s+Current overcollateralization amount")
     data["weighted_avg_apr"] = _grab_percent(text, r"\d+\s*\.\s+Weighted Average Coupon")
@@ -151,8 +187,14 @@ def parse_servicer_certificate(html: str) -> dict:
     if fc_liq is not None or pr_liq is not None:
         data["liquidation_proceeds"] = (fc_liq or 0) + (pr_liq or 0)
 
-    data["specified_reserve_amount"] = _grab_amount(text, r"47\s*\.\s+Required Reserve Account Amount")
-    data["reserve_account_balance"]  = _grab_amount(text, r"55\s*\.\s+Ending Balance")
+    data["specified_reserve_amount"] = _grab_amount(text, r"\d+\s*\.\s+Required Reserve Account Amount")
+    # Reserve Account Ending Balance: line number drifts by vintage
+    #   2014 certs          -> "56. Ending Balance"
+    #   2017-2020, non-split -> "55. Ending Balance"
+    #   2021-3+ (A-2 split)  -> "57. Ending Balance"
+    # "Ending Balance" is unique to the Reserve Account section in every
+    # CARMX vintage sampled, so a number-agnostic anchor is safe.
+    data["reserve_account_balance"]  = _grab_amount(text, r"\d+\s*\.\s+Ending Balance")
     data["residual_cash"] = _grab_amount(text, r"e\.\s+Excess Collections")
     data["regular_pda"]   = _grab_amount(text, r"37\s*\.\s+Regular Principal Distributable Amount")
     data["actual_servicing_fee"] = _grab_amount(text, r"24\s*\.\s+Servicing Fee[^\n]*?c\.\s+Amount Paid")
