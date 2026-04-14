@@ -56,6 +56,8 @@
     font-weight: 700; margin-left: 0.35rem;
   }
   .nav a.todo.has-pending { background: #7c2d12; border-color: #ea580c; color: #fff7ed; }
+  .nav a.capacity.warn   { background: #78350f; border-color: #f59e0b; color: #fed7aa; }
+  .nav a.capacity.urgent { background: #7f1d1d; border-color: #ef4444; color: #fecaca; }
 </style>
 </head>
 <body>
@@ -64,6 +66,7 @@
 <div class="nav">
   <a class="todo" id="nav-todo" href="/todo.html">📋 Your to-do<span class="count" id="todo-count" style="display:none"></span></a>
   <a href="/accounts.html">🔑 Accounts</a>
+  <a class="capacity" id="nav-capacity" href="/capacity.html">💾 Capacity</a>
 </div>
 <div id="cards"></div>
 
@@ -121,6 +124,17 @@ async function render() {
       } else {
         countEl.style.display = 'none';
         linkEl.classList.remove('has-pending');
+      }
+    }
+  } catch {}
+  try {
+    const r = await fetch('/capacity.json?v=' + Date.now(), { cache: 'no-cache' });
+    if (r.ok) {
+      const doc = await r.json();
+      const capEl = document.getElementById('nav-capacity');
+      capEl.classList.remove('warn', 'urgent');
+      if (doc.overall === 'warn' || doc.overall === 'urgent') {
+        capEl.classList.add(doc.overall);
       }
     }
   } catch {}

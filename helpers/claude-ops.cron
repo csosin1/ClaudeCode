@@ -3,3 +3,5 @@
 * * * * * root /usr/local/bin/claude-watchdog.sh >/dev/null 2>&1
 # Respawn: every 5 min, respawn any archived project windows
 */5 * * * * root /usr/local/bin/claude-respawn.sh >/dev/null 2>&1
+# Capacity: every 5 min, write capacity.json + notify on threshold breaches
+*/5 * * * * root /usr/local/bin/capacity-check.sh >/dev/null 2>&1

@@ -174,6 +174,9 @@ When something breaks: patch fast to restore service if needed — then **always
 ## User Actions & Accounts
 Whenever you need the user to do something manual (sign up, paste a credential, click a console button), file it with `user-action.sh add …` — never leave it buried in chat. Check `user-action.sh remind` at session start. Only mark done after **you** verify. Register every new third-party account with `account.sh add …` so subscriptions are centralized. See `SKILLS/user-action-tracking.md` and `SKILLS/accounts-registry.md`.
 
+## Capacity Awareness
+Before heavy work (batch scraping, concurrent builders, big model runs), check `/capacity.json` or `https://casinv.dev/capacity.html`. If state is `warn` or `urgent`, don't add load — notify the user with a concrete upgrade recommendation instead. Silent thrashing is the worst failure mode. See `SKILLS/capacity-monitoring.md`.
+
 ## Never Idle — Gather Blockers Upfront, Work Around the Rest
 The user's time is the scarce resource. Do not end a turn waiting for permission when any useful work remains.
 

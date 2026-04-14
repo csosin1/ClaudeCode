@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Capacity · casinv.dev</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+    background: #0f172a; color: #e2e8f0; min-height: 100vh;
+    padding: 1rem; line-height: 1.4;
+  }
+  h1 { font-size: 1.4rem; margin-bottom: 0.25rem; }
+  .sub { color: #64748b; font-size: 0.8rem; margin-bottom: 1rem; }
+  .banner {
+    padding: 0.9rem 1rem; border-radius: 10px; font-size: 0.95rem;
+    margin-bottom: 1rem; font-weight: 600;
+  }
+  .banner.ok     { background: #064e3b; color: #d1fae5; }
+  .banner.warn   { background: #78350f; color: #fed7aa; }
+  .banner.urgent { background: #7f1d1d; color: #fecaca; }
+
+  .card {
+    background: #1e293b; border: 1px solid #334155; border-radius: 12px;
+    padding: 1rem; margin-bottom: 0.75rem;
+  }
+  .metric-head { display: flex; align-items: center; justify-content: space-between;
+                 margin-bottom: 0.5rem; }
+  .metric-name { font-size: 1rem; color: #f8fafc; font-weight: 600; }
+  .sev {
+    display: inline-block; padding: 0.1rem 0.5rem; border-radius: 999px;
+    font-size: 0.7rem; font-weight: 700; letter-spacing: 0.02em;
+  }
+  .sev.ok     { background: #065f46; color: #d1fae5; }
+  .sev.warn   { background: #92400e; color: #fed7aa; }
+  .sev.urgent { background: #991b1b; color: #fecaca; }
+
+  .bar {
+    height: 10px; border-radius: 999px; background: #334155; overflow: hidden;
+    margin: 0.5rem 0;
+  }
+  .bar .fill { height: 100%; transition: width 0.4s; }
+  .bar .fill.ok     { background: #10b981; }
+  .bar .fill.warn   { background: #f59e0b; }
+  .bar .fill.urgent { background: #ef4444; }
+
+  .detail { font-size: 0.85rem; color: #94a3b8; }
+  .detail b { color: #cbd5e1; font-weight: 600; }
+  .threshold { font-size: 0.75rem; color: #64748b; margin-top: 0.25rem; }
+  .back { display: inline-block; color: #94a3b8; font-size: 0.85rem;
+          margin-top: 1.5rem; }
+</style>
+</head>
+<body>
+<h1>Droplet Capacity</h1>
+<div class="sub" id="sub">loading…</div>
+<div id="banner"></div>
+<div id="metrics"></div>
+<a class="back" href="/projects.html">← all projects</a>
+
+<script>
+function render(doc) {
+  if (!doc || !doc.overall) {
+    document.getElementById('metrics').innerHTML = '<div class="card">no data yet</div>';
+    return;
+  }
+  document.getElementById('sub').textContent = 'updated ' + doc.updated_at;
+  const banners = {
+    ok: 'All green.',
+    warn: 'Getting tight — plan to upgrade soon.',
+    urgent: 'Critical — the droplet needs more capacity NOW.',
+  };
+  document.getElementById('banner').innerHTML =
+    `<div class="banner ${doc.overall}">${banners[doc.overall] || ''}</div>`;
+
+  const rows = [];
+  const metrics = [
+    { key: 'ram',  label: 'RAM',  val: doc.ram.pct,  unit: '%',
+      detail: `${doc.ram.used_gb} / ${doc.ram.total_gb} GB`,
+      th: doc.thresholds.ram },
+    { key: 'swap', label: 'Swap', val: doc.swap.pct, unit: '%',
+      detail: `${doc.swap.used_gb} / ${doc.swap.total_gb} GB`,
+      th: doc.thresholds.swap },
+    { key: 'disk', label: 'Disk', val: doc.disk.pct, unit: '%',
+      detail: `${doc.disk.used_gb} / ${doc.disk.total_gb} GB`,
+      th: doc.thresholds.disk },
+    { key: 'load', label: 'CPU load (15m)', val: doc.load.ratio, unit: '× cores',
+      detail: `${doc.load.load_15m} on ${doc.load.cores} cores (1m: ${doc.load.load_1m})`,
+      th: doc.thresholds.load },
+  ];
+  for (const m of metrics) {
+    const sev = doc[m.key].severity;
+    const pct = m.key === 'load'
+      ? Math.min(100, (m.val / 3) * 100)
+      : Math.min(100, m.val);
+    rows.push(`
+      <div class="card">
+        <div class="metric-head">
+          <span class="metric-name">${m.label}</span>
+          <span class="sev ${sev}">${sev}</span>
+        </div>
+        <div class="bar"><div class="fill ${sev}" style="width:${pct}%"></div></div>
+        <div class="detail"><b>${m.val}${m.unit}</b> · ${m.detail}</div>
+        <div class="threshold">warn at ${m.th.warn} · urgent at ${m.th.urgent}</div>
+      </div>`);
+  }
+  document.getElementById('metrics').innerHTML = rows.join('');
+}
+async function tick() {
+  try {
+    const r = await fetch('/capacity.json?v=' + Date.now(), { cache: 'no-cache' });
+    if (r.ok) render(await r.json());
+  } catch {}
+}
+tick();
+setInterval(tick, 10000);
+</script>
+</body>
+</html>
