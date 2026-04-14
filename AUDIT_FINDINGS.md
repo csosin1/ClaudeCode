@@ -101,3 +101,98 @@ Files touched: `carvana_abs/ingestion/servicer_parser.py`, `carmax_abs/ingestion
 - `AUDIT_EYEBALL.md` — 10 hand-verified samples with raw text windows
 - `audit_sample.py` — harness (widened to cover all 17 pool metrics + both issuer formats)
 - `/tmp/audit/` — sample chunks + per-chunk results + aggregates
+
+---
+
+## Iter 4 (validation pass) — Phase 1 outlier scan
+
+_Scan: 2026-04-14. 100% coverage across Carvana (607 rows, 16 deals) + CarMax (2,006 rows, 49 deals) `pool_performance`; `loan_loss_summary` 52,787 rows (41,793 Carvana + 10,994 CarMax). Per-deal z-score (>3) + IQR×3 on monthly deltas; NULL census; cross-field invariants; orphan sweep; distribution smell tests. Script: `/tmp/audit_phase1.py` → `/tmp/audit_phase1_full.json`._
+
+### Counts per check class (Iter 4)
+
+| Check                                    | Carvana | CarMax | Total | Status |
+|------------------------------------------|--------:|-------:|------:|--------|
+| z/IQR outliers (17 metrics × 2 issuers)  |      51 |     32 |    83 | all traced to known issuer format / known source-faithful rows (see below) |
+| NULLs in required cols (bpb, epb, iso, agg_note_balance) | 0 | 0 | 0 | clean |
+| `weighted_avg_apr` out of [0, 0.35]      |       0 |      0 |     0 | clean |
+| Negatives in nonneg fields (excl. `liquidation_proceeds`) | 1 | 0 | 1 | known: Carvana 2025-P4 cnl=-525 (Iter 3 C4, source-faithful) |
+| Dates outside [2014-01-01, 2026-04-14]   |       0 |      0 |     0 | clean |
+| Bucket sum (31/61/91/121) vs total > $10 |       0 |      0 |     0 | clean |
+| `ending > beginning × 1.005`             |       0 |      0 |     0 | clean |
+| `aggregate_note_balance` non-monotone    |       0 |      0 |     0 | clean |
+| `cumulative_net_losses` non-monotone     |      12 |     68 |    80 | matches known 80 source-faithful servicer restatements exactly — no new |
+| `cnl > cgl + |clp|` (strict)             |       1 |      0 |     1 | known: Carvana 2024-P4 2025-01-10 (Iter 3 early-cycle, source-faithful) |
+| Orphans (by `accession_number`)          |       0 |      0 |     0 | clean — earlier raw join using `filings.distribution_date` produced false orphans because that column is always NULL in `filings` (join must use `accession_number`) |
+| Flat-line runs ≥5 on varying metrics     |       0 |      0 |     0 | clean |
+
+### New findings (Iter 4)
+
+#### F-010 — CarMax 2018-2 & 2018-3 on 2022-01-18: `recoveries` contaminated with prior-cumulative value; `liquidation_proceeds` negative; `cumulative_liquidation_proceeds` NULL
+- **Location:** `carmax_abs/db/carmax_abs.db::pool_performance` — exactly 2 rows:
+  - `deal=2018-2, distribution_date=1/18/2022, accession=0001734850-22-000005`
+  - `deal=2018-3, distribution_date=1/18/2022, accession=0001742867-22-000005`
+- **Observed:** `recoveries=22,123,235.66 / 23,065,733.37`; `liquidation_proceeds=-15,923.82 / -10,285.72`; `cumulative_liquidation_proceeds=NULL` on both.
+- **Expected:** Neighboring months (2021-12 / 2022-02) for the same deals show `recoveries ≡ liquidation_proceeds` and `cumulative_liquidation_proceeds ≈ $22M / $23M`. The observed "recoveries" value is within ~$100K of the prior-month `cumulative_liquidation_proceeds` ($22,139,159 / $23,076,019). Strong signal that the parser, on these 2 filings only, pulled the cumulative field into the monthly `recoveries` slot and dropped the monthly `cumulative_liquidation_proceeds`.
+- **Source chain:** values are SQL-reproduced from `pool_performance`; primary cert HTML not re-fetched in this pass (would confirm in Phase 2). All 14 other CarMax deals filed on 2022-01-18 parsed correctly (recoveries matches liquidation_proceeds and CLP is populated), so this is isolated to 2 filings, not a date-wide format shift.
+- **Stopping condition:** verification stopped at DB layer; need to inspect the 2 filings' cert HTML in `filing_cache/` in Phase 2 to confirm root cause (field-label rename, table shift, or cert irregularity).
+- **Severity:** high — 2 rows where 3 columns are wrong simultaneously; would distort any 2018-vintage monthly-recovery chart or loss-curve. Non-headline but materially off.
+- **Iteration:** 4 (validation pass)
+- **Flagged by:** Phase 1 outlier scan — `recoveries` z-score outlier (top 4 of that metric across both issuers)
+- **Status:** open
+- **Root-cause group:** G-Iter4-A (CarMax 2018-vintage Jan-2022 parser slip)
+
+#### F-011 — CarMax 2014–2015 old-format parser gap: 85 rows missing 6 key metrics
+- **Location:** `carmax_abs/db/carmax_abs.db::pool_performance` — 85 rows across deals 2014-1 (21), 2014-2 (18), 2014-3 (15), 2014-4 (12), 2015-1 (9), 2015-2 (6), 2015-3 (3), 2015-4 (1). All dist dates in 2014-03 through 2015-11.
+- **Observed:** On every one of those rows, these columns are NULL: `recoveries`, `net_charged_off_amount`, `cumulative_gross_losses`, `cumulative_liquidation_proceeds` (87 on this one — +2 are the F-010 rows), `delinquent_91_120_balance`, `delinquent_121_plus_balance`, `total_delinquent_balance`, `delinquent_91_120_count`, `delinquent_121_plus_count`, `delinquency_trigger_actual`.
+- **Expected:** Same metrics are populated on every 2016+ CarMax row. The adjacent columns on these rows (beg/end pool bal, principal/interest collections, liquidation_proceeds, gross_charged_off_amount, delinq 31-60 / 61-90, note balances, reserve account, weighted APR) all look plausible — it's a selective label-miss, not a wholesale ingest failure.
+- **Source chain:** 2014-2015 CarMax cert HTML layout differs from 2016+; parser's label regexes don't match. Same class of bug as AUDIT_FINDINGS #3/#4 but on a different era/column set.
+- **Stopping condition:** need a Phase-2 pass over a few 2014-2015 filings in `filing_cache/` to confirm which labels the older certs use (e.g. "Recoveries" vs "Gross Recoveries", "91-120 Days" vs "90+ Days", etc.) and patch the parser.
+- **Severity:** high — 8 deals' early-life loss/delinquency series are missing. Dashboard time-series for those deals will have blank first year.
+- **Iteration:** 4 (validation pass)
+- **Flagged by:** Phase 1 NULL census + distribution smell test
+- **Status:** open
+- **Root-cause group:** G-Iter4-B (CarMax 2014–2015 old-format parser coverage)
+
+#### F-012 — CarMax systemic always-NULL columns: parser never populates 4 fields (2,006/2,006 rows)
+- **Location:** `carmax_abs/db/carmax_abs.db::pool_performance`
+- **Observed:** 100% NULL on `beginning_pool_count`, `avg_principal_balance`, `delinquency_trigger_level`, `available_funds`. Plus `actual_servicing_fee` 1,419/2,006 NULL and `regular_pda` 1,419/2,006 NULL.
+- **Expected:** These fields are populated on the Carvana side from the same-purpose cert lines; CarMax certs contain equivalents (`Beginning Pool Count` / `Average Principal Balance per Receivable` / `Delinquency Trigger` / `Available Funds`). Parser gap.
+- **Severity:** medium — dashboard loses 4 CarMax-side metrics entirely; doesn't corrupt existing numbers. `note_balance_n` always-NULL is **expected** (CarMax Prime has no Class N tranche) — not a finding.
+- **Iteration:** 4 (validation pass)
+- **Flagged by:** NULL census
+- **Status:** open
+- **Root-cause group:** G-Iter4-B (CarMax parser coverage — bundle with F-011)
+
+#### F-013 — CarMax 40 Carvana `loan_loss_summary.total_recovery` negative beyond fp noise
+- **Location:** `carvana_abs/db/carvana_abs.db::loan_loss_summary`
+- **Observed:** 40 loans with `total_recovery < -$1` (min -$9,502, mean -$863). Distribution: 2021-N1 (7), 2021-N4 (7), 2022-P1 (6), 2022-P3 (6), 2021-N2 (5), 2021-N3 (3), 2021-P2 (2), 2021-P1 (1), 2022-P2 (1), 2024-P2 (1), 2024-P3 (1). CarMax side's 7 "negative" recoveries are floating-point zeros (~-2e-13) — not a finding.
+- **Expected:** Negative recoveries are plausible when prior recoveries are reversed/clawed back in a later period. The count is small (0.1% of 41,793 Carvana rows) and magnitudes are modest. Likely source-faithful servicer reversals, not a parser bug.
+- **Severity:** low — advisory. Dashboard should clamp-at-zero for display or footnote as net-of-reversal.
+- **Iteration:** 4 (validation pass)
+- **Flagged by:** `loan_loss_summary` smell test
+- **Status:** open — verification deferred; low priority
+
+#### F-014 — `loan_loss_summary` date fields stored in MM-DD-YYYY, not ISO
+- **Location:** Both DBs, `loan_loss_summary.chargeoff_period` and `first_recovery_period` (52,787 rows).
+- **Observed:** Format is `"MM-DD-YYYY"` (e.g. `"02-28-2026"`). Example row: `('2021-N1', '714493', chargeoff_period='06-30-2022', first_recovery_period='07-31-2022')`.
+- **Expected:** For consistency with `pool_performance.dist_date_iso` (added per AUDIT_FINDINGS #5), a `*_iso` column would sort chronologically. Current format still sorts-wrong under `ORDER BY chargeoff_period`.
+- **Severity:** low — same class as the resolved pool-date lex bug, but on a table not currently used for "latest" lookups. Add-companion-ISO-column suggestion.
+- **Iteration:** 4 (validation pass)
+- **Flagged by:** distribution smell test (format consistency)
+- **Status:** open — low
+
+### Known-legit (re-confirmed, NOT flagged as new)
+
+- 80 `cumulative_net_losses` decreases (12 Carvana + 68 CarMax) — exact match to Iter 3 C1 servicer restatements. No new restatements.
+- 1 `cnl > cgl + |clp|` strict violation (Carvana 2024-P4 2025-01-10 cnl=87, cgl=0, clp=0) — Iter 3 early-cycle source-faithful.
+- 1 `cnl < 0` (Carvana 2025-P4 2025-12-10 cnl=-525) — Iter 3 C4 inception-window sign reversal, source-faithful.
+- `beginning_pool_balance=0` on first row of Carvana 2020-P1, 2021-P1 — inception (pool built during first cycle). Analogous to the "29 of 32 CarMax zero cnl rows were first-distribution" non-issue already documented.
+- Carvana `delinquent_121_plus_balance` / `_count` 100% NULL — Carvana cert format uses 91+ bucket terminally (no 121+). Bucket sums reconcile to `total_delinquent_balance` without it. Format-faithful.
+- CarMax `note_balance_n` 100% NULL — CarMax Prime has no Class N tranche. Expected.
+
+### Phase 1 verdict
+
+**4 NEW open findings** (1 high-severity parser anomaly on 2 specific filings, 1 high-severity era-wide parser gap, 1 medium-severity parser coverage gap, 2 low-severity advisory). Zero new monotonicity or invariant violations beyond the Iter 3 documented source-faithful set. Orphan sweep is clean when joined by `accession_number`.
+
+Recommend Phase 2 batches in this order: (1) trace F-010 to cert HTML in `filing_cache/` for CarMax 2018-2 / 2018-3 January-2022 filings — likely a localized parser issue fixable with one patch; (2) trace F-011 / F-012 CarMax 2014-2015 cert layout and always-NULL fields — one parser-coverage PR can fix both.
+
