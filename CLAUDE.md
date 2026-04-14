@@ -34,10 +34,8 @@ Nothing defective reaches the user. Each task runs through three checkpoints —
 
 The main session orchestrates — it does not write code directly.
 
-## Parallel Builders
-When a task splits into independent, non-conflicting pieces (different files, different features, no shared mutable state), spawn one Builder subagent per piece and run them in parallel. Before spawning, the orchestrator lists the file paths each Builder will touch and verifies no overlap. After all Builders return, merge the outputs, then run a single Reviewer pass and a single QA pass over the combined diff.
-
-Parallel is the default when pieces are clearly independent. Fall back to sequential when (a) the work touches a shared file, (b) one piece's output is input to another, or (c) the spec is ambiguous enough that early Builder work could invalidate later decisions.
+## Parallel Execution
+**Never do work sequentially that can run in parallel** — tool calls, subagents, builders, research queries. Independent tool calls go in a single assistant message with multiple tool-use blocks. See `SKILLS/parallel-execution.md` for when to parallelize, when to serialize, and how to dispatch.
 
 ## Spec Before Any Code
 Surface to the user and wait for "go":
@@ -95,6 +93,9 @@ If it's not linked from http://159.223.127.125/, it's not done.
 - Stripe only for payments; Checkout or Payment Links (never custom card forms); verify webhook signatures.
 - Row-level scoping on user-data queries. Missing `WHERE user_id=…` is a critical failure.
 - Firewall: 80, 443, 22. Root SSH disabled, key auth only.
+
+## Continuous Platform Improvement
+**A problem solved once should never need to be solved again.** Every session leaves one artifact that makes future sessions cheaper: a new skill, a sharper rule, a removed manual step, or a trimmed doc. CLAUDE.md stays thin — it's the constitution. Power lives in `SKILLS/`. See `SKILLS/platform-stewardship.md` for where different kinds of learning belong and when to write them up.
 
 ## Skills Registry — Search, Use, Contribute Back
 Reusable patterns live in `SKILLS/*.md`. Every non-trivial task follows a 3-step loop: **search, use, contribute**.
