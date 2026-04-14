@@ -255,19 +255,28 @@ def parse_servicer_certificate(html: str) -> dict:
     if saw_any:
         data["total_note_interest"] = total_int
 
+    # Delinquency buckets.
+    #   2016+ certs: 4 buckets — 31-60 / 61-90 / 91-120 / 121+ with "e. Total
+    #   Past Due (sum a - d)" and "f. Delinquent Loans as a percentage".
+    #   2014-2015 certs: 3 buckets — 31-60 / 61-90 / "91 or more" with
+    #   "d. Total Past Due (sum a - c)"; no trigger %.
+    # Match on the body of the label, not the letter prefix — old/new formats
+    # use different letters for the total line and the 91+ bucket. The 91+
+    # bucket maps to `delinquent_91_120_balance` for old-format deals (no
+    # 121+ bucket exists to populate separately); this keeps one code path.
     for cnt_key, bal_key, pat in [
-        ("delinquent_31_60_count",   "delinquent_31_60_balance",   r"a\.\s+31 to 60 days past due"),
-        ("delinquent_61_90_count",   "delinquent_61_90_balance",   r"b\.\s+61 to 90 days past due"),
-        ("delinquent_91_120_count",  "delinquent_91_120_balance",  r"c\.\s+91 to 120 days past due"),
-        ("delinquent_121_plus_count", "delinquent_121_plus_balance", r"d\.\s+121 or more days past due"),
+        ("delinquent_31_60_count",   "delinquent_31_60_balance",   r"[a-z]\.\s+31 to 60 days past due"),
+        ("delinquent_61_90_count",   "delinquent_61_90_balance",   r"[a-z]\.\s+61 to 90 days past due"),
+        ("delinquent_91_120_count",  "delinquent_91_120_balance",  r"[a-z]\.\s+91 (?:to 120|or more) days past due"),
+        ("delinquent_121_plus_count", "delinquent_121_plus_balance", r"[a-z]\.\s+121 or more days past due"),
     ]:
         c, b = _grab_count_and_amount(text, pat)
         if c is not None: data[cnt_key] = c
         if b is not None: data[bal_key] = b
-    _, total_dq = _grab_count_and_amount(text, r"e\.\s+Total Past Due")
+    _, total_dq = _grab_count_and_amount(text, r"[a-z]\.\s+Total Past Due")
     if total_dq is not None:
         data["total_delinquent_balance"] = total_dq
-    data["delinquency_trigger_actual"] = _grab_percent(text, r"f\.\s+Delinquent Loans as a percentage")
+    data["delinquency_trigger_actual"] = _grab_percent(text, r"[a-z]\.\s+Delinquent Loans as a percentage")
 
     # Period loss / recovery / net.
     # 2017+ certs have two distinct lines for period vs cumulative, both
@@ -277,15 +286,20 @@ def parse_servicer_certificate(html: str) -> dict:
     # only, no count).  2014 certs lack the suffix and the cumulative
     # breakdowns entirely — only the consolidated "Cumulative Net Losses"
     # line exists.
+    # Defaulted Receivables breakdown.
+    # 2016+ certs have two "(charge-offs)" lines (period + cumulative);
+    # 2014-2015 certs only have the line-4 period "Defaulted Receivables $ X"
+    # with no count and no cumulative breakdown. Amount may be negative when
+    # prior-period charge-offs are reversed (rare but valid).
     all_def = list(re.finditer(
-        r"\d+\s*\.\s+Defaulted Receivables\s*\(charge-offs?\)\s+([\d,]+)\s+\$\s*([\d,]+(?:\.\d+)?)", text))
+        r"\d+\s*\.\s+Defaulted Receivables\s*\(charge-offs?\)\s+([\d,]+)\s+\$\s*(-?[\d,]+(?:\.\d+)?)", text))
     if all_def:
         data["gross_charged_off_amount"] = _clean_number(all_def[0].group(2))
         if len(all_def) > 1:
             data["cumulative_gross_losses"] = _clean_number(all_def[-1].group(2))
     else:
         # 2014-era fallback: line 4 has "Defaulted Receivables $ X" no count
-        m4 = re.search(r"\d+\s*\.\s+Defaulted Receivables\s+\$\s*([\d,]+(?:\.\d+)?)", text)
+        m4 = re.search(r"\d+\s*\.\s+Defaulted Receivables\s+\$\s*(-?[\d,]+(?:\.\d+)?)", text)
         if m4:
             data["gross_charged_off_amount"] = _clean_number(m4.group(1))
 
@@ -293,17 +307,29 @@ def parse_servicer_certificate(html: str) -> dict:
     #   "Liquidation Proceeds (recoveries)"  (some 2017-era certs)
     #   "Recoveries"                          (most 2017+ certs)
     # Both formats: <n>. <label> <count> $ <amount>
+    # Amount MUST allow a leading "-" — monthly recoveries can be negative
+    # when prior recoveries are reversed/clawed back. Without this the
+    # period row silently fails to match and the cumulative row's value is
+    # mis-stored under `recoveries` (see AUDIT_FINDINGS F-010).
+    # 2014-2015 certs have no recoveries line at all — both columns stay NULL.
     all_rec = list(re.finditer(
-        r"\d+\s*\.\s+(?:Liquidation Proceeds\s*\(recoveries\)|Recoveries)\s+([\d,]+)\s+\$\s*([\d,]+(?:\.\d+)?)", text))
+        r"\d+\s*\.\s+(?:Liquidation Proceeds\s*\(recoveries\)|Recoveries)\s+([\d,]+)\s+\$\s*(-?[\d,]+(?:\.\d+)?)", text))
     if all_rec:
         if "recoveries" not in data:
             data["recoveries"] = _clean_number(all_rec[0].group(2))
         if len(all_rec) > 1:
             data["cumulative_liquidation_proceeds"] = _clean_number(all_rec[-1].group(2))
 
-    # Period net loss — line "<n>. Net Losses (Ln <a> - Ln <b>) $ X".
-    # Can be negative (more period recoveries than period defaults).
-    m_net = re.search(r"\d+\s*\.\s+Net Losses\s+(?:\(Ln[^)]*\)\s+)?\$\s*(-?[\d,]+(?:\.\d+)?)", text)
+    # Period net loss.
+    # 2016+ certs: "<n>. Net Losses (Ln <a> - Ln <b>) $ X" — can be negative.
+    # 2014-2015 certs: "<n>. Net Losses with respect to preceding Collection
+    # Period $ X" — never negative in practice (no recoveries line).
+    m_net = re.search(
+        r"\d+\s*\.\s+Net Losses"
+        r"(?:\s+\(Ln[^)]*\)|\s+with respect to preceding Collection Period)?"
+        r"\s+\$\s*(-?[\d,]+(?:\.\d+)?)",
+        text,
+    )
     if m_net:
         data["net_charged_off_amount"] = _clean_number(m_net.group(1))
 

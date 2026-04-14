@@ -1,5 +1,21 @@
 # Lessons Learned
 
+## 2026-04-14 Non-negative amount regex silently dropped rows with negative monthly values
+- **What went wrong:** CarMax parser's "Recoveries" and "Defaulted Receivables (charge-offs)" patterns used amount subpattern `\$\s*([\d,]+(?:\.\d+)?)` — no leading `-`. For 2018-2 and 2018-3 on Jan 2022 (the only 2 of 2,024 CarMax certs with net-negative monthly recoveries that period), the period row failed to match. With only the cumulative row matching, the single hit was stored as `recoveries` (22M — wrong), and `cumulative_liquidation_proceeds` was left NULL. Values on dashboard charts looked real but were in the wrong row.
+- **Root cause:** Regex assumed domain values are always non-negative. Real-world financial time series have legitimate sign reversals (reversals/clawbacks, restatements). Silent mis-alignment, not a crash.
+- **What to do differently:**
+  - **Every amount regex that scrapes financial figures must accept optional leading `-`:** `\$\s*(-?[\d,]+(?:\.\d+)?)`. Same rule for parenthesized negatives `\(...\)` if the source uses those.
+  - **If a regex uses `re.finditer` and you branch on `len(matches) > 1`:** when the count is off by one, the fallback path silently stores the wrong column into the wrong slot. Prefer explicit "first-occurrence-is-period, last-occurrence-is-cumulative" with a length assertion rather than `if len>1` that merges single-match cases into the period slot.
+  - Preventive rule: post-ingest invariants should include "same-period recoveries ≡ liquidation_proceeds" (when both are monthly) — when they diverge by more than fp-noise the row is a candidate parser bug.
+
+## 2026-04-14 Label-anchored patterns beat letter-prefix patterns for multi-vintage issuer certs
+- **What went wrong:** CarMax parser used fixed letter prefixes (`a\.` / `b\.` / `c\.` / `d\.` / `e\.` / `f\.`) on delinquency buckets and the "Total Past Due" / "Delinquent Loans as a percentage" labels. 2014-2015 certs use 3 DQ buckets ending at letter `d.` (total); 2016+ certs use 4 buckets with total at `e.` and trigger % at `f.`. The fixed letters silently failed on 85 early-life rows of 2014-1 through 2015-4 (columns NULL; no error).
+- **Root cause:** Letter prefix happens to be stable in any single vintage but **drifts across vintages** as field counts change. Anchoring on letter is anchoring on structure, not semantics.
+- **What to do differently:**
+  - Anchor on the **label body** (the English text of the field name), not the list-letter prefix. Use `[a-z]\.\s+<label body>` as the anchor, never `a\.\s+<body>`.
+  - When issuer formats change shape (buckets added/split), a single pattern with a label-body alternation (`91 to 120|91 or more`) handles all vintages in one code path — no if-vintage-then-else branches.
+  - Preventive rule: if ≥5% of rows have a NULL in a column that the cert source always populates for some vintage range, treat as "parser vintage gap" and search for letter-prefix or line-number anchors in the regex.
+
 ## 2026-04-14 `ORDER BY distribution_date` sorted lex — silently stale "latest" values
 - **What went wrong:** `pool_performance.distribution_date` is stored as `M/D/YYYY` / `MM/DD/YYYY` text. Every SQL `ORDER BY distribution_date DESC LIMIT 1` returned a row picked by lex order, not chronological (`'9/12/2022' > '9/10/2025'` lex). "Current WAC", "Initial WAC", "Current CoD" summary fields, and any "latest pool row" lookup silently showed stale data on 14/16 Carvana deals and 47/49 CarMax deals. Invisible because the returned value was real — just from the wrong period (often years off).
 - **Root cause:** Text storage in a `%m/%d/%Y` format that isn't lex-sortable. Fine for display, catastrophic for SQL sort. Python-side `.sort_values("period")` in some code paths masked it — but any direct `SELECT … ORDER BY distribution_date LIMIT 1` bypassed Python re-sorting and returned the lex-latest row.

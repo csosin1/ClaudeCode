@@ -196,3 +196,59 @@ _Scan: 2026-04-14. 100% coverage across Carvana (607 rows, 16 deals) + CarMax (2
 
 Recommend Phase 2 batches in this order: (1) trace F-010 to cert HTML in `filing_cache/` for CarMax 2018-2 / 2018-3 January-2022 filings — likely a localized parser issue fixable with one patch; (2) trace F-011 / F-012 CarMax 2014-2015 cert layout and always-NULL fields — one parser-coverage PR can fix both.
 
+## Iter 4 (Phase 2) — resolutions (2026-04-14)
+
+### F-010 — RESOLVED pending re-audit (root-cause group G-Iter4-A)
+
+**Root cause:** `all_rec` and `all_def` period-loss regexes in `carmax_abs/ingestion/servicer_parser.py` used amount subpattern `[\d,]+(?:\.\d+)?` (non-negative). On 2018-2 and 2018-3 Jan 2022 certs — the only 2 of 2,024 CarMax filings with **negative monthly recoveries** (prior recoveries reversed/clawed back in that period) — the period-row match failed silently. With only 1 `all_rec` match remaining (the cumulative row), the single match was stored as `recoveries` and `cumulative_liquidation_proceeds` stayed NULL. Same class of bug latent on `all_def` if a future period has negative charge-offs.
+
+**Fix:** Amount subpatterns now accept optional leading `-` (`-?[\d,]+(?:\.\d+)?`). Label-anchored, single code path, no vintage/deal branches.
+
+**Post-fix (2018-2 Jan 2022):** `recoveries=-15,923.82`, `cumulative_liquidation_proceeds=22,123,235.66`, `cumulative_gross_losses=44,347,947.09` — all cross-check to source cert. Same cells correct on 2018-3. All 14 other deals on 2022-01-18 unchanged.
+
+### F-011 — RESOLVED pending re-audit (root-cause group G-Iter4-B)
+
+**Root cause:** 2014-2015 CarMax certs use an older, simpler format:
+- Period net-loss label is `Net Losses with respect to preceding Collection Period $ X` (not `Net Losses (Ln X - Ln Y) $ X`).
+- Delinquency buckets are 3-wide (`a. 31 to 60 / b. 61 to 90 / c. 91 or more days past due / d. Total Past Due (sum a-c)`), not the 4-wide 2016+ format with letter `e.` total and `f.` trigger %.
+- No `Recoveries` line, no cumulative charge-offs breakdown, no delinquency trigger %. Those fields genuinely do not exist in the older format.
+
+Parser's regexes anchored on the 2016+ labels (`Net Losses (Ln...)`, `c. 91 to 120`, `e. Total Past Due`, `f. Delinquent Loans as a percentage`) silently failed on all 85 early-life rows of 2014-1 through 2015-4.
+
+**Fix:** Label patterns extended to match both vintages:
+- Net-loss label now accepts `(Ln ...)` OR `with respect to preceding Collection Period` OR no suffix.
+- DQ bucket letter prefixes loosened from fixed letters (`a./b./c./d./e./f.`) to `[a-z]\.` (label-body-anchored, not letter-anchored).
+- 91-day bucket accepts `91 to 120` OR `91 or more` in the same alternation. For old 3-bucket certs the 91+ total lands in `delinquent_91_120_balance` (semantic mapping, since no separate 121+ bucket exists), and `delinquent_121_plus_*` stay NULL (faithful to source).
+
+**Post-fix NULL delta on 93 rows of 2014-2015 CarMax (85 old-format + 8 Dec-2015 new-format):**
+
+| Column | Before | After | Notes |
+|---|---|---|---|
+| `net_charged_off_amount` | 85 NULL | 0 NULL | +85 populated |
+| `gross_charged_off_amount` | 85 NULL | 0 NULL | +85 populated (via line-4 fallback) |
+| `delinquent_91_120_balance` | 85 NULL | 0 NULL | +85 populated (old 3-bucket 91+ total) |
+| `delinquent_91_120_count` | 85 NULL | 0 NULL | +85 populated |
+| `total_delinquent_balance` | 85 NULL | 0 NULL | +85 populated |
+| `delinquent_31_60_balance`, `delinquent_61_90_balance` | 85 NULL | 0 NULL | letter-prefix loosen incidentally fixed these too |
+| `recoveries`, `cumulative_liquidation_proceeds`, `cumulative_gross_losses`, `delinquent_121_plus_*`, `delinquency_trigger_actual` | 85 NULL | 85 NULL | source-faithful — labels not present in 2014-2015 format |
+
+Source-verified spot-check (2014-1 Jun 2014): `net_charged_off_amount=306,435.62` matches cert line 73. `delinquent_91_120_balance=902,144.77` matches cert line 76c (91+ bucket). `total_delinquent_balance=10,408,173.09` matches line 76d total.
+
+### F-012 — deferred (coverage gap, not corruption)
+4 always-NULL CarMax columns (`beginning_pool_count`, `avg_principal_balance`, `delinquency_trigger_level`, `available_funds`) require adding new label regexes for fields the parser never extracted. Deferred — outside iter-4 scope (this iter fixed corruption-class bugs). Source values exist and can be added in a later coverage PR without touching existing logic.
+
+### F-013 — CLOSED as not-a-bug (source-faithful)
+
+**Investigation:** `loan_loss_summary.total_recovery` is `SUM(recoveries)` over `loan_performance.recoveries` per `(deal, asset_number)` in `carvana_abs/ingestion/ingest.py:164-168`. Per-period `recoveries` come straight from ABS-EE XML `<recoveries>` elements with no transformation. 40 loans sum to negative because the issuer reports net-of-reversal recoveries — when a prior recovery is clawed back in a later period, that period's `recoveries` is negative. Carvana parser preserves sign faithfully.
+
+**Verdict:** Not a parser bug; do not modify Carvana parser. Magnitudes are modest ($-9,502 worst, $-863 mean; 40 of 41,793 rows = 0.1%). Dashboard can clamp-at-zero for display or footnote as "net of reversals" — renderer concern, not ingestion.
+
+### F-014 — deferred (low-priority format advisory)
+`loan_loss_summary` date columns in `MM-DD-YYYY` text. Low priority; not used for "latest" lookups. Add companion `_iso` columns in a future polish PR.
+
+### Summary
+- Files touched: `carmax_abs/ingestion/servicer_parser.py` (3 blocks: delinquency letter-prefix loosen + 91+ label alternation; defaulted-receivables amount allowing `-`; recoveries amount allowing `-`; net-loss label alternation).
+- All 2,024 CarMax cached filings reparsed via `cmx_reparse.py`: ok=2024 miss=0 fail=0.
+- Post-fix regression: `audit_sample.py --chunk /tmp/audit2/sample_00.json` → 35/35 MATCH, 0 mismatches.
+- Dashboard DB re-exported; preview promoted to live.
+
