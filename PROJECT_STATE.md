@@ -3,7 +3,15 @@
 _Last updated: 2026-04-14 (pre-resize checkpoint)_
 
 ## Current focus
-**Data audit loop complete — data trusted.** Full audit per SKILLS/data-audit-qa.md ran 3 iterations; clean pass on iteration 3 (pool 2% = 855 MATCH + 12 audit-extractor bugs + 0 real issues; loan-level 835 + full 346K Tier-2 = 0 discrepancies; invariants = 0 new findings; hand-eyeball = 13/13). Two parser bug classes fixed and reparsed: Carvana reserve row-override + early-cycle gross/liq tagging (`bc40ba5`, 314 rows), CarMax tranche class-name matching + Ending Balance reserve label (`84a7ebb`, 2004 rows). Findings at `AUDIT_FINDINGS.md`; iteration reports at `AUDIT_INVARIANTS_ITER3.md`, `AUDIT_EYEBALL_ITER3.md`, `AUDIT_LOAN_LEVEL.md`. **Remaining non-data items (display/renderer/coverage, not blocking data trust):** #5 dashboard lex-date sort, #6 CarMax Notes & OC sub-tab missing, #7 restatement display flag, #8 re-ingest CarMax 2025-2 June+July, #9 DQ-rate suppression at <10% pool.
+**All 9 audit items resolved — data trusted and live.** Full audit per SKILLS/data-audit-qa.md completed 3 iterations to clean-pass. Post-fix audit (1,395-tuple sample + 3-cell spot-check) reconfirmed data trusted after display changes landed. Live dashboard regenerated + promoted with all fixes. Fix commits:
+- `bc40ba5` Carvana parser (reserve row + early-cycle)
+- `84a7ebb` CarMax parser (tranche class-name + Ending Balance reserve)
+- `1037f00` lex-date sort (dist_date_iso column + 11 query rewrites)
+- `346ec51` CarMax 2025-2 re-ingest (PK-collision from stale issuer header)
+- `0413c62` dashboard renderer (CarMax Notes & OC tab + restatement flag + DQ tail suppression)
+- `1a91324` post-fix audit report
+
+**New follow-up (non-blocking):** PK-collision sweep found 26 orphan filings (8 Carvana benign — rescue rows already captured via 10-D/A; 18 CarMax = lost amendments, mostly 8-year-old, low magnitude). Fix requires parser collision-resolution rule (prefer /A, else latest filing_date) + batch re-ingest. Queue for next session.
 
 ## Memory hygiene 2026-04-14
 Found 2 wins: (1) `export_dashboard_db.py` in both issuers materialized 417k-row `loans` table via `fetchall()` → converted to chunked cursor iteration (10k/batch). Peak RSS on export dropped to ~38MB. (2) WAL checkpoint on both 3GB source DBs — already clean (0 frames). Deferred as separate tasks: `.copy()` chains in `generate_dashboard.py` (intentional chart-data isolation, needs careful audit); `pd.read_sql_query` full-table load in `default_model.py:206` (417k-row loan frame — chunksize conversion is a small refactor, not hygiene); no `lru_cache` anywhere (cache-layer add, out of scope).
