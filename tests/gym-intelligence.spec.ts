@@ -88,6 +88,137 @@ for (const vp of VIEWPORTS) {
         await expect(muni).toContainText('Municipal competitors:', { timeout: 15000 });
       });
 
+      test('trend cell renders for at least one competitor', async ({ page }) => {
+        test.skip(base.label !== 'preview', 'trend column ships on preview only');
+        // Gate on snapshot-dates: if only one distinct snapshot_date exists
+        // in the live DB (pre-backfill), the column is intentionally hidden
+        // and there's nothing to assert. Skip rather than fail in that case.
+        const datesResp = await page.request.get(base.path + 'api/snapshot-dates');
+        expect(datesResp.ok()).toBeTruthy();
+        const datesBody = await datesResp.json();
+        const count = typeof datesBody.count === 'number'
+          ? datesBody.count
+          : (Array.isArray(datesBody) ? datesBody.length : 0);
+        if (count < 2) {
+          test.info().annotations.push({
+            type: 'skip-reason',
+            description: 'Backfill not yet run; only one snapshot_date present.',
+          });
+          test.skip();
+        }
+        await page.goto(base.path);
+        await expect(page.getByTestId('chain-table')).toBeVisible({ timeout: 20000 });
+        // At least one trend cell should move off the placeholder within 15s.
+        await expect(async () => {
+          const cells = page.getByTestId('trend-cell');
+          const total = await cells.count();
+          expect(total).toBeGreaterThan(0);
+          let nonPlaceholder = 0;
+          for (let i = 0; i < Math.min(total, 20); i++) {
+            const txt = (await cells.nth(i).innerText()).trim();
+            // Placeholder row renders as a lone em-dash "—". A populated cell
+            // contains an arrow + pill with digits or "no change".
+            if (txt && txt !== '—' && /\d|no change/.test(txt)) nonPlaceholder++;
+          }
+          expect(nonPlaceholder).toBeGreaterThanOrEqual(1);
+        }).toPass({ timeout: 15000 });
+      });
+
+      test('trend column hidden when only one snapshot_date exists', async ({ page }) => {
+        test.skip(base.label !== 'preview', 'trend column ships on preview only');
+        // Stub snapshot-dates to simulate pre-backfill state.
+        await page.route('**/api/snapshot-dates', async (route) => {
+          await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({ dates: ['2026-04-12'], count: 1 }),
+          });
+        });
+        await page.goto(base.path);
+        await expect(page.getByTestId('chain-table')).toBeVisible({ timeout: 20000 });
+        // Notice banner must appear, trend cells must not.
+        await expect(page.getByTestId('no-trend-notice')).toBeVisible();
+        await expect(page.getByTestId('trend-cell')).toHaveCount(0);
+      });
+
+      test('YoY pill color matches sign', async ({ page }) => {
+        test.skip(base.label !== 'preview', 'trend column ships on preview only');
+        // Force the multi-snapshot code path so the trend column renders.
+        await page.route('**/api/snapshot-dates', async (route) => {
+          await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+              dates: ['2025-04-12', '2026-04-12'],
+              count: 2,
+            }),
+          });
+        });
+
+        // Return a different yoy_pct depending on a canonical_name match in
+        // the query. We control three known competitors via URL inspection
+        // and cycle green / red / gray.
+        await page.route('**/api/chain-history*', async (route) => {
+          const url = route.request().url();
+          // URL-decode the `name=` param so we can compare cleanly.
+          const m = url.match(/[?&]name=([^&]+)/);
+          const name = m ? decodeURIComponent(m[1]) : '';
+          // Build a 2-point series; yoy_pct is what the frontend styles on.
+          let yoy_pct = 0;
+          if (/green/i.test(name)) yoy_pct = 12;
+          else if (/red/i.test(name)) yoy_pct = -8;
+          else yoy_pct = 1.2;  // flat
+          await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+              canonical_name: name,
+              country: 'All Europe',
+              series: [
+                { snapshot_date: '2025-04-12', location_count: 100 },
+                { snapshot_date: '2026-04-12', location_count: 100 + yoy_pct },
+              ],
+              yoy_delta: yoy_pct,
+              yoy_pct,
+            }),
+          });
+        });
+
+        // Also stub the chains-table call so we get exactly three rows with
+        // predictable names. This removes the dependency on whatever the
+        // live DB contains (and keeps the test fast).
+        await page.route('**/api/chains-table*', async (route) => {
+          await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify([
+              { canonical_name: 'GreenChain', competitive_classification: 'direct_competitor', ownership_type: 'private', location_count: 300, region_count: 300 },
+              { canonical_name: 'RedChain',   competitive_classification: 'direct_competitor', ownership_type: 'private', location_count: 200, region_count: 200 },
+              { canonical_name: 'FlatChain',  competitive_classification: 'direct_competitor', ownership_type: 'private', location_count: 100, region_count: 100 },
+            ]),
+          });
+        });
+
+        await page.goto(base.path);
+        await expect(page.getByTestId('chain-table')).toBeVisible({ timeout: 20000 });
+
+        // Wait for the trend cells to populate (move off the placeholder).
+        const arrows = page.getByTestId('trend-arrow');
+        await expect(arrows).toHaveCount(3, { timeout: 10000 });
+
+        // Each arrow sits inside a row. Grab the row's canonical_name via the
+        // sibling trend-cell's data-chain attribute so we can pair sign→color.
+        const rows = await page.locator('[data-testid="trend-cell"]').all();
+        expect(rows.length).toBe(3);
+        const greenArrow = page.locator('[data-testid="trend-cell"][data-chain="GreenChain"] [data-testid="trend-arrow"]');
+        const redArrow = page.locator('[data-testid="trend-cell"][data-chain="RedChain"] [data-testid="trend-arrow"]');
+        const flatArrow = page.locator('[data-testid="trend-cell"][data-chain="FlatChain"] [data-testid="trend-arrow"]');
+
+        await expect(greenArrow).toHaveClass(/trend-up/);
+        await expect(redArrow).toHaveClass(/trend-down/);
+        await expect(flatArrow).toHaveClass(/trend-flat/);
+      });
+
       test('no JS console errors', async ({ page }) => {
         const errors: string[] = [];
         page.on('pageerror', (e) => errors.push(e.message));
