@@ -1,6 +1,6 @@
-# gym-intelligence — Project State
+# Gym Intelligence — Project State
 
-_Last updated: 2026-04-14 end-of-day by gym-intelligence session_
+_Last updated: 2026-04-14 end-of-day by Gym Intelligence session (slug: gym-intelligence)_
 
 ## Current focus
 **Queued for tomorrow: build a historical time-series of chain location counts over the last 4 years.** User approved the plan tonight ("Do the last 4 yrs quarterly") but the build did not start — stopped at the end-of-day checkpoint. Scope is locked, files identified, ready to dispatch to Builder(s).
