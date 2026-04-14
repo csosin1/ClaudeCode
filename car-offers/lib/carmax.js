@@ -496,8 +496,36 @@ async function _getCarmaxOfferImpl({ vin, mileage, zip, condition, email, consum
       }
     }
 
-    // Final check for offer
-    const finalOffer = await scanForOffer(page);
+    // Poll for the offer — /appraisal-checkout is a SPA that loads the dollar
+    // amount async AFTER the wizard-loop's last click settles. We retry every
+    // 3 seconds for up to 90 seconds, bailing as soon as a plausible number
+    // appears. Also watches for "estimate range" pages where CarMax gives a
+    // min/max instead of a firm offer (seen on older/higher-mileage cars).
+    log('[carmax] wizard loop done — polling for offer amount (up to 90s)...');
+    let finalOffer = null;
+    let estimateRange = null;
+    const pollStart = Date.now();
+    while (Date.now() - pollStart < 90_000) {
+      finalOffer = await scanForOffer(page);
+      if (finalOffer && finalOffer > 500) break;
+      // Detect estimate-range page: look for "We need more info" or two $ amounts in the hero
+      try {
+        const bodyText = await page.textContent('body');
+        if (/need more info|estimate range|up to \$/i.test(bodyText || '')) {
+          const nums = (bodyText || '').match(/\$\s?\d{1,3}(?:[,]\d{3})+/g);
+          if (nums && nums.length >= 2) {
+            const vals = nums.map(s => parseInt(s.replace(/[$,\s]/g, ''), 10)).filter(n => n > 500 && n < 250000);
+            if (vals.length >= 2) {
+              estimateRange = { low: Math.min(...vals), high: Math.max(...vals) };
+              log(`[carmax] estimate range detected: $${estimateRange.low} — $${estimateRange.high}`);
+              break;
+            }
+          }
+        }
+      } catch { /* keep polling */ }
+      await new Promise(r => setTimeout(r, 3000));
+    }
+
     if (finalOffer && finalOffer > 500) {
       log(`[carmax] final-check offer: $${finalOffer}`);
       return {
@@ -505,6 +533,18 @@ async function _getCarmaxOfferImpl({ vin, mileage, zip, condition, email, consum
         offer_usd: finalOffer,
         offer: `$${finalOffer.toLocaleString()}`,
         details: { vin, mileage, zip, condition, source: 'carmax', url: page.url(), launchMethod },
+        wizardLog,
+      };
+    }
+    if (estimateRange) {
+      const midpoint = Math.round((estimateRange.low + estimateRange.high) / 2);
+      log(`[carmax] estimate range midpoint: $${midpoint}`);
+      return {
+        status: 'estimate_range',
+        offer_usd: midpoint,
+        offer: `$${estimateRange.low.toLocaleString()}–$${estimateRange.high.toLocaleString()}`,
+        estimate_range: estimateRange,
+        details: { vin, mileage, zip, condition, source: 'carmax', url: page.url(), launchMethod, note: 'CarMax requires photos or in-person visit for firm offer on this vehicle' },
         wizardLog,
       };
     }
