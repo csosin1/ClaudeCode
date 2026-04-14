@@ -36,13 +36,54 @@ text:
 """
 
 from __future__ import annotations
+import os
 import re
 import logging
 import sqlite3
-from typing import Optional
+from datetime import datetime, date
+from typing import Optional, Tuple
 from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
+
+# Dedicated audit log for ingestion collision + stale-header decisions.
+# Lives next to the DB so it's visible for post-mortems without cluttering stderr.
+_AUDIT_LOG_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "db",
+    "ingestion_decisions.log",
+)
+
+
+def _audit(msg: str) -> None:
+    """Append one decision line to the ingestion audit log + info-log it."""
+    try:
+        os.makedirs(os.path.dirname(_AUDIT_LOG_PATH), exist_ok=True)
+        with open(_AUDIT_LOG_PATH, "a") as f:
+            f.write(f"{datetime.utcnow().isoformat()}Z {msg}\n")
+    except Exception:
+        pass
+    logger.info(msg)
+
+
+def _parse_mdy(s: Optional[str]) -> Optional[date]:
+    """Parse an 'M/D/YYYY' distribution-date string."""
+    if not s:
+        return None
+    try:
+        return datetime.strptime(s.strip(), "%m/%d/%Y").date()
+    except (ValueError, TypeError):
+        return None
+
+
+def _parse_ymd(s: Optional[str]) -> Optional[date]:
+    """Parse a 'YYYY-MM-DD' filing_date string."""
+    if not s:
+        return None
+    try:
+        return datetime.strptime(s.strip()[:10], "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        return None
 
 # A "real" dollar amount in CARMX certs is always preceded by "$" — values
 # inside formula parentheticals like "(Ln 77 - Ln 78)" are bare numbers and
@@ -278,26 +319,173 @@ def parse_servicer_certificate(html: str) -> dict:
     return data
 
 
+def _is_stale_header(
+    data: dict,
+    filing_date: Optional[date],
+    filing_type: Optional[str],
+) -> Tuple[bool, int]:
+    """Detect stale-header filings: issuer copied the prior period's
+    'Distribution Date' literal into the current cert so the extracted
+    distribution_date disagrees with filing_date by >30 days.
+
+    Amendments (/A) are excluded: they're legitimately filed weeks or months
+    after the period they restate.
+
+    Returns (is_stale, delta_days).
+    """
+    if filing_date is None:
+        return False, 0
+    if filing_type and filing_type.endswith("/A"):
+        return False, 0
+    dist_date = _parse_mdy(data.get("distribution_date"))
+    if dist_date is None:
+        return False, 0
+    delta_days = abs((filing_date - dist_date).days)
+    return (delta_days > 30), delta_days
+
+
+def _resolve_collision(
+    conn: sqlite3.Connection,
+    deal: str,
+    distribution_date: str,
+    incoming_accession: str,
+    incoming_filing_type: Optional[str],
+    incoming_filing_date: Optional[date],
+) -> Tuple[bool, Optional[str]]:
+    """Decide whether incoming filing should overwrite the existing row at
+    (deal, distribution_date). Returns (should_write, reason).
+
+    Precedence:
+      1. If incoming filing_type ends with '/A' and existing is NOT '/A'
+         -> accept (amendment wins).
+      2. If existing is '/A' and incoming is NOT '/A' -> reject
+         (don't clobber an amendment with a later-ingested original 10-D).
+      3. Both '/A' or both plain -> later filing_date wins; tie -> incoming.
+      4. No existing row -> accept.
+    """
+    row = conn.execute(
+        """
+        SELECT pp.accession_number, f.filing_type, f.filing_date
+        FROM pool_performance pp
+        LEFT JOIN filings f ON f.accession_number = pp.accession_number
+        WHERE pp.deal = ? AND pp.distribution_date = ?
+        """,
+        (deal, distribution_date),
+    ).fetchone()
+
+    if row is None:
+        return True, "no_existing_row"
+
+    existing_acc, existing_type, existing_fdate_str = row
+    if existing_acc == incoming_accession:
+        # Re-ingest of the same filing — always allow (parser bug fixes etc.).
+        return True, "same_accession_reingest"
+
+    incoming_is_a = bool(incoming_filing_type and incoming_filing_type.endswith("/A"))
+    existing_is_a = bool(existing_type and existing_type.endswith("/A"))
+
+    if incoming_is_a and not existing_is_a:
+        return True, f"amendment_overwrites_original(existing={existing_acc})"
+    if existing_is_a and not incoming_is_a:
+        return False, f"refuse_overwrite_amendment(existing={existing_acc})"
+
+    # Same tier (both /A or both plain) — prefer later filing_date.
+    existing_fdate = _parse_ymd(existing_fdate_str)
+    if incoming_filing_date is None:
+        return False, f"no_incoming_filing_date_ambiguous(existing={existing_acc})"
+    if existing_fdate is None:
+        return True, f"existing_has_no_filing_date(existing={existing_acc})"
+    if incoming_filing_date > existing_fdate:
+        return True, f"incoming_newer({incoming_filing_date}>{existing_fdate},existing={existing_acc})"
+    if incoming_filing_date < existing_fdate:
+        return False, f"existing_newer({existing_fdate}>={incoming_filing_date},existing={existing_acc})"
+    # Equal filing_date — prefer incoming (idempotent re-runs get stable outcome).
+    return True, f"tie_filing_date_prefer_incoming(existing={existing_acc})"
+
+
 def store_pool_data(html_content: str, accession_number: str,
                     deal: str, db_path: str) -> bool:
-    """Parse + upsert into pool_performance. Mirror of the Carvana version."""
+    """Parse + upsert into pool_performance with collision-safe logic.
+
+    Looks up filing_type + filing_date from `filings` (keyed by accession) so
+    callers don't need to change. Applies a stale-header override on the
+    extracted distribution_date, then resolves PK collisions explicitly
+    instead of blindly INSERT OR REPLACE.
+    """
     data = parse_servicer_certificate(html_content)
     if not data.get("distribution_date"):
         return False
+
     conn = sqlite3.connect(db_path)
     try:
+        meta = conn.execute(
+            "SELECT filing_type, filing_date FROM filings WHERE accession_number = ?",
+            (accession_number,),
+        ).fetchone()
+        filing_type = meta[0] if meta else None
+        filing_date = _parse_ymd(meta[1]) if meta else None
+
+        stale, delta_days = _is_stale_header(data, filing_date, filing_type)
+        if stale:
+            # Stale header: cert re-reports the prior period's data under the
+            # prior period's literal 'Distribution Date'. Skip the write and
+            # keep ingested_pool=0 so the orphan-detection invariant stays
+            # clean. Any authoritative data for THIS period arrives separately
+            # on a /A amendment.
+            _audit(
+                f"STALE_HEADER_SKIP deal={deal} accession={accession_number} "
+                f"filing_date={filing_date.isoformat() if filing_date else 'NA'} "
+                f"extracted_dist={data.get('distribution_date')} "
+                f"delta_days={delta_days}"
+            )
+            conn.execute(
+                "UPDATE filings SET ingested_pool=0 WHERE accession_number=?",
+                (accession_number,),
+            )
+            conn.commit()
+            return True
+
+        dist = data["distribution_date"]
+
+        should_write, reason = _resolve_collision(
+            conn, deal, dist, accession_number, filing_type, filing_date
+        )
+        if not should_write:
+            # Period is already covered by a higher-precedence row (amendment
+            # wins, or newer plain filing wins). Keep ingested_pool=0 to
+            # preserve the invariant "ingested_pool=1 -> PP row exists".
+            _audit(
+                f"COLLISION_REJECT deal={deal} dist={dist} "
+                f"incoming={accession_number} type={filing_type} reason={reason}"
+            )
+            conn.execute(
+                "UPDATE filings SET ingested_pool=0 WHERE accession_number=?",
+                (accession_number,),
+            )
+            conn.commit()
+            return True
+
+        _audit(
+            f"COLLISION_WRITE deal={deal} dist={dist} "
+            f"incoming={accession_number} type={filing_type} reason={reason}"
+        )
+
         cols = ["deal", "distribution_date", "accession_number"]
-        vals = [deal, data["distribution_date"], accession_number]
+        vals = [deal, dist, accession_number]
         for k, v in data.items():
-            if k == "distribution_date" or v is None: continue
-            cols.append(k); vals.append(v)
+            if k == "distribution_date" or v is None:
+                continue
+            cols.append(k)
+            vals.append(v)
         placeholders = ",".join(["?"] * len(cols))
         conn.execute(
             f"INSERT OR REPLACE INTO pool_performance ({','.join(cols)}) VALUES ({placeholders})",
             vals,
         )
-        conn.execute("UPDATE filings SET ingested_pool=1 WHERE accession_number=?",
-                     (accession_number,))
+        conn.execute(
+            "UPDATE filings SET ingested_pool=1 WHERE accession_number=?",
+            (accession_number,),
+        )
         conn.commit()
         return True
     except sqlite3.Error as e:

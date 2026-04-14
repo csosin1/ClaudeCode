@@ -8,6 +8,7 @@ qa-report.md
 __pycache__/
 *.pyc
 *.db
+ingestion_decisions.log
 .playwright-mcp/
 carvana_abs/filing_cache/
 

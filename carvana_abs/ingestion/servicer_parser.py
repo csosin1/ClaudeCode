@@ -10,13 +10,132 @@ Both formats use numbered field labels: (1), (2), ... (118+).
 """
 
 import logging
+import os
 import re
-from typing import Optional
+from datetime import datetime, date
+from typing import Optional, Tuple
 from bs4 import BeautifulSoup
 
 from carvana_abs.db.schema import get_connection
 
 logger = logging.getLogger(__name__)
+
+# Dedicated audit log for ingestion collision + stale-header decisions.
+# Lives next to the DB so it's visible for post-mortems without cluttering stderr.
+_AUDIT_LOG_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "db",
+    "ingestion_decisions.log",
+)
+
+
+def _audit(msg: str) -> None:
+    """Append one decision line to the ingestion audit log + info-log it."""
+    try:
+        os.makedirs(os.path.dirname(_AUDIT_LOG_PATH), exist_ok=True)
+        with open(_AUDIT_LOG_PATH, "a") as f:
+            f.write(f"{datetime.utcnow().isoformat()}Z {msg}\n")
+    except Exception:
+        pass
+    logger.info(msg)
+
+
+def _parse_mdy(s: Optional[str]) -> Optional[date]:
+    if not s:
+        return None
+    try:
+        return datetime.strptime(s.strip(), "%m/%d/%Y").date()
+    except (ValueError, TypeError):
+        return None
+
+
+def _parse_ymd(s: Optional[str]) -> Optional[date]:
+    if not s:
+        return None
+    try:
+        return datetime.strptime(s.strip()[:10], "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        return None
+
+
+def _is_stale_header(
+    data: dict,
+    filing_date: Optional[date],
+    filing_type: Optional[str],
+) -> Tuple[bool, int]:
+    """Detect stale-header filings: issuer copied the prior period's
+    'Distribution Date' literal into the current cert, so the extracted
+    distribution_date disagrees with filing_date by >30 days.
+
+    Amendments (/A) are excluded: they're legitimately filed weeks or months
+    after the period they restate. Normal filing lag is ~7-14 days so 30
+    days is a safe threshold.
+
+    Returns (is_stale, delta_days)."""
+    if filing_date is None:
+        return False, 0
+    if filing_type and filing_type.endswith("/A"):
+        return False, 0
+    dist_date = _parse_mdy(data.get("distribution_date"))
+    if dist_date is None:
+        return False, 0
+    delta_days = abs((filing_date - dist_date).days)
+    return (delta_days > 30), delta_days
+
+
+def _resolve_collision(
+    conn,
+    deal: str,
+    distribution_date: str,
+    incoming_accession: str,
+    incoming_filing_type: Optional[str],
+    incoming_filing_date: Optional[date],
+) -> Tuple[bool, Optional[str]]:
+    """Decide whether incoming filing should overwrite the existing row at
+    (deal, distribution_date). Same precedence rules as CarMax side:
+      1. Incoming /A + existing plain  -> accept (amendment wins).
+      2. Existing /A + incoming plain  -> reject (protect amendment).
+      3. Same tier                     -> prefer later filing_date.
+      4. No existing row               -> accept.
+    """
+    row = conn.execute(
+        """
+        SELECT pp.accession_number, f.filing_type, f.filing_date
+        FROM pool_performance pp
+        LEFT JOIN filings f ON f.accession_number = pp.accession_number
+        WHERE pp.deal = ? AND pp.distribution_date = ?
+        """,
+        (deal, distribution_date),
+    ).fetchone()
+
+    if row is None:
+        return True, "no_existing_row"
+    # Support both tuple and sqlite3.Row access
+    existing_acc = row[0]
+    existing_type = row[1]
+    existing_fdate_str = row[2]
+
+    if existing_acc == incoming_accession:
+        return True, "same_accession_reingest"
+
+    incoming_is_a = bool(incoming_filing_type and incoming_filing_type.endswith("/A"))
+    existing_is_a = bool(existing_type and existing_type.endswith("/A"))
+
+    if incoming_is_a and not existing_is_a:
+        return True, f"amendment_overwrites_original(existing={existing_acc})"
+    if existing_is_a and not incoming_is_a:
+        return False, f"refuse_overwrite_amendment(existing={existing_acc})"
+
+    existing_fdate = _parse_ymd(existing_fdate_str)
+    if incoming_filing_date is None:
+        return False, f"no_incoming_filing_date_ambiguous(existing={existing_acc})"
+    if existing_fdate is None:
+        return True, f"existing_has_no_filing_date(existing={existing_acc})"
+    if incoming_filing_date > existing_fdate:
+        return True, f"incoming_newer({incoming_filing_date}>{existing_fdate},existing={existing_acc})"
+    if incoming_filing_date < existing_fdate:
+        return False, f"existing_newer({existing_fdate}>={incoming_filing_date},existing={existing_acc})"
+    return True, f"tie_filing_date_prefer_incoming(existing={existing_acc})"
 
 
 def _clean_number(text: str) -> Optional[float]:
@@ -778,7 +897,13 @@ def _parse_from_tables(tables) -> dict:
 
 def store_pool_data(html_content: str, accession_number: str,
                     deal: str, db_path: Optional[str] = None) -> bool:
-    """Parse servicer certificate HTML and store pool performance data."""
+    """Parse servicer certificate HTML and store pool performance data.
+
+    Looks up filing_type + filing_date from `filings` (keyed by accession) so
+    callers don't change. Applies a stale-header override to distribution_date
+    and resolves PK collisions explicitly (amendment / recency rules) instead
+    of silently INSERT OR REPLACE-ing a previous period's row.
+    """
     from carvana_abs.config import DB_PATH
 
     data = parse_servicer_certificate(html_content)
@@ -790,6 +915,62 @@ def store_pool_data(html_content: str, accession_number: str,
     cursor = conn.cursor()
 
     try:
+        # Pull filing metadata for collision resolution + stale-header guard.
+        meta = cursor.execute(
+            "SELECT filing_type, filing_date FROM filings WHERE accession_number = ?",
+            (accession_number,),
+        ).fetchone()
+        filing_type = meta[0] if meta else None
+        filing_date = _parse_ymd(meta[1] if meta else None)
+
+        stale, delta_days = _is_stale_header(data, filing_date, filing_type)
+        if stale:
+            # Stale header = cert re-reports the prior period's data under the
+            # prior period's 'Distribution Date' literal. Inserting it would
+            # either (a) clobber the real prior-period row on PK collision, or
+            # (b) create a duplicate at a fabricated key. Neither is useful:
+            # any authoritative data for THIS period lives on a subsequent /A.
+            # Skip the write AND explicitly mark ingested_pool=0 so the
+            # orphan-detection invariant ("ingested_pool=1 -> PP row exists")
+            # stays clean.
+            _audit(
+                f"STALE_HEADER_SKIP deal={deal} accession={accession_number} "
+                f"filing_date={filing_date.isoformat() if filing_date else 'NA'} "
+                f"extracted_dist={data.get('distribution_date')} "
+                f"delta_days={delta_days}"
+            )
+            cursor.execute(
+                "UPDATE filings SET ingested_pool=0 WHERE accession_number=?",
+                (accession_number,),
+            )
+            conn.commit()
+            return True
+
+        dist = data["distribution_date"]
+
+        should_write, reason = _resolve_collision(
+            conn, deal, dist, accession_number, filing_type, filing_date
+        )
+        if not should_write:
+            # Filing's period is already covered by a higher-precedence row
+            # (amendment wins, or newer plain filing wins). Keep ingested_pool=0
+            # to preserve the invariant "ingested_pool=1 -> PP row exists".
+            _audit(
+                f"COLLISION_REJECT deal={deal} dist={dist} "
+                f"incoming={accession_number} type={filing_type} reason={reason}"
+            )
+            cursor.execute(
+                "UPDATE filings SET ingested_pool=0 WHERE accession_number=?",
+                (accession_number,),
+            )
+            conn.commit()
+            return True
+
+        _audit(
+            f"COLLISION_WRITE deal={deal} dist={dist} "
+            f"incoming={accession_number} type={filing_type} reason={reason}"
+        )
+
         cursor.execute("""
             INSERT OR REPLACE INTO pool_performance
             (deal, distribution_date, accession_number,

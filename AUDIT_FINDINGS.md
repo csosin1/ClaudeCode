@@ -78,6 +78,21 @@ _Per SKILLS/data-audit-qa.md: 100% outlier scan + 2% risk-weighted random sample
 5. Re-ingest CarMax 2025-2 June + July (#8) from EDGAR.
 6. **Full audit loop re-run** (pool 2% + loan-level 2% + invariants + eyeball). Iterate until zero real data discrepancies.
 
+## Post-fix follow-up (2026-04-14) — PK-collision class of bug — RESOLVED
+
+Root cause: `store_pool_data` in both parsers used `INSERT OR REPLACE INTO pool_performance` keyed on `(deal, distribution_date)` with no amendment or recency awareness. Two silent-data-loss failure modes:
+
+- **Stale-header (Carvana, 8 filings):** Dec 2024 10-D filings carried a stale `Distribution Date 11/8/2024` header → parser overwrote the real Nov row.
+- **Amendment-lost (CarMax, 18 filings):** 16 × 2018-03-23 bulk 10-D/A restating Feb 2018 + 2014-1 (5/15/2014) + 2024-4 (11/15/2024). When the original 10-D ingested after the /A, `INSERT OR REPLACE` silently discarded the amendment.
+
+**Fix (root-cause, not patch):**
+1. `store_pool_data` now looks up `filing_type` + `filing_date` from the `filings` table and resolves PK collisions explicitly: amendment wins over plain, plain never clobbers amendment, else later `filing_date` wins. Decisions logged to `<issuer>_abs/db/ingestion_decisions.log`.
+2. Stale-header guard: if extracted `distribution_date` disagrees with `filing_date` by more than 30 days (amendments excluded — they're legitimately filed late), skip the write entirely; any authoritative data for the period arrives on a subsequent `/A`.
+3. Rejected / skipped filings are explicitly marked `ingested_pool=0` so the invariant `ingested_pool=1 -> PP row exists` stays clean.
+4. Re-ingested all 26 orphans from `filing_cache/`. Orphan count: **26 -> 0**. Post-fix `audit_sample.py` chunk 00: stable 35 MATCH. Dashboard DBs re-exported + preview + live promoted.
+
+Files touched: `carvana_abs/ingestion/servicer_parser.py`, `carmax_abs/ingestion/servicer_parser.py`.
+
 ## Artifacts
 
 - `AUDIT_MANIFEST.md` — chart/table enumeration + sampling universe
