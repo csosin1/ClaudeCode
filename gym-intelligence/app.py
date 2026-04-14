@@ -174,28 +174,35 @@ def api_country_counts():
 
 @bp.route("/api/chains-table")
 def api_chains_table():
-    """All chains ordered by location count, optionally filtered by country."""
+    """All chains ordered by location count, optionally filtered by country.
+
+    Defaults to competitive-only (direct_competitor). Pass ?show=all to
+    include non-competitors, OSM-noise (not_a_chain) and unknowns.
+    """
     country = request.args.get("country", "")
+    competitive_only = request.args.get("show", "competitive") != "all"
+    competitive_clause = "AND competitive_classification = 'direct_competitor'" if competitive_only else ""
     conn = get_connection()
 
     if country and country != "All Europe":
-        rows = conn.execute("""
+        rows = conn.execute(f"""
             SELECT c.canonical_name, c.competitive_classification, c.ownership_type,
                    c.location_count,
                    COUNT(l.id) as region_count
             FROM chains c
             JOIN locations l ON l.chain_id = c.id AND l.active = 1 AND l.country = ?
             WHERE c.location_count > 0
+              {competitive_clause.replace("competitive_classification", "c.competitive_classification")}
             GROUP BY c.id
             ORDER BY region_count DESC
         """, (country,)).fetchall()
     else:
-        rows = conn.execute("""
+        rows = conn.execute(f"""
             SELECT canonical_name, competitive_classification, ownership_type,
                    location_count,
                    location_count as region_count
             FROM chains
-            WHERE location_count > 0
+            WHERE location_count > 0 {competitive_clause}
             ORDER BY location_count DESC
         """).fetchall()
 

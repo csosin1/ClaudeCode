@@ -1,18 +1,19 @@
 # gym-intelligence — Project State
 
-_Last updated: 2026-04-13 by gym-intelligence session_
+_Last updated: 2026-04-14 by gym-intelligence session_
 
 ## Current focus
-Idle. Last completed work (2026-04-12): added `MIN_LOCATIONS_FOR_CLASSIFICATION = 4` floor to `classify.py` (commit c412728) so refreshes only spend Claude tokens on chains that actually move Basic-Fit's competitive landscape, not the ~31k OSM single-location noise.
+**Awaiting user "ship it" on preview.** Completed a reclassification + ownership pass that produced material data improvements (competitor count more than doubled) and added a "Competitors only" toggle to the dashboard (default ON). Live is untouched until acceptance.
 
 ## Last decisions
-- **Classification floor = 4 locations.** Pre-floor, the classifier matched all ~31k unclassified chains per refresh (~$220, 17+ hrs). Floor of 4 covers ~22% of clubs across 391 chains for ~$3. Set in `classify.py:19`.
-- **Flask + vanilla JS, not Streamlit.** Mobile-first single-page dashboard at `/gym-intelligence/`. Streamlit was replaced (commit ee243ee) for fast iPhone loads.
-- **Preview-first deploy retrofit.** Live (port 8502) and preview (port 8503) are separate systemd units sharing source from `/opt/site-deploy/gym-intelligence/`; live is only updated via `deploy/promote.sh gym-intelligence`.
+- **Classify unknowns with knowledge-only path, not web_search.** Anthropic's `web_search_20250305` tool returned 529 Overloaded 100% of the time on this account during the run; plain inference on `claude-sonnet-4-6` worked fine and already knows most European gym chains. Retry with web_search later — it's capacity, not quota, so should clear.
+- **Municipal competitors go in the direct_competitor bucket if they sell a monthly gym membership under €50.** Added `ownership_type TEXT` column (private / public / unknown) and a "Municipal competitors" counter on the overview. After the full pass: 1 municipal competitor flagged (Altafit) — likely a misclassification; all other public-ownership chains landed in non_competitor (municipal pools/pavilions that sell pay-per-entry, not memberships).
+- **Dashboard shows only competitive chains by default.** Unchecking "Competitors only" returns the full 31k-chain view via `?show=all`.
 
 ## Open questions
-- **145 chains with ≥4 locations remain `competitive_classification = 'unknown'`.** Did the prior pass leave them unknown because Claude couldn't decide, or because the run was interrupted? Re-run on these specific IDs would be cheap (<$0.50) before deciding whether to widen the prompt or mark them manually.
-- **Preview is drifted from source.** Source `classify.py` (Apr 13, has the floor) hasn't been rsynced to `/opt/gym-intelligence-preview/classify.py` (still Apr 6 content) — no `gym-intelligence.sh` deploy has run since 2026-04-12 19:30 per `/var/log/general-deploy.log`. Looks like an auto-deploy infra issue (deployed `/opt/auto_deploy_general.sh` is older than the repo copy). Out of scope for this project chat to fix; flagged in CHANGES.md.
+- **Altafit is the only municipal competitor** — and it's almost certainly wrong; Altafit is a private Spanish budget chain. Worth manually correcting in DB before promoting, or re-running ownership on just the competitor set with a stricter prompt.
+- **23 chains still `unknown`** after the pass — all tiny (4–18 locations) and genuinely obscure European brands (Fitomat, Bionic, Sano, Fit-in, etc.). Retrying with web_search once Anthropic's capacity clears may resolve most of them.
+- **Session parallelism keeps clobbering in-flight edits.** During this task, preview files were rsynced over from source twice mid-session by auto-deploys triggered by other project chats. Workflow-wise it worked out (source was updated last) but it's fragile.
 
 ## Next step
-Await user request. If they ask to act on the preview drift, run `REPO_DIR=/opt/site-deploy LOG=/tmp/gym-deploy.log bash /opt/site-deploy/deploy/gym-intelligence.sh` to manually sync preview, then verify  http://159.223.127.125/gym-intelligence/preview/  serves the new code.
+User eyeballs  https://casinv.dev/gym-intelligence/preview/  — if accepted, run `bash /opt/site-deploy/deploy/promote.sh gym-intelligence` to promote code + rsync preview DB → live. If not accepted, iterate on preview without asking.

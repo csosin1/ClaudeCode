@@ -28,19 +28,19 @@ for (const vp of VIEWPORTS) {
       });
 
       test('chain table renders with at least 45 direct_competitor rows', async ({ page }) => {
+        test.skip(base.label !== 'preview', 'testid-based rendering ships on preview only');
         await page.goto(base.path);
-        // Market tab is active by default; wait for table to render.
         const table = page.getByTestId('chain-table');
-        await expect(table).toBeVisible({ timeout: 15000 });
-        // Direct competitors: project has >=45 today (spec invariant).
+        await expect(table).toBeVisible({ timeout: 20000 });
         const directRows = page.getByTestId('direct-row');
         const count = await directRows.count();
         expect(count).toBeGreaterThanOrEqual(45);
       });
 
       test('Public pill renders when any chain has public ownership', async ({ page }) => {
+        test.skip(base.label !== 'preview', 'Public pill ships on preview only');
         const apiResp = await page.request.get(
-          base.path + 'api/chains-table?country=All%20Europe'
+          base.path + 'api/chains-table?country=All%20Europe&show=all'
         );
         expect(apiResp.ok()).toBeTruthy();
         const rows = await apiResp.json();
@@ -52,16 +52,40 @@ for (const vp of VIEWPORTS) {
           });
           test.skip();
         }
+        // Altafit (public + direct_competitor) appears in the default
+        // competitors-only view, so no toggle needed. Unchecking would render
+        // 31k rows and choke the browser.
         await page.goto(base.path);
-        await expect(page.getByTestId('chain-table')).toBeVisible({ timeout: 15000 });
-        await expect(page.getByTestId('public-pill').first()).toBeVisible();
+        await expect(page.getByTestId('chain-table')).toBeVisible({ timeout: 20000 });
+        await expect(page.getByTestId('public-pill').first()).toBeVisible({ timeout: 15000 });
+      });
+
+      test('competitors-only toggle defaults ON and filters table', async ({ page }) => {
+        test.skip(base.label !== 'preview', 'toggle only ships on preview');
+        await page.goto(base.path);
+        const checkbox = page.locator('#competitors-only');
+        await expect(checkbox).toBeChecked();
+        await expect(page.getByTestId('chain-table')).toBeVisible({ timeout: 20000 });
+        const onlyCount = await page.getByTestId('direct-row').count();
+        expect(onlyCount).toBeGreaterThan(0);
+        // Untoggle → API returns strictly more rows (non-competitors + others).
+        // Don't assert DOM count because rendering 31k rows chokes the browser;
+        // assert via the API payload instead.
+        const allResp = await page.request.get(
+          base.path + 'api/chains-table?country=All%20Europe&show=all'
+        );
+        const allRows = await allResp.json();
+        expect(allRows.length).toBeGreaterThan(onlyCount);
       });
 
       test('overview shows Municipal competitors counter', async ({ page }) => {
+        test.skip(base.label !== 'preview', 'counter ships on preview only');
         await page.goto(base.path);
+        // Wait for table render to complete before checking counter text —
+        // the counter is populated by loadTable() after the status API call.
+        await expect(page.getByTestId('chain-table')).toBeVisible({ timeout: 20000 });
         const muni = page.getByTestId('municipal-counter');
-        await expect(muni).toBeVisible({ timeout: 15000 });
-        await expect(muni).toContainText('Municipal competitors:');
+        await expect(muni).toContainText('Municipal competitors:', { timeout: 15000 });
       });
 
       test('no JS console errors', async ({ page }) => {

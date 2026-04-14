@@ -142,6 +142,10 @@ label{font-size:.85rem;color:var(--text-dim);font-weight:600}
     <button class="country-btn" data-c="LU">LU</button>
     <button class="country-btn" data-c="DE">DE</button>
   </div>
+  <label data-testid="competitors-toggle" style="display:flex;align-items:center;gap:8px;padding:10px 12px 0;cursor:pointer;font-size:.9rem">
+    <input type="checkbox" id="competitors-only" checked style="width:16px;height:16px;cursor:pointer">
+    <span>Competitors only</span>
+  </label>
   <div id="mkt-summary" style="padding:8px 12px;color:var(--text-dim);font-size:.85rem"></div>
   <div id="mkt-muni" data-testid="municipal-counter" style="padding:0 12px 8px;color:var(--text-dim);font-size:.85rem"></div>
   <div id="mkt-table-wrap" style="padding:0 12px 12px"></div>
@@ -258,6 +262,7 @@ function ownershipPill(o) {
 
 // ---- TAB 1: Market Table ----
 let currentCountry = 'All Europe';
+let competitorsOnly = true;
 
 document.querySelectorAll('.country-btn').forEach(btn => {
   btn.addEventListener('click', () => {
@@ -266,6 +271,11 @@ document.querySelectorAll('.country-btn').forEach(btn => {
     currentCountry = btn.dataset.c;
     loadTable();
   });
+});
+
+document.getElementById('competitors-only').addEventListener('change', (e) => {
+  competitorsOnly = e.target.checked;
+  loadTable();
 });
 
 async function initMarket() {
@@ -288,7 +298,8 @@ async function loadTable() {
   const summary = document.getElementById('mkt-summary');
   wrap.innerHTML = '<p style="color:var(--text-dim)">Loading...</p>';
 
-  const data = (await api('chains-table?country=' + encodeURIComponent(currentCountry))) || [];
+  const showParam = competitorsOnly ? 'competitive' : 'all';
+  const data = (await api('chains-table?country=' + encodeURIComponent(currentCountry) + '&show=' + showParam)) || [];
   if (!data.length) {
     wrap.innerHTML = '<div class="card" style="text-align:center;padding:30px"><h3>No data yet</h3><p style="color:var(--text-dim)">Go to Admin tab → Collect Gym Data from OSM</p></div>';
     summary.textContent = '';
