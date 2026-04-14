@@ -24,9 +24,38 @@ REQUEST_DELAY = 0.15  # SEC throttle: ≤10 req/s
 AUTO_LOAN_NS = "http://www.sec.gov/edgar/document/absee/autoloan/assetdata"
 
 # --- Deal Registry ---
-# CIKs verified via SEC EDGAR full-text search 2026-04-13.
-# All 21 CARMX deals issued 2020-Q1 through 2025-Q1.
+# CIKs verified via SEC EDGAR company search 2026-04-13. Full CARMX history
+# back to 2006-1. ABS-EE (loan-level data) only available for deals issued
+# after Reg AB II took effect (Nov 2016) — so 2014-2016 contribute pool-level
+# only and 2017+ contribute both pool and loan-level data.
 DEALS = {
+    # 2014–2016 (pool-level only, no ABS-EE — pre-Reg AB II)
+    "2014-1": {"cik": "0001598693", "entity_name": "CarMax Auto Owner Trust 2014-1"},
+    "2014-2": {"cik": "0001607082", "entity_name": "CarMax Auto Owner Trust 2014-2"},
+    "2014-3": {"cik": "0001615396", "entity_name": "CarMax Auto Owner Trust 2014-3"},
+    "2014-4": {"cik": "0001623837", "entity_name": "CarMax Auto Owner Trust 2014-4"},
+    "2015-1": {"cik": "0001633241", "entity_name": "CarMax Auto Owner Trust 2015-1"},
+    "2015-2": {"cik": "0001640878", "entity_name": "CarMax Auto Owner Trust 2015-2"},
+    "2015-3": {"cik": "0001648945", "entity_name": "CarMax Auto Owner Trust 2015-3"},
+    "2015-4": {"cik": "0001654861", "entity_name": "CarMax Auto Owner Trust 2015-4"},
+    "2016-1": {"cik": "0001662810", "entity_name": "CarMax Auto Owner Trust 2016-1"},
+    "2016-2": {"cik": "0001671212", "entity_name": "CarMax Auto Owner Trust 2016-2"},
+    "2016-3": {"cik": "0001678507", "entity_name": "CarMax Auto Owner Trust 2016-3"},
+    "2016-4": {"cik": "0001686277", "entity_name": "CarMax Auto Owner Trust 2016-4"},
+    # 2017–2019 (pool + ABS-EE)
+    "2017-1": {"cik": "0001693819", "entity_name": "CarMax Auto Owner Trust 2017-1"},
+    "2017-2": {"cik": "0001702777", "entity_name": "CarMax Auto Owner Trust 2017-2"},
+    "2017-3": {"cik": "0001710329", "entity_name": "CarMax Auto Owner Trust 2017-3"},
+    "2017-4": {"cik": "0001718592", "entity_name": "CarMax Auto Owner Trust 2017-4"},
+    "2018-1": {"cik": "0001725618", "entity_name": "CarMax Auto Owner Trust 2018-1"},
+    "2018-2": {"cik": "0001734850", "entity_name": "CarMax Auto Owner Trust 2018-2"},
+    "2018-3": {"cik": "0001742867", "entity_name": "CarMax Auto Owner Trust 2018-3"},
+    "2018-4": {"cik": "0001754008", "entity_name": "CarMax Auto Owner Trust 2018-4"},
+    "2019-1": {"cik": "0001762278", "entity_name": "CarMax Auto Owner Trust 2019-1"},
+    "2019-2": {"cik": "0001770345", "entity_name": "CarMax Auto Owner Trust 2019-2"},
+    "2019-3": {"cik": "0001779026", "entity_name": "CarMax Auto Owner Trust 2019-3"},
+    "2019-4": {"cik": "0001788503", "entity_name": "CarMax Auto Owner Trust 2019-4"},
+    # 2020+ (already in our DB)
     "2020-1": {"cik": "0001796587", "entity_name": "CarMax Auto Owner Trust 2020-1"},
     "2020-2": {"cik": "0001806211", "entity_name": "CarMax Auto Owner Trust 2020-2"},
     "2020-3": {"cik": "0001814294", "entity_name": "CarMax Auto Owner Trust 2020-3"},
@@ -48,6 +77,11 @@ DEALS = {
     "2024-3": {"cik": "0002029255", "entity_name": "CarMax Auto Owner Trust 2024-3"},
     "2024-4": {"cik": "0002037519", "entity_name": "CarMax Auto Owner Trust 2024-4"},
     "2025-1": {"cik": "0002049715", "entity_name": "CarMax Auto Owner Trust 2025-1"},
+    # New (not yet in our DB)
+    "2025-2": {"cik": "0002063979", "entity_name": "CarMax Auto Owner Trust 2025-2"},
+    "2025-3": {"cik": "0002074530", "entity_name": "CarMax Auto Owner Trust 2025-3"},
+    "2025-4": {"cik": "0002089777", "entity_name": "CarMax Auto Owner Trust 2025-4"},
+    "2026-1": {"cik": "0002094950", "entity_name": "CarMax Auto Owner Trust 2026-1"},
 }
 
 DEFAULT_DEAL = "2020-1"

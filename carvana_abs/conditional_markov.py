@@ -275,7 +275,10 @@ def build_aggregates(conn, deals, covariates):
                      prev_ltv_b, prev_mod, pcov["orig_q"])
             trans[pcell][cur_state] += 1
 
-        # Save last snapshot (used for the per-loan forecast pass)
+        # Save last snapshot (used for the per-loan forecast pass).
+        # Keeping for ALL loans (active + terminated) — terminated loans
+        # contribute their lookback to the calibration overlay so we can
+        # compute model-predicted-to-date over the full original pool.
         latest_state[key] = {
             "state": cur_state,
             "balance": float(end_bal) if end_bal is not None else 0.0,
@@ -288,7 +291,7 @@ def build_aggregates(conn, deals, covariates):
             "orig_amount": cov["orig_amount"],
             "term": cov["term"],
             "orig_q": cov["orig_q"],
-            "is_active": True,  # if zero_balance_code never set in this loan, it's active
+            "deal": deal,
         }
         prev_state = cur_state
         prev_age_b = age_b
@@ -307,15 +310,20 @@ def build_aggregates(conn, deals, covariates):
                          prev_ltv_b, prev_mod, pcov["orig_q"])
                 trans[pcell][t] += 1
 
-    # Drop terminated loans from latest_state — only keep currently-active
-    for key in list(latest_state):
-        if key in defaulted or key in paidoff:
-            del latest_state[key]
+    # Tag each loan with its terminal status (used downstream).
+    for key, snap in latest_state.items():
+        if key in defaulted: snap["status"] = "defaulted"
+        elif key in paidoff: snap["status"] = "paidoff"
+        else: snap["status"] = "active"
 
+    n_active = sum(1 for s in latest_state.values() if s["status"] == "active")
+    n_def = sum(1 for s in latest_state.values() if s["status"] == "defaulted")
+    n_paid = sum(1 for s in latest_state.values() if s["status"] == "paidoff")
     logger.info(f"  rows scanned: {rows:,}")
     logger.info(f"  transition cells: {len(trans):,}  paydown cells (perf): "
                 f"{len(paydown_perf):,}  LGD cells: {len(lgd_samples):,}")
-    logger.info(f"  active loans for forecast: {len(latest_state):,}")
+    logger.info(f"  loans tracked: {len(latest_state):,} "
+                f"(active={n_active:,} defaulted={n_def:,} paidoff={n_paid:,})")
     return trans, paydown_perf, paydown_mod, lgd_samples, latest_state
 
 
@@ -577,21 +585,26 @@ def run(carvana_db=CARVANA_DB, dashboard_db=DASHBOARD_DB):
                                        "active_loans": 0, "active_balance": 0.0,
                                        "dq_loss": 0.0, "perf_loss": 0.0,
                                        "dq_balance": 0.0, "perf_balance": 0.0,
-                                       "lookback_predicted_loss": 0.0})
+                                       "lookback_predicted_loss": 0.0,
+                                       "n_loans_total": 0})
     for (deal, asset), loan in latest.items():
-        el, var = forecast_loan(loan, trans, perf_curve, mod_curve, lgd_lookup)
+        d = deal_totals[deal]
+        d["n_loans_total"] += 1
         # Lookback: what would the model have predicted for this loan from age 0
-        # through current age, given its origination covariates? Used to compute
-        # the deal-level calibration factor (realized / lookback_pred).
+        # through current age (or termination age for terminated loans)?
+        # Done for ALL loans — gives full-pool predicted-to-date for the deal.
         lookback_el, _ = forecast_loan(
             loan, trans, perf_curve, mod_curve, lgd_lookup,
             start_state=0, start_age=0, end_age=loan["age_months"])
-        d = deal_totals[deal]
+        d["lookback_predicted_loss"] += lookback_el
+        # Forward forecast only for active loans
+        if loan["status"] != "active":
+            continue
+        el, var = forecast_loan(loan, trans, perf_curve, mod_curve, lgd_lookup)
         d["expected_loss"] += el
         d["variance"] += var
         d["active_loans"] += 1
         d["active_balance"] += loan["balance"]
-        d["lookback_predicted_loss"] += lookback_el
         if loan["state"] == 0:
             d["perf_loss"] += el
             d["perf_balance"] += loan["balance"]
@@ -622,34 +635,26 @@ def run(carvana_db=CARVANA_DB, dashboard_db=DASHBOARD_DB):
         sigma = float(np.sqrt(var)) if var > 0 else 0
 
         # Pool-level early-performance calibration overlay.
-        # Compare realized cum gross losses to date with what the model would
-        # have predicted for ALL the pool's loans from age 0 to now. The
-        # lookback sum we collected only covers currently-active loans, so
-        # scale by (orig_pool / active_balance) to estimate the full-pool
-        # predicted-to-date. Apply the resulting factor to the forward
-        # forecast with guardrails:
-        #   • need ≥6 months of avg history before applying (else too noisy)
-        #   • clamp factor to [0.5, 2.0] to prevent freak early months from
-        #     blowing out the forecast
-        lookback_active = d.get("lookback_predicted_loss", 0)
+        # Compare realized cum gross losses with what the model would have
+        # predicted for ALL the pool's loans from age 0 to now (lookback is
+        # now done over active + terminated loans, so no scaling needed).
+        # Apply the resulting multiplier to the forward forecast.
+        # Guardrails: need ≥6 months avg history; clamp factor to [0.5, 2.0].
+        lookback_full = d.get("lookback_predicted_loss", 0)
         active_bal = d.get("active_balance", 0) or 0
         cum_gross = cert.get("cum_gross_losses") or 0
         orig_bal = deal_orig_bal.get(deal, 0)
         ages = [latest[k]["age_months"] for k in latest if k[0] == deal]
         avg_age = (sum(ages) / len(ages)) if ages else 0
+        n_loans_total = d.get("n_loans_total", 0)
 
         cal_factor = 1.0
         cal_status = "uncalibrated (deal too young or no prior loss data)"
-        if avg_age >= 6 and orig_bal > 0 and active_bal > 0 and lookback_active > 0 and cum_gross > 0:
-            # Scale model's lookback prediction from active-loan basis to
-            # full-pool basis using the active-balance share of original pool
-            # as a proxy. Conservative: undercounts the predicted-cum-gross
-            # for already-terminated loans slightly, which biases the cal_factor
-            # marginally HIGHER (i.e. forecasts adjust UP if we observed worse
-            # than predicted, which is the right direction).
-            scale = orig_bal / max(active_bal, 1.0)
-            model_pred_to_date = lookback_active * scale
-            raw_factor = cum_gross / model_pred_to_date if model_pred_to_date > 0 else 1.0
+        if avg_age >= 12 and lookback_full > 0 and cum_gross > 0:
+            # Direct comparison — lookback_full is the model's predicted
+            # cum gross loss across ALL loans in the deal from origination
+            # through their current age (or termination age for closed loans).
+            raw_factor = cum_gross / lookback_full
             cal_factor = max(0.5, min(2.0, raw_factor))
             cal_status = (f"{cal_factor:.2f}× ({'capped' if cal_factor != raw_factor else 'within bounds'}, "
                           f"raw={raw_factor:.2f})")
@@ -659,6 +664,7 @@ def run(carvana_db=CARVANA_DB, dashboard_db=DASHBOARD_DB):
 
         by_deal[deal] = {
             "active_loans": d.get("active_loans", 0),
+            "n_loans_total": n_loans_total,
             "active_balance": round(d.get("active_balance", 0), 2),
             "avg_age_months": round(avg_age, 1),
             "realized": round(cum_net, 2),
@@ -670,7 +676,7 @@ def run(carvana_db=CARVANA_DB, dashboard_db=DASHBOARD_DB):
             "total_plus_1sd": round(cum_net + ev_calibrated + sigma_calibrated, 2),
             "forecast_only": round(ev_calibrated, 2),
             "forecast_sigma": round(sigma_calibrated, 2),
-            "lookback_predicted_loss": round(lookback_active, 2),
+            "lookback_predicted_loss": round(lookback_full, 2),
             "calibration_factor": round(cal_factor, 4),
             "calibration_status": cal_status,
             "uncalibrated_forecast": round(ev, 2),
