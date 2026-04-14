@@ -93,7 +93,14 @@ function openDb(filePath) {
   const Database = require('better-sqlite3');
   const target = filePath || DEFAULT_DB_PATH;
   const db = new Database(target);
-  db.pragma('journal_mode = WAL');
+  // NOTE: explicitly NOT using WAL mode. The service holds an open DB handle
+  // AND operator scripts (node -e, lib/panel-seed, etc.) hold their own
+  // handles concurrently. With WAL + service restart, uncommitted WAL entries
+  // from the operator side can be lost. journal_mode=DELETE uses SQLite's
+  // standard file-locking, serializes writes across all handles, every COMMIT
+  // lands in the main db file immediately. Tiny perf hit, zero data-loss.
+  db.pragma('journal_mode = DELETE');
+  db.pragma('synchronous = FULL');
 
   // Detect legacy schema: offers table with no run_id column.
   try {
