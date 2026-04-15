@@ -61,3 +61,20 @@ Append an entry when something breaks in a way that wasn't obvious from the code
   1. **Before committing hours of wall-clock to a batch run against a new-to-us external API, run a one-query smoke test and sanity-check the element count against a baseline.** A 15-second curl would have shown 0 elements and saved the full build cycle. Adding this as a general rule in `SKILLS/external-api-smoke-test.md`.
   2. **Treat silent empty responses as failures.** The builder's `collect_snapshot` returns success when the element count is tiny — should warn/halt when historical count is <5% of present-day, because that's a near-certain silent-fail signature.
   3. **For OSM historical data specifically:** the usable paths are (a) Wayback Machine scraping of chain store-locator pages for the ~20 chains we actually care about, (b) Geofabrik planet-file history extracts processed offline with osmium (heavy: ~50GB/snapshot), or (c) chain financial disclosures. Pick (a) for Basic-Fit competitive tracking — aligned with the actual signal we need.
+
+## 2026-04-15 — zram missing from stock DigitalOcean Ubuntu kernel
+
+**Symptom:** `apt install zram-tools && systemctl start zramswap` → service fails with
+`modprobe: FATAL: Module zram not found in directory /lib/modules/6.8.0-107-generic`.
+
+**Root cause:** DO's default Ubuntu 22.04 cloud kernel ships a stripped modules
+set. `zram` isn't in the base `linux-image-*` package — it's in
+`linux-modules-extra-$(uname -r)`, which isn't installed by default.
+
+**Fix:** `apt-get install -y linux-modules-extra-$(uname -r)` then the
+service starts cleanly. `modprobe zram` confirms the module loads.
+
+**Preventive rule:** future droplets that need optional kernel modules
+(zram, nbd, dummy, ipvs, etc.) should install `linux-modules-extra-$(uname -r)`
+before `apt install`-ing the tool that depends on them. Add to the
+new-droplet bootstrap checklist once we have one.
