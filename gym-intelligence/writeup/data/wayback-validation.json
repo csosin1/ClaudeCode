@@ -1,0 +1,172 @@
+[
+  {
+    "chain": "Basic-Fit",
+    "chain_id": 13,
+    "quarter_end": "2022-06-30",
+    "ohsome_locator_url": "https://www.basic-fit.com/en-de/all-clubs",
+    "ohsome_count": 882,
+    "wayback_count": null,
+    "reason": "no capture within +/-45d"
+  },
+  {
+    "chain": "Basic-Fit",
+    "chain_id": 13,
+    "quarter_end": "2022-09-30",
+    "ohsome_locator_url": "https://www.basic-fit.com/en-de/all-clubs",
+    "ohsome_count": 915,
+    "wayback_count": null,
+    "reason": "no capture within +/-45d"
+  },
+  {
+    "chain": "Basic-Fit",
+    "chain_id": 13,
+    "quarter_end": "2022-12-31",
+    "ohsome_locator_url": "https://www.basic-fit.com/en-de/all-clubs",
+    "ohsome_count": 979,
+    "wayback_count": null,
+    "reason": "no capture within +/-45d"
+  },
+  {
+    "chain": "Basic-Fit",
+    "chain_id": 13,
+    "quarter_end": "2023-03-31",
+    "ohsome_locator_url": "https://www.basic-fit.com/en-de/all-clubs",
+    "ohsome_count": 1037,
+    "wayback_count": null,
+    "reason": "no capture within +/-45d"
+  },
+  {
+    "chain": "Basic-Fit",
+    "chain_id": 13,
+    "quarter_end": "2023-06-30",
+    "ohsome_locator_url": "https://www.basic-fit.com/en-de/all-clubs",
+    "wayback_capture_timestamp": "20230705150416",
+    "wayback_capture_url": "https://web.archive.org/web/20230705150416/https://www.basic-fit.com/en-de/all-clubs",
+    "capture_days_from_quarter_end": 5,
+    "wayback_count": 9,
+    "wayback_basis": "counted_list",
+    "wayback_confidence": "medium",
+    "wayback_reason": "Visible club listings counted: Gronau, Oldenburg, Bremen, Gelsenkirchen, Hamburg (upcoming), Köln, Hagen, Bielefeld, Kaiserslautern (upcoming). JSON embed contains only analytics data, no venue list.",
+    "wayback_model": "claude-haiku-4-5-20251001",
+    "slug_hint": null,
+    "ohsome_count": 1101,
+    "delta": 1092,
+    "delta_pct": 12133.33,
+    "sanity": "FAILED_SANITY"
+  },
+  {
+    "chain": "Basic-Fit",
+    "chain_id": 13,
+    "quarter_end": "2023-09-30",
+    "ohsome_count": 1159,
+    "ohsome_locator_url": "https://www.basic-fit.com/en-de/all-clubs",
+    "wayback_count": null,
+    "reason": "SANITY_HALT earlier cell failed sanity"
+  },
+  {
+    "chain": "Basic-Fit",
+    "chain_id": 13,
+    "quarter_end": "2023-12-31",
+    "ohsome_count": 1193,
+    "ohsome_locator_url": "https://www.basic-fit.com/en-de/all-clubs",
+    "wayback_count": null,
+    "reason": "SANITY_HALT earlier cell failed sanity"
+  },
+  {
+    "chain": "Basic-Fit",
+    "chain_id": 13,
+    "quarter_end": "2024-03-31",
+    "ohsome_count": 1245,
+    "ohsome_locator_url": "https://www.basic-fit.com/en-de/all-clubs",
+    "wayback_count": null,
+    "reason": "SANITY_HALT earlier cell failed sanity"
+  },
+  {
+    "chain": "Basic-Fit",
+    "chain_id": 13,
+    "quarter_end": "2024-06-30",
+    "ohsome_count": 1352,
+    "ohsome_locator_url": "https://www.basic-fit.com/en-de/all-clubs",
+    "wayback_count": null,
+    "reason": "SANITY_HALT earlier cell failed sanity"
+  },
+  {
+    "chain": "Basic-Fit",
+    "chain_id": 13,
+    "quarter_end": "2024-09-30",
+    "ohsome_count": 1418,
+    "ohsome_locator_url": "https://www.basic-fit.com/en-de/all-clubs",
+    "wayback_count": null,
+    "reason": "SANITY_HALT earlier cell failed sanity"
+  },
+  {
+    "chain": "Basic-Fit",
+    "chain_id": 13,
+    "quarter_end": "2024-12-31",
+    "ohsome_count": 1476,
+    "ohsome_locator_url": "https://www.basic-fit.com/en-de/all-clubs",
+    "wayback_count": null,
+    "reason": "SANITY_HALT earlier cell failed sanity"
+  },
+  {
+    "chain": "Basic-Fit",
+    "chain_id": 13,
+    "quarter_end": "2025-03-31",
+    "ohsome_count": 1529,
+    "ohsome_locator_url": "https://www.basic-fit.com/en-de/all-clubs",
+    "wayback_count": null,
+    "reason": "SANITY_HALT earlier cell failed sanity"
+  },
+  {
+    "chain": "Basic-Fit",
+    "chain_id": 13,
+    "quarter_end": "2025-06-30",
+    "ohsome_count": 1582,
+    "ohsome_locator_url": "https://www.basic-fit.com/en-de/all-clubs",
+    "wayback_count": null,
+    "reason": "SANITY_HALT earlier cell failed sanity"
+  },
+  {
+    "chain": "Basic-Fit",
+    "chain_id": 13,
+    "quarter_end": "2025-09-30",
+    "ohsome_count": 1658,
+    "ohsome_locator_url": "https://www.basic-fit.com/en-de/all-clubs",
+    "wayback_count": null,
+    "reason": "SANITY_HALT earlier cell failed sanity"
+  },
+  {
+    "chain": "Basic-Fit",
+    "chain_id": 13,
+    "quarter_end": "2025-12-31",
+    "ohsome_count": 1696,
+    "ohsome_locator_url": "https://www.basic-fit.com/en-de/all-clubs",
+    "wayback_count": null,
+    "reason": "SANITY_HALT earlier cell failed sanity"
+  },
+  {
+    "chain": "Basic-Fit",
+    "chain_id": 13,
+    "quarter_end": "2026-03-31",
+    "ohsome_count": 1721,
+    "ohsome_locator_url": "https://www.basic-fit.com/en-de/all-clubs",
+    "wayback_count": null,
+    "reason": "SANITY_HALT earlier cell failed sanity"
+  },
+  {
+    "chain": "Basic-Fit",
+    "chain_id": 13,
+    "quarter_end": "2026-04-12",
+    "source": "live",
+    "ohsome_locator_url": "https://www.basic-fit.com/en-nl/all-clubs",
+    "wayback_count": 253,
+    "wayback_basis": "stated_number",
+    "wayback_confidence": "high",
+    "wayback_reason": "Page explicitly states '253 gyms found' in visible text, confirmed by JSON schema numberOfItems: 253",
+    "wayback_model": "claude-haiku-4-5-20251001",
+    "slug_hint": 4,
+    "ohsome_count": 1153,
+    "delta": 900,
+    "delta_pct": 355.73
+  }
+]
