@@ -338,7 +338,36 @@ Chains: Basic-Fit, clever fit, FitX, plus borderline McFit and Anytime Fitness. 
 
 Germany remains strongly positive: fifty-two percentage points of excess clustering against a now-broader subset. France's non-degenerate reading is a modest +5 points, but the French subset is still missing L'Orange Bleue, KeepCool, and Fitness Park, so the sign of the true figure is not knowable from this row. The Netherlands reads approximately zero; but note that the Dutch subset is missing SportCity, which is Basic-Fit's dominant NL peer — so the zero is a null by construction, not a finding. Belgium and Spain sit near zero in a subset that excludes their respective significant budget peers. Luxembourg remains degenerate at $n = 2$.
 
-**Figure 5.1.** Clean-subset and extended-subset excess clustering by country, shown as a horizontal bar chart with Germany highlighted. Each country's bar is labeled with the number of clean-subset peer gyms; Netherlands, Belgium, Spain, and Luxembourg are shaded gray to indicate that the clean-subset test is degenerate (no peer chains survived the audit in that country). (Image: `fig-5-1-clean-subset-excess.png`, to be rendered separately.)
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 280" style="max-width:640px;width:100%;height:auto;font-family:-apple-system,sans-serif;font-size:12px">
+<text x="320" y="20" text-anchor="middle" font-size="14" font-weight="600">Figure 5.1 — Clean-subset excess clustering by country (percentage points)</text>
+<line x1="330.0" y1="35" x2="330.0" y2="245" stroke="#888" stroke-width="1"/>
+<text x="330.0" y="260" text-anchor="middle" font-size="10" fill="#666">0 (random assortment)</text>
+<text x="90" y="60.66666666666667" text-anchor="end">NL</text>
+<rect x="330.0" y="46.66666666666667" width="0.0" height="20.0" fill="#c62f2f" opacity="0.85"/>
+<text x="336.0" y="60.66666666666667" text-anchor="start" font-weight="600">+0.0 pp</text>
+<text x="565" y="60.66666666666667" font-size="10" fill="#666">n_BF=118, n_clean=118</text>
+<text x="90" y="94.00000000000001" text-anchor="end">BE</text>
+<rect x="330.0" y="80.00000000000001" width="0.0" height="20.0" fill="#c62f2f" opacity="0.85"/>
+<text x="336.0" y="94.00000000000001" text-anchor="start" font-weight="600">+0.0 pp</text>
+<text x="565" y="94.00000000000001" font-size="10" fill="#666">n_BF=63, n_clean=63</text>
+<text x="90" y="127.33333333333334" text-anchor="end">FR</text>
+<rect x="330.0" y="113.33333333333334" width="2.4820143884892087" height="20.0" fill="#2a7f2a" opacity="0.85"/>
+<text x="338.48201438848923" y="127.33333333333334" text-anchor="start" font-weight="600">+0.6 pp</text>
+<text x="565" y="127.33333333333334" font-size="10" fill="#666">n_BF=704, n_clean=708</text>
+<text x="90" y="160.66666666666666" text-anchor="end">ES</text>
+<rect x="330.0" y="146.66666666666666" width="0.0" height="20.0" fill="#c62f2f" opacity="0.85"/>
+<text x="336.0" y="160.66666666666666" text-anchor="start" font-weight="600">+0.0 pp</text>
+<text x="565" y="160.66666666666666" font-size="10" fill="#666">n_BF=134, n_clean=134</text>
+<text x="90" y="194.0" text-anchor="end">LU</text>
+<text x="340.0" y="194.0" fill="#999" font-style="italic">degenerate (n_bf=2, n_clean=2)</text>
+<text x="90" y="227.33333333333334" text-anchor="end">DE</text>
+<rect x="330.0" y="213.33333333333334" width="230.0" height="20.0" fill="#2a7f2a" opacity="0.85"/>
+<text x="566.0" y="227.33333333333334" text-anchor="start" font-weight="600">+55.6 pp</text>
+<text x="565" y="227.33333333333334" font-size="10" fill="#666">n_BF=132, n_clean=565</text>
+<text x="320" y="270" text-anchor="middle" font-size="10" fill="#666">Positive = BF nearest same-tier neighbor is another BF more than random predicts. Clean subset: BF + clever fit + FitX only.</text>
+</svg>
+
+**Figure 5.1.** Clean-subset excess clustering by country, in percentage points above random-assortment baseline. Positive = a Basic-Fit gym's nearest budget-tier neighbor is another Basic-Fit more often than random predicts. Germany is the only country where the clean-subset test is non-degenerate: NL/BE/FR/ES have zero or near-zero clever-fit and FitX presence in our data, so Basic-Fit's nearest clean-subset neighbor is another Basic-Fit by construction (100% observed vs 100% expected = zero excess). Luxembourg has only 2 BF gyms and no peers. The +55.6 pp Germany figure is the single robust directional finding in the current dataset; every other country awaits the remediation in Chapter 6. Computed from `/opt/gym-intelligence-preview/gyms.db` `locations` table, 2026-04-15.
 
 ## Directional reading
 
