@@ -1,6 +1,6 @@
 # Gym Intelligence — Project State
 
-_Last updated: 2026-04-15 ~04:25 UTC by Gym Intelligence session (slug: gym-intelligence)_
+_Last updated: 2026-04-15 ~04:35 UTC by Gym Intelligence session (slug: gym-intelligence). Backfill 12/16 complete; Figure 5.1 now embedded as inline SVG in thesis.md and PDF._
 
 ## Current focus
 
