@@ -1,76 +1,84 @@
-# Basic-Fit Cluster Strategy — Hypothesis Test Plan (v2)
+# Basic-Fit Cluster Strategy — Hypothesis Test Plan (v3)
 
-_Drafted 2026-04-15 by Gym Intelligence session. Revised after user feedback flagged that raw density metrics are muddled by population + transit heterogeneity. Awaiting user "go" on the Voronoi approach below._
+_Drafted 2026-04-15 by Gym Intelligence session. Revised after user sharpened scope to industry-structure test only; white-space analysis deferred as a follow-up project._
 
 ## The hypothesis (user, as of 2026-04-15)
 
-> Consumers in low-end gyms choose on **good-enough × price × proximity** — proximity matters most. Basic-Fit exploits this by building catchments and saturating them with enough density that *parallel-tier* competitors can't profitably enter. Amenity-rich (pool/tennis), niche (Pilates, cycling), and premium operators compete on different axes and remain viable alongside Basic-Fit.
->
-> **Sharper form:** in a uniform-population / uniform-transport world, gym spacing *within a tier* should be roughly constant — once a budget gym covers the population within its reach, no second budget gym opens nearby. Real-world population density and transit muddle raw-distance measurements, so the test has to normalize for both.
+Consumers in low-end gyms choose on **good-enough × price × proximity** — proximity matters most. Basic-Fit exploits this by building catchments and saturating them with enough density that parallel-tier competitors can't profitably enter. Amenity-rich, niche, and premium operators compete on different axes and remain viable alongside Basic-Fit.
 
-## The sharpened testable claim
+Refined: in a uniform-population / uniform-transport world, gym spacing *within a tier* should be roughly constant. Saturation is invisible with raw distance but visible with two cleaner signatures:
 
-**Per-tier catchment populations are tightly distributed in mature markets and loose in new ones.**
+1. **Spacing tightness:** distance between each gym and its nearest same-tier gym should cluster in a "not too close, not too far" band (saturation signature).
+2. **Chain clustering:** when a Basic-Fit's nearest same-tier neighbor is another Basic-Fit disproportionately often compared to random assortment, that's Basic-Fit's catchment strategy in action.
 
-Formalised: for each gym *g* of tier *t*, compute C(g,t) = population closer to *g* than to any other tier-*t* gym. The hypothesis predicts:
+## The test — industry-structure analysis
 
-- The distribution of C values *within a tier within a country* is tight (low coefficient of variation) in mature markets.
-- The distribution is loose in new markets where chains are still jostling for position.
-- Different tiers have different C means but each tier's distribution is internally tight.
-- Over time, as Basic-Fit saturates new markets (e.g., DE 2022→2026), that country's budget-tier C-distribution tightens.
+### Quantitative form
 
-## The v2 test — Voronoi weighted by population
+Per country × snapshot_date × tier, compute two numbers:
 
-### Why this shape
-Voronoi-closest-gym is the simplest possible consumer-choice proxy: "you go to the gym closer to you than any other." Weight by population grid to get C(g,t) in people, not km². This folds population density in automatically — dense urban Voronoi cells are small but populous; sparse rural cells are large but sparsely populated; the per-gym "people served" metric normalizes out both.
+1. **Spacing tightness** = coefficient of variation of the distribution of "population-weighted distance to nearest same-tier gym." Low CV = uniformly spaced = saturated. High CV = chaotic = new market.
+2. **Same-chain clustering excess** for the chain under test (Basic-Fit for the headline test; repeatable for others). Formula: `observed P(nearest same-tier gym is same chain) − expected P under random assortment (= chain's share of that tier in that country)`. Expected = 0 under random assortment. Positive excess = clustering.
 
-Transit gets a crude but honest handling: in areas with better transit, people actually travel further, so real catchments are wider than Voronoi-nearest predicts. That shows up as noise in the distribution, not bias — the test looks at *shape* of the distribution, not absolute values.
+Both metrics are scalars per (country, quarter). Two metrics × 6 countries × 16 quarters = 192 data points, easy to chart.
 
-### Concrete pipeline
-Per country × snapshot_date × tier:
-1. Filter `snapshots` to the relevant tier (budget, amenity-rich, niche, premium, public).
-2. Pull lat/lon for those chains from `locations` (joined via `chain_id`).
-3. Compute Voronoi cells using `scipy.spatial.Voronoi` on the gym points (or faster: use a spatial KD-tree and nearest-neighbour lookup on the population grid directly — avoids polygon construction for millions of grid cells).
-4. Load the Eurostat GEOSTAT 1km² population grid for the country.
-5. For each grid cell, find the nearest gym of the tier → sum that cell's population into that gym's C.
-6. Output: distribution of C values per gym in the tier. Compute mean, median, CV (coefficient of variation = stddev / mean), Gini.
+### Coverage-drift immunity
+
+- **Same-chain clustering excess** is a ratio within the same tier and same snapshot, so uniform OSM coverage growth has zero effect on it. If OSM grows from 70% → 95% coverage of budget gyms across all chains equally, both observed and expected shift the same amount and the excess is unchanged.
+- **Spacing tightness CV** is partially self-normalizing (ratio of std to mean) but does shift if coverage improves *differentially* across space (e.g., urban OSM fills in faster than rural). Flag in the validation sidebar; upgrade to isochrones + Eurostat-anchored cells in v4 if the CV signal correlates too neatly with coverage drift.
 
 ### Success criteria
-- **Primary:** in mature markets (NL Basic-Fit territory since ~2004), the budget-tier C-distribution has CV < 0.4 (i.e., most gyms serve a similar number of people within a factor of ~2× of the median).
-- **Contrast:** in new markets (DE Basic-Fit presence since ~2019), budget-tier CV > 0.6.
-- **Tier separation:** budget-tier mean C should differ from niche/premium-tier mean C by > 2× (they're sized for different market widths).
-- **Temporal:** DE budget-tier CV tightens monotonically 2022→2026 (saturation in progress).
 
-Each is a clean eyeball chart. No p-values needed for a thesis-exploration pass.
+- **Excess Basic-Fit→Basic-Fit clustering:** >+20 percentage points in NL today. Weaker (<10) in DE today. DE's excess trends upward monotonically through 2022-2026. All three are eyeball-obvious in the small-multiples chart.
+- **Spacing tightness CV:** NL budget-tier CV < 0.4 today. DE budget-tier CV > 0.6 today, declining >5 pct points over the 16 quarters. NL niche and premium tiers have looser CV than NL budget (different competitive dynamics, as predicted).
+- **Tier contrast:** within NL at t=today, budget-tier excess-clustering >> premium-tier excess-clustering. (Premium gyms don't cluster by chain because they compete on amenities, not proximity.)
 
-## Data requirements
+## Rendering
 
-**Already have:**
-- Gym lat/lon per chain per snapshot_date (after overnight backfill completes).
+One page at `/gym-intelligence/thesis`, three sections stacked:
+
+### Section A — the map (the visual answer)
+
+One small-multiples grid, 6 countries. Per panel: budget-tier gyms dotted, each with a line to its nearest same-tier neighbor. Line color = blue if neighbor is same chain, red if different chain. 5-second glance tells the story: forest of blue in NL = clustering confirmed; mixed red/blue in DE = not yet. Scroll horizontally on mobile.
+
+### Section B — the numbers (the quantitative answer)
+
+Compact table, one row per country, columns:
+
+| Country | BF share of budget tier | Observed P(BF→BF) | Excess clustering | CV of nearest-gym population |
+
+Plus one trend line: excess clustering per country over 16 quarters. DE's line climbing = saturation in progress. NL's line flat and high = already saturated.
+
+### Section C — coverage-quality sidebar (trust validation)
+
+Small collapsible section: OSM-derived Basic-Fit count vs Basic-Fit's investor-published real count, per quarter, per country. Computed percent-coverage trajectory. This contextualizes Section A and B — lets the reader discount any suspicious tightening that correlates with pure coverage improvement.
+
+Data source for ground-truth: Basic-Fit's quarterly investor updates (public, ~15 min of Claude-assisted scraping, ~$0.50). I'll queue this as background work alongside the analysis build.
+
+### What lives on the page vs what doesn't
+
+- **Lives:** the map, the table, the trend line, the coverage sidebar. CSV download button for the raw per-gym computation so user can work with it offline.
+- **Doesn't:** animated quarter-by-quarter maps, interactive filter sliders, full isochrone-based catchments. Each is an upgrade for v4 if v3's directional signal warrants the refinement.
+
+## Deferred (not in scope)
+
+- **White-space analysis.** "Where could a new competitor profitably enter" — reverse-map of the above. Separate follow-up project. Useful if the hypothesis confirms and we want to operationalize the insight; not useful for testing the hypothesis itself.
+- **Finer amenity splits.** Breaking premium into "pool-equipped," "racquet-equipped," "spa-equipped" etc. Worth doing if Section B shows interesting patterns inside the non-budget tiers.
+- **Isochrone-based catchments.** OpenRouteService 15-min walk/cycle/drive polygons instead of Voronoi-nearest. Fixes the rural/urban transit concern. Worth doing if v3's directional signal is ambiguous or if a reader challenges the Voronoi approximation.
+
+## Data we already have
+
+- Gym lat/lon per chain per country (live DB `locations` table).
 - Tier attribution (`competitive_classification`, `price_tier`, `ownership_type`).
+- 16-quarter snapshot time series — **in flight right now**, backfill ~5/16 complete as of this writing, ETA ~3 hours at current pace.
 
-**Need to add:**
-- **Eurostat GEOSTAT 1km² population grid.** Free download, ~300MB for EU-27, one-time. URL: `https://ec.europa.eu/eurostat/web/gisco/geodata/population-distribution/geostat`. Cache on droplet under `/opt/gym-intelligence/data/eurostat_grid_1k_2021.gpkg` (~350MB) or the smaller per-country CSV extracts (~40MB each for our 6 countries; worth per-country to avoid full-EU download).
-- **Python deps:** `geopandas`, `shapely`, `scipy.spatial` (Voronoi/KDTree), `matplotlib` or similar for the output chart. Add to `requirements.txt`.
+## Data we need to add
 
-**Nice-to-have (v3 upgrade, not required for v2):**
-- OpenRouteService isochrones instead of Voronoi. 15-min walk/cycle/drive polygons give real transit-adjusted catchments. Free tier 500/day fits our ~100 competitor-tier gyms; for 30k all-gym coverage we'd need to self-host OSRM or batch it over days. Worth doing only if v2 shows a directional pattern and we want to confirm/quantify it.
-- Amenity/niche-type flags on chains (pool/tennis/Pilates/CrossFit) for finer tier splits. Claude pass on the 99 known competitors (~$0.30) + OSM tag mining for the long tail.
+- **Eurostat GEOSTAT 1km² population grid** for population-weighted distance computation. Free, ~300MB full-EU or ~40MB per country. Download + spatial-join per gym. One-time setup, ~30 min.
+- **Basic-Fit investor data** (for coverage-quality sidebar). Quarterly location counts 2022–2026. Scrape from investor-relations PDFs, one Claude pass, ~$0.50.
 
-## What the first deliverable looks like
+## Effort estimate
 
-One chart per country × tier × most-recent-snapshot — six countries × four tiers = 24 small-multiples on a grid. Each panel: histogram of C values with mean/median/CV annotated. Then one trend chart per country showing budget-tier CV over the 16 snapshot_dates. If the thesis is visible, NL's panel shows a narrow peak, DE shows a broad one, and DE's CV trends downward over time.
+Build: ~3–4 hrs across one Builder dispatch (analysis module + Flask endpoint + minimal mobile-first frontend on the `/thesis` route). Plus ~1 hr for the Eurostat ingestion. Plus ~30 min for Basic-Fit investor scrape. Total: ~half-day after backfill completes.
 
-**Ship this first. Decide on v3 (isochrones + amenity splits) only after looking at v2.**
-
-## What this doesn't resolve
-
-- **Selection vs causation.** Basic-Fit chose where to enter. A tight per-tier CV in NL could reflect their saturation strategy OR it could reflect a long-settled market equilibrium where *any* operator would have landed in similar places. Distinguishing these needs a natural experiment (e.g., a regulation that forced random entry ordering) and is out of scope.
-- **Price-tier fuzz.** We classified price to three bands (budget <€25, mid €25–50, premium >€50). Basic-Fit and clever fit are both "budget" but with real price and amenity differences. Coarse tiering may wash out fine-grained competition dynamics.
-- **Rural/urban transit.** Voronoi-nearest in rural NL (cars, highways) is a different consumer choice than Voronoi-nearest in downtown Amsterdam (bike-5-min). v2 treats both the same. v3 with isochrones fixes this.
-
-## Estimated effort
-
-v2 build: ~3-4 hrs (ingest Eurostat grid, implement Voronoi+KDTree pipeline, render chart). Run: <5 min on the backfilled DB. Review: user looks at the chart and decides whether to commit to v3.
-
-Total to v2 deliverable: ~half day after backfill completes.
+Review: user looks at Section A's map + Section B's numbers on mobile and decides whether the thesis held. If yes, queue the white-space follow-up. If no, the data we now have still produced a real finding (Basic-Fit's position isn't as unassailable as thought) and that's worth knowing too.
