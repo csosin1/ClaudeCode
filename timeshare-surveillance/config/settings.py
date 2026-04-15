@@ -56,7 +56,7 @@ TARGETS = [
 EDGAR_USER_AGENT = "CAS Investment Partners research@casinvestmentpartners.com"
 EDGAR_RATE_LIMIT_PER_SEC = 8
 FILING_TYPES = ["10-K", "10-Q"]
-LOOKBACK_FILINGS = 25
+LOOKBACK_FILINGS = 45  # HGV has 38 total 10-K+10-Q since 2017 spinoff; 45 leaves headroom
 
 # ----- Anthropic -----
 
