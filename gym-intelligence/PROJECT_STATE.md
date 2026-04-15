@@ -1,6 +1,10 @@
 # Gym Intelligence — Project State
 
-_Last updated: 2026-04-15 ~04:35 UTC by Gym Intelligence session (slug: gym-intelligence). Backfill 12/16 complete; Figure 5.1 now embedded as inline SVG in thesis.md and PDF._
+_Last updated: 2026-04-15 ~05:50 UTC by Gym Intelligence session (slug: gym-intelligence). Backfill **complete (16/16, 0 failures)**. Time-series artifact saved at `gym-intelligence/writeup/data/clean-subset-timeseries.json`. Figure 5.1 already embedded as inline SVG in shipped thesis._
+
+## Finding from completed backfill (not yet surfaced in thesis; awaiting user review)
+
+Germany clean-subset BF share trajectory 2022→2026 is monotonic and meaningful: 18.5% → 23.8%. Raw counts: BF +92% (71→136), clever fit +26% (275→346), FitX +151% (37→93). Basic-Fit is gaining share of the parallel-budget tier we trust. This is directionally consistent with the hypothesis but does not prove clustering — clustering requires per-gym lat/lon over time, which the `snapshots` table aggregates away. Re-collection with per-gym history added to the chapter-6 remediation shopping list (in the artifact's `caveat` field).
 
 ## Current focus
 
