@@ -46,10 +46,14 @@ def load_html(issuer, accession):
     if not row or not row[0]:
         return None, 'no-servicer-cert-url'
     p = cache_path(row[0], cache_dir)
-    if not os.path.exists(p):
-        return None, f'cache-miss'
-    with open(p, 'r', errors='replace') as f:
-        return f.read(), None
+    import gzip as _gzip
+    if os.path.exists(p + '.gz'):
+        with _gzip.open(p + '.gz', 'rt', errors='replace') as f:
+            return f.read(), None
+    if os.path.exists(p):
+        with open(p, 'r', errors='replace') as f:
+            return f.read(), None
+    return None, 'cache-miss'
 
 # Per-metric label patterns. First match wins. Carvana labels listed first
 # (more recent format dominates the sample).

@@ -1,12 +1,38 @@
 """SEC EDGAR API client with rate limiting and retry logic."""
 
 import os
+import gzip
 import time
 import logging
 import requests
 from typing import Optional
 
 from carmax_abs.config import HEADERS, REQUEST_DELAY
+
+
+def _open_cache_for_read(path: str, binary: bool = False):
+    """Open a cache entry for reading. Prefer the .gz form, fall back to legacy
+    uncompressed file if present. Returns an open file handle or None."""
+    gz = path + ".gz"
+    if os.path.exists(gz):
+        return gzip.open(gz, "rb" if binary else "rt", errors=None if binary else "replace")
+    if os.path.exists(path):
+        return open(path, "rb" if binary else "r", errors=None if binary else "replace")
+    return None
+
+
+def _write_cache_atomic(path: str, data, binary: bool = False) -> None:
+    """Write a cache entry as gzip atomically: tmp → fsync → rename."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    final = path + ".gz"
+    tmp = final + ".tmp"
+    if binary:
+        with gzip.open(tmp, "wb") as f:
+            f.write(data)
+    else:
+        with gzip.open(tmp, "wt", errors="replace") as f:
+            f.write(data)
+    os.replace(tmp, final)
 
 logger = logging.getLogger(__name__)
 
@@ -113,24 +139,20 @@ def _cache_path(url: str) -> str:
 def download_document(url: str) -> Optional[str]:
     """Download a document (HTML, XML, etc.) from SEC EDGAR.
 
-    Caches locally so we don't re-download on reingest.
-    Returns the text content of the document.
+    Caches locally as gzip so we don't re-download on reingest. Reads
+    legacy uncompressed entries transparently.
     """
-    # Check cache first
     cache = _cache_path(url)
-    if os.path.exists(cache):
-        logger.debug(f"Cache hit: {cache}")
-        with open(cache, "r", errors="replace") as f:
-            return f.read()
+    fh = _open_cache_for_read(cache, binary=False)
+    if fh is not None:
+        with fh:
+            return fh.read()
 
     logger.info(f"Downloading document: {url}")
     resp = fetch_url(url)
     if resp:
-        # Save to cache
-        os.makedirs(CACHE_DIR, exist_ok=True)
-        with open(cache, "w", errors="replace") as f:
-            f.write(resp.text)
-        logger.debug(f"Cached: {cache}")
+        _write_cache_atomic(cache, resp.text, binary=False)
+        logger.debug(f"Cached: {cache}.gz")
         return resp.text
     return None
 
@@ -138,20 +160,18 @@ def download_document(url: str) -> Optional[str]:
 def download_document_bytes(url: str) -> Optional[bytes]:
     """Download a document as raw bytes from SEC EDGAR.
 
-    Caches locally so we don't re-download on reingest.
-    Returns the raw bytes content of the document.
+    Caches locally (gzip-compressed) keyed by `<path>.bin`. Reads
+    legacy uncompressed entries transparently.
     """
     cache = _cache_path(url) + ".bin"
-    if os.path.exists(cache):
-        logger.debug(f"Cache hit: {cache}")
-        with open(cache, "rb") as f:
-            return f.read()
+    fh = _open_cache_for_read(cache, binary=True)
+    if fh is not None:
+        with fh:
+            return fh.read()
 
     logger.info(f"Downloading document (bytes): {url}")
     resp = fetch_url(url)
     if resp:
-        os.makedirs(CACHE_DIR, exist_ok=True)
-        with open(cache, "wb") as f:
-            f.write(resp.content)
+        _write_cache_atomic(cache, resp.content, binary=True)
         return resp.content
     return None
