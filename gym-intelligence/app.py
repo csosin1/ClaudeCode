@@ -595,6 +595,81 @@ def api_countries():
 
 
 # ---------------------------------------------------------------------------
+# Thesis writeup — markdown → HTML with optional PDF export
+# ---------------------------------------------------------------------------
+_THESIS_MD = Path(__file__).parent / "writeup" / "thesis.md"
+
+_THESIS_HTML_SHELL = """<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{title}</title>
+<style>
+body{{font-family:Georgia,serif;max-width:760px;margin:2rem auto;padding:1rem;line-height:1.65;color:#222;background:#fafaf7}}
+h1,h2,h3,h4{{font-family:-apple-system,Helvetica,sans-serif;color:#111;line-height:1.25}}
+h1{{font-size:1.8rem;border-bottom:2px solid #333;padding-bottom:.4rem;margin-top:2rem}}
+h2{{font-size:1.4rem;margin-top:2rem;border-bottom:1px solid #ccc;padding-bottom:.2rem}}
+h3{{font-size:1.15rem;margin-top:1.5rem}}
+p,li{{font-size:1rem}}
+blockquote{{border-left:4px solid #888;background:#f0ede4;padding:.6rem 1rem;margin:1rem 0;font-size:.95rem;color:#333}}
+code{{background:#eee;padding:.1rem .3rem;border-radius:3px;font-size:.9em}}
+pre code{{display:block;padding:.8rem;overflow-x:auto}}
+table{{border-collapse:collapse;margin:1rem 0;font-size:.92rem;width:100%}}
+th,td{{border:1px solid #bbb;padding:.4rem .6rem;text-align:left}}
+th{{background:#ede9dd}}
+.toolbar{{position:sticky;top:0;background:#fafaf7;padding:.6rem 0;border-bottom:1px solid #ccc;margin-bottom:1rem;display:flex;gap:.6rem;align-items:center;font-family:-apple-system,sans-serif;font-size:.9rem}}
+.toolbar a{{color:#c62f2f;text-decoration:none;font-weight:600;padding:.3rem .7rem;border:1px solid #c62f2f;border-radius:4px}}
+.toolbar a:hover{{background:#c62f2f;color:#fff}}
+.toolbar .meta{{color:#666;margin-left:auto;font-size:.82rem}}
+@media print{{.toolbar{{display:none}}body{{max-width:none;margin:0;padding:0}}}}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" id="MathJax-script" async></script>
+</head><body>
+<div class="toolbar">
+<a href="./thesis.pdf">Download PDF</a>
+<a href="../">← Dashboard</a>
+<span class="meta">Generated {date}</span>
+</div>
+{content}
+</body></html>
+"""
+
+
+def _render_thesis_html():
+    import markdown
+    md = _THESIS_MD.read_text()
+    html = markdown.markdown(md, extensions=["tables", "fenced_code", "toc", "footnotes"])
+    return _THESIS_HTML_SHELL.format(
+        title="Basic-Fit Cluster Strategy — Hypothesis Test",
+        content=html,
+        date=date.today().isoformat(),
+    )
+
+
+@bp.route("/thesis")
+def thesis_page():
+    if not _THESIS_MD.exists():
+        return ("<p>thesis.md not yet deployed.</p>", 503)
+    from flask import Response
+    return Response(_render_thesis_html(), mimetype="text/html")
+
+
+@bp.route("/thesis.pdf")
+def thesis_pdf():
+    if not _THESIS_MD.exists():
+        return ("thesis not ready", 503)
+    from weasyprint import HTML
+    import tempfile
+    html_str = _render_thesis_html().replace(
+        '<a href="./thesis.pdf">Download PDF</a>', ""
+    )
+    pdf_bytes = HTML(string=html_str).write_pdf()
+    buf = io.BytesIO(pdf_bytes)
+    buf.seek(0)
+    return send_file(buf, mimetype="application/pdf", as_attachment=True,
+                     download_name="gym-intelligence-thesis.pdf")
+
+
+# ---------------------------------------------------------------------------
 # Mount blueprint and run
 # ---------------------------------------------------------------------------
 app.register_blueprint(bp, url_prefix=os.environ.get("URL_PREFIX", "/gym-intelligence"))
