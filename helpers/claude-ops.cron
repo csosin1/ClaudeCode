@@ -5,3 +5,5 @@
 */5 * * * * root /usr/local/bin/claude-respawn.sh >/dev/null 2>&1
 # Capacity: every 5 min, write capacity.json + notify on threshold breaches
 */5 * * * * root /usr/local/bin/capacity-check.sh >/dev/null 2>&1
+# Daily reflection reminder at 23:00 UTC
+0 23 * * * root /usr/local/bin/notify.sh "Daily reflection time — reflections/$(date -u +\%Y-\%m-\%d).md" "Platform reflection" default "https://github.com/csosin1/ClaudeCode/tree/main/reflections" >/dev/null 2>&1
