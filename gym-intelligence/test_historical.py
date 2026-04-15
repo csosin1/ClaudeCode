@@ -185,29 +185,57 @@ class CollectSnapshotTest(unittest.TestCase):
         except FileNotFoundError:
             pass
 
-    def _fake_elements(self):
-        # One Basic-Fit node + one Anytime Fitness node, regardless of country.
-        return {
-            "elements": [
-                {
-                    "type": "node", "id": 100, "lat": 52.0, "lon": 4.0,
-                    "tags": {"name": "Basic-Fit Amsterdam", "brand": "Basic-Fit"},
-                },
-                {
-                    "type": "node", "id": 101, "lat": 52.1, "lon": 4.1,
-                    "tags": {"name": "Anytime Fitness Rotterdam",
-                             "brand": "Anytime Fitness"},
-                },
-            ]
-        }
+    def _fake_records(self, country_code: str):
+        """Return records in the shape ohsome_fetch_country produces.
+
+        Two records: one Basic-Fit, one Anytime Fitness. Independent of
+        country — we return the same pair for every country the snapshot
+        collector iterates over.
+        """
+        return [
+            {
+                "osm_id": f"node/100-{country_code}",
+                "name": "Basic-Fit Amsterdam",
+                "brand": "Basic-Fit",
+                "operator": None,
+                "country": country_code,
+                "city": None,
+                "lat": 52.0,
+                "lon": 4.0,
+                "address_full": None,
+                "addr_street": None,
+                "addr_housenumber": None,
+                "addr_postcode": None,
+                "addr_city": None,
+                "addr_country": None,
+                "website": None,
+                "osm_tags": json.dumps({"name": "Basic-Fit Amsterdam", "brand": "Basic-Fit"}),
+            },
+            {
+                "osm_id": f"node/101-{country_code}",
+                "name": "Anytime Fitness Rotterdam",
+                "brand": "Anytime Fitness",
+                "operator": None,
+                "country": country_code,
+                "city": None,
+                "lat": 52.1,
+                "lon": 4.1,
+                "address_full": None,
+                "addr_street": None,
+                "addr_housenumber": None,
+                "addr_postcode": None,
+                "addr_city": None,
+                "addr_country": None,
+                "website": None,
+                "osm_tags": json.dumps({"name": "Anytime Fitness Rotterdam", "brand": "Anytime Fitness"}),
+            },
+        ]
 
     def test_idempotent_overwrite_and_multi_date(self):
-        fake_elements = self._fake_elements()
+        def fake_ohsome_fetch(country_code, as_of, progress_cb=None):
+            return self._fake_records(country_code)
 
-        def fake_query_overpass(*_args, **_kwargs):
-            return fake_elements
-
-        with mock.patch.object(collect, "query_overpass", fake_query_overpass):
+        with mock.patch.object(collect, "ohsome_fetch_country", fake_ohsome_fetch):
             stats1 = collect.collect_snapshot(
                 "2023-03-31",
                 sleep_between_countries=0.0,
@@ -266,30 +294,40 @@ class CollectSnapshotTest(unittest.TestCase):
                 "SELECT COUNT(*) AS c FROM chains"
             ).fetchone()["c"]
 
-        unknown_elements = {
-            "elements": [
+        def _rec(country, osm_id, name, brand=None, lat=52.0, lon=4.0):
+            return {
+                "osm_id": osm_id,
+                "name": name,
+                "brand": brand,
+                "operator": None,
+                "country": country,
+                "city": None,
+                "lat": lat,
+                "lon": lon,
+                "address_full": None,
+                "addr_street": None,
+                "addr_housenumber": None,
+                "addr_postcode": None,
+                "addr_city": None,
+                "addr_country": None,
+                "website": None,
+                "osm_tags": json.dumps({"name": name, **({"brand": brand} if brand else {})}),
+            }
+
+        def fake_ohsome_fetch(country_code, as_of, progress_cb=None):
+            return [
                 # Known chain — matches "Basic-Fit" in seeded chains table.
-                {
-                    "type": "node", "id": 200, "lat": 52.0, "lon": 4.0,
-                    "tags": {"name": "Basic-Fit Utrecht", "brand": "Basic-Fit"},
-                },
-                # Unknown one-off gym — must be skipped, not inserted as a chain.
-                {
-                    "type": "node", "id": 201, "lat": 52.1, "lon": 4.1,
-                    "tags": {"name": "Gertjan's Garage Gym"},
-                },
+                _rec(country_code, f"node/200-{country_code}",
+                     "Basic-Fit Utrecht", brand="Basic-Fit"),
+                # Unknown one-off gym — must be skipped.
+                _rec(country_code, f"node/201-{country_code}",
+                     "Gertjan's Garage Gym", lat=52.1, lon=4.1),
                 # Another unknown — also skipped.
-                {
-                    "type": "node", "id": 202, "lat": 52.2, "lon": 4.2,
-                    "tags": {"name": "Sportschool De Randweg"},
-                },
+                _rec(country_code, f"node/202-{country_code}",
+                     "Sportschool De Randweg", lat=52.2, lon=4.2),
             ]
-        }
 
-        def fake_query_overpass(*_args, **_kwargs):
-            return unknown_elements
-
-        with mock.patch.object(collect, "query_overpass", fake_query_overpass):
+        with mock.patch.object(collect, "ohsome_fetch_country", fake_ohsome_fetch):
             stats = collect.collect_snapshot(
                 "2024-06-30",
                 sleep_between_countries=0.0,

@@ -226,6 +226,69 @@ def run_backfill(
     return summary
 
 
+# --- Smoke test --------------------------------------------------------------
+
+# Lower bounds for a single-quarter smoke run against OHSOME. These are
+# deliberately conservative (actual 2025-04-01 numbers across 6 countries
+# are >> these) so a genuine pass signals the data source is producing
+# usable data, while a fail is a loud "OHSOME is returning nothing".
+_SMOKE_MIN_CHAINS = 30
+_SMOKE_MIN_LOCATIONS = 500
+_SMOKE_DATE = "2025-04-01"
+
+
+def _run_smoke_test() -> int:
+    """Collect one quarter via OHSOME and gate on conservative thresholds.
+
+    Prints the stats dict as JSON and exits non-zero if either threshold
+    fails. This is the operator-visible "is OHSOME actually producing data"
+    check before the long 16-quarter backfill runs.
+    """
+    print(json.dumps({"smoke_test": "start", "date": _SMOKE_DATE}))
+
+    def progress(msg: str):
+        # Verbose: every step the collector logs goes to stdout for humans.
+        print(msg, flush=True)
+
+    init_db()
+    t0 = time.monotonic()
+    try:
+        # Re-collect even if already present so the smoke is meaningful.
+        with get_db() as conn:
+            conn.execute("DELETE FROM snapshots WHERE snapshot_date = ?", (_SMOKE_DATE,))
+        stats = collect_snapshot(_SMOKE_DATE, progress_cb=progress)
+    except Exception as e:
+        wall = time.monotonic() - t0
+        print(json.dumps({
+            "smoke_test": "failed",
+            "date": _SMOKE_DATE,
+            "error": repr(e),
+            "wall_seconds": round(wall, 2),
+        }))
+        return 1
+
+    failures: list[str] = []
+    if stats.get("chains_matched", 0) < _SMOKE_MIN_CHAINS:
+        failures.append(
+            f"chains_matched={stats.get('chains_matched')} < min {_SMOKE_MIN_CHAINS}"
+        )
+    if stats.get("locations_seen", 0) < _SMOKE_MIN_LOCATIONS:
+        failures.append(
+            f"locations_seen={stats.get('locations_seen')} < min {_SMOKE_MIN_LOCATIONS}"
+        )
+
+    print(json.dumps({
+        "smoke_test": "failed" if failures else "ok",
+        "stats": stats,
+        "failures": failures,
+        "thresholds": {
+            "min_chains_matched": _SMOKE_MIN_CHAINS,
+            "min_locations_seen": _SMOKE_MIN_LOCATIONS,
+        },
+    }))
+    return 2 if failures else 0
+
+
 def _cli():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--years", type=int, default=4,
@@ -247,7 +310,20 @@ def _cli():
     )
     p.add_argument("--date", type=str, default=None,
                    help="Collect a single YYYY-MM-DD snapshot and exit.")
+    p.add_argument(
+        "--smoke-test",
+        action="store_true",
+        help=(
+            f"Collect a single quarter ({_SMOKE_DATE}) via OHSOME and verify "
+            f">={_SMOKE_MIN_CHAINS} chains / >={_SMOKE_MIN_LOCATIONS} "
+            "locations. Exits non-zero on threshold fail. Use before the "
+            "full backfill to validate the data source."
+        ),
+    )
     args = p.parse_args()
+
+    if args.smoke_test:
+        sys.exit(_run_smoke_test())
 
     summary = run_backfill(
         years=args.years,

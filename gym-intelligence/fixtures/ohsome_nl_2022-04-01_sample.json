@@ -1,0 +1,84 @@
+{
+  "attribution": {
+    "url": "https://ohsome.org/copyrights",
+    "text": "© OpenStreetMap contributors"
+  },
+  "apiVersion": "1.10.3",
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {"type": "Point", "coordinates": [4.88, 52.37]},
+      "properties": {
+        "@osmId": "way/636824780",
+        "@snapshotTimestamp": "2022-04-01T00:00:00Z",
+        "brand": "Basic-Fit",
+        "brand:wikidata": "Q40165577",
+        "leisure": "fitness_centre",
+        "name": "Basic-Fit",
+        "building": "yes",
+        "addr:city": "Amsterdam",
+        "addr:street": "Damrak",
+        "addr:housenumber": "70",
+        "addr:postcode": "1012 LM"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {"type": "Point", "coordinates": [5.30, 52.18]},
+      "properties": {
+        "@osmId": "way/273587612",
+        "@snapshotTimestamp": "2022-04-01T00:00:00Z",
+        "leisure": "fitness_centre",
+        "name": "INSPIRE Fitness",
+        "building": "yes"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {"type": "Point", "coordinates": [4.90, 52.35]},
+      "properties": {
+        "@osmId": "relation/3729149",
+        "@snapshotTimestamp": "2022-04-01T00:00:00Z",
+        "leisure": "fitness_centre",
+        "building": "yes",
+        "type": "multipolygon"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {"type": "Point", "coordinates": [4.48, 51.92]},
+      "properties": {
+        "@osmId": "node/4567891234",
+        "@snapshotTimestamp": "2022-04-01T00:00:00Z",
+        "amenity": "gym",
+        "name": "Anytime Fitness Rotterdam",
+        "brand": "Anytime Fitness",
+        "addr:city": "Rotterdam"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {"type": "Point", "coordinates": [5.12, 52.09]},
+      "properties": {
+        "@osmId": "way/9988776655",
+        "@snapshotTimestamp": "2022-04-01T00:00:00Z",
+        "leisure": "sports_centre",
+        "name": "Sportcentrum Galgenwaard",
+        "sport": "multi"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {"type": "Point", "coordinates": [4.88, 52.37]},
+      "properties": {
+        "@osmId": "way/636824780",
+        "@snapshotTimestamp": "2022-04-01T00:00:00Z",
+        "brand": "Basic-Fit",
+        "leisure": "fitness_centre",
+        "name": "Basic-Fit",
+        "building": "yes"
+      }
+    }
+  ]
+}

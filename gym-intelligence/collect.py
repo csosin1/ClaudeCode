@@ -17,6 +17,7 @@ from db import (
     setup_logging,
     update_chain_location_counts,
 )
+from ohsome_fetch import ohsome_fetch_country
 
 logger = setup_logging("collect")
 
@@ -488,8 +489,8 @@ def collect_snapshot(
     as_of: str,
     progress_cb=None,
     mirrors: list[str] | None = None,
-    sleep_between_countries: float = 30.0,
-    sleep_between_queries: float = 15.0,
+    sleep_between_countries: float = 0.0,
+    sleep_between_queries: float = 0.0,
 ) -> dict:
     """Collect a single historical snapshot for `as_of` (YYYY-MM-DD).
 
@@ -497,6 +498,13 @@ def collect_snapshot(
     WITHOUT touching the `locations` table (which represents the present-day
     canonical set). Chain matching uses the *current-day* `chains` table so
     historical counts roll up into today's canonical chain set.
+
+    **Data source:** OHSOME API (https://api.ohsome.org/v1/). Overpass attic
+    queries silently return zero elements from the public mirrors (confirmed
+    broken 2026-04), so historical collection is now powered by OHSOME,
+    which is the documented purpose-built alternative. The `mirrors` and
+    `sleep_between_queries` kwargs are retained for backward-compat with
+    existing callers but are ignored — OHSOME owns its own rate-limiting.
 
     Idempotent: re-running for the same `as_of` deletes existing rows for
     that date before inserting. Running for a *different* date leaves prior
@@ -521,7 +529,11 @@ def collect_snapshot(
         if progress_cb:
             progress_cb(msg)
 
-    mirror_list = mirrors if mirrors is not None else OVERPASS_MIRRORS
+    # `mirrors` and `sleep_between_queries` retained for call-site compat
+    # but have no effect now that OHSOME is the data source. OHSOME has
+    # a single endpoint and handles its own rate-limiting inside
+    # ohsome_fetch_country.
+    _ = mirrors, sleep_between_queries
     start = time.monotonic()
     init_db()
 
@@ -535,22 +547,20 @@ def collect_snapshot(
     country_list = list(COUNTRY_BBOXES.keys())
     for i, country_code in enumerate(country_list, 1):
         cname = COUNTRY_NAMES.get(country_code, country_code)
-        log(f"[{as_of}] Collecting {cname} ({i}/{len(country_list)})...")
+        log(f"[{as_of}] Collecting {cname} ({i}/{len(country_list)}) via OHSOME...")
         try:
-            locations = collect_country(
+            locations = ohsome_fetch_country(
                 country_code,
-                progress_cb=progress_cb,
                 as_of=as_of,
-                mirrors=mirror_list,
-                sleep_between_queries=sleep_between_queries,
+                progress_cb=progress_cb,
             )
             per_country_locations[country_code] = locations
             countries_collected.append(country_code)
             total_elements_seen += len(locations)
             log(f"  [{as_of}] {cname}: {len(locations)} gyms")
-
-            if i < len(country_list) and sleep_between_countries > 0:
-                time.sleep(sleep_between_countries)
+            # No manual sleep here — ohsome_fetch_country already inserts a
+            # 1.2s polite pause after each call to respect OHSOME's 1 req/s
+            # rate-limit guidance.
         except Exception as e:
             log(f"  [{as_of}] {cname}: FAILED — {e}")
             logger.error("Snapshot %s country %s failed: %s", as_of, country_code, e)
