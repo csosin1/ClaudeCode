@@ -1,37 +1,25 @@
 # Gym Intelligence — Project State
 
-_Last updated: 2026-04-14 end-of-day by Gym Intelligence session (slug: gym-intelligence)_
+_Last updated: 2026-04-15 ~00:00 UTC by Gym Intelligence session (slug: gym-intelligence)_
 
 ## Current focus
-**Queued for tomorrow: build a historical time-series of chain location counts over the last 4 years.** User approved the plan tonight ("Do the last 4 yrs quarterly") but the build did not start — stopped at the end-of-day checkpoint. Scope is locked, files identified, ready to dispatch to Builder(s).
+**Historical backfill approach failed — Overpass attic unusable for our query shape.** Built the 4-year quarterly historical pipeline (commits 50c727f + 2a7e2ad), started the real collection, got 1 quarter in (2022-06-30) that returned only 256 locations across 6 countries vs 41,754 present-day — a ~99% data loss that the trend column on preview exposed immediately. Diagnosed via four direct Overpass tests: the main `overpass-api.de` mirror accepts `[date:"..."]` syntactically (200 OK) but silently returns 0 elements for bbox+tag queries at ANY date, including 2026. A plain (non-attic) query to the same mirror returns the expected thousands. The pipeline itself is correct; the external API doesn't support our query shape. Preview DB cleaned (bad 2022 rows wiped; trend column back to hidden since only 1 snapshot_date remains). Live was never touched. Full post-mortem in `/opt/site-deploy/LESSONS.md` entry 2026-04-14.
 
-**Shipped earlier today (live as of ~05:00 UTC):**
-- Competitors-only toggle on Market tab (default ON) — /api/chains-table?show=all opens the full 31k view.
-- Reclassify of 145 unknowns → 99 direct_competitors (was 45), 60 OSM-noise in `not_a_chain`, 23 still unknown.
-- Ownership axis (private/public/unknown) added to schema + backfilled on 308 classified ≥4-loc chains → 184 private / 87 public / 37 unknown.
-- Public pill + Municipal competitors counter on the Market tab.
-- Promoted with rollback tag `rollback-gym-20260414-045932`; previous live DB backed up at `/opt/gym-intelligence/gyms.db.pre-promote-20260414-050012`.
+**Awaiting user decision on the alternative data source.**
 
 ## Last decisions
-- **Use Overpass attic queries for history, not a separate data source.** Same free API already in `collect.py`; adds one `[date:"YYYY-MM-DDTHH:MM:SSZ"]` header. No new infra, no API cost. Noise from OSM tagging-lag is acceptable within the 4-year window (~85-95% coverage in our six countries).
-- **4 years, quarterly end-dates** — 16 total snapshot_dates. 15 historical to collect (2022-06-30 through 2026-03-31); present-day snapshot from 2026-04-12 already exists in DB.
-- **Chain matching uses the current-day `chains` table** — historical gyms of chains we don't know today get dropped. This is intentional: a now-defunct obscure chain adds noise, not signal, to Basic-Fit's competitive view.
-- **Altafit flagged as municipal competitor is probably wrong but was shipped as-is.** User said "ship it" knowing this. Flip to private or re-run municipal detection on the competitor set in a follow-up.
+- **Abandon Overpass attic as the historical data source.** The attic code in `collect.py`/`historical_backfill.py` stays in the repo because the code is correct — the issue is Overpass infrastructure, not our implementation. It won't be invoked again until we have a history-enabled mirror we've validated.
+- **Recommended next source: Wayback Machine store-locator scraping.** Archive.org stores Basic-Fit/clever fit/Fitness Park/etc. store-locator pages historically. For our top ~20 chains by location count × 16 quarters = ~1,600 archive fetches, ~1-2 hrs wall-clock, no API cost. Gives authoritative per-chain numbers (better than OSM even where OSM works), limited to chains with machine-readable locators (most big ones do).
+- **Competitors-only toggle (default ON), ownership pills, Municipal competitors counter, 99-direct-competitor reclassification — all live as of commit 10639b9 / rollback tag rollback-gym-20260414-045932.** Promote completed at ~05:00 UTC. Live DB is the superset of preview (same data, no ownership regressions).
+- **Live venv orphan purge shipped (commit 93cc898).** `/opt/gym-intelligence` went 580MB → 30MB. Deploy script now idempotently purges Streamlit-era packages on every run.
+- **Altafit is flagged municipal competitor in live — almost certainly wrong** (it's a private Spanish budget chain). User accepted "ship it" knowing this; pending manual flip or re-run.
 
 ## Open questions
-- **Wall-clock budget for the 4-year backfill.** Overpass attic queries are ~2-3× slower than present-day; 15 snapshots × 6 countries × 3 tag-types could be 6-12 hours. Some Overpass mirrors refuse attic queries or heavily rate-limit them — will need mirror-failover logic same as the present-day collector. Fine for an overnight background run.
-- **Dashboard visualization format.** Could be (a) a trend column on the Market tab per competitor (sparkline + absolute Δ), (b) a dedicated Trends tab, or (c) Δ-YoY badge next to location count. No user preference captured yet; Builder should propose the lightest one and let QA show it.
-- **23 chains still `unknown` in classification** — waiting on Anthropic's web_search tool capacity to clear before retrying. Plain-model retry already done; further progress needs live web lookups.
+- **Which alternative historical source does the user want?** Wayback (my recommendation), planet-file history dump (heavy), or chain financial disclosures (authoritative but spotty coverage). Needs one answer before I dispatch builders.
+- **Droplet capacity still warn.** Swap 69.7%, disk 78.5% as of the evening check. The venv purge reclaimed 550MB disk on live but swap usage persists and belongs to a different process (not ours). Separate RCA or a resize is the permanent fix.
+- **23 chains still `unknown` classification** — awaiting Anthropic's web_search tool capacity to clear before retrying.
 
 ## Next step
-Dispatch two Builder subagents in parallel (per the Parallel Builders rule):
+**Await user direction on historical-data source.** When they say Wayback: dispatch a single Builder (not parallel — this is sequential Archive.org fetch + parse, single file `gym-intelligence/wayback_scraper.py`), wire results into the same `snapshots` table (schema already supports it), let the existing trend column render them. If user instead says "skip historical, focus elsewhere" — close out the feature, leave the trend column code hidden, update PROJECT_STATE with the close.
 
-1. **Backend builder** touches only: `gym-intelligence/collect.py` (add `--as-of YYYY-MM-DD` flag, inject `[date:"..."]` header into each Overpass query, write rows to `snapshots` with matching date), `gym-intelligence/historical_backfill.py` (new runner that iterates the 15 quarter-end dates and calls the collector), unit tests in `gym-intelligence/test_historical.py`.
-
-2. **Frontend builder** touches only: `gym-intelligence/app.py` (new `/api/chain-history?chain=...&country=...` endpoint that reads from `snapshots`), `gym-intelligence/templates/index.html` (trend sparkline or Δ-YoY column on the Market tab, hooked off the existing chain-table row renderer), Playwright assertions in `tests/gym-intelligence.spec.ts` guarded by `base.label === 'preview'`.
-
-After both return: single Reviewer pass on the combined diff, merge to main, run `historical_backfill.py` in background (foreground Builder keeps only unit tests with Overpass mocked; the real 6-12h collection happens after code ships to preview). Share preview URL when first 2-3 quarters have landed so user has something to look at even before the full run completes.
-
-No code changes uncommitted tonight; main is at commit 10639b9, pushed.
-
-**Memory hygiene 2026-04-14 (capacity URGENT response):** found live venv carried ~420MB of Streamlit-era orphans (pyarrow 149M, pandas 73M, plotly 68M, numpy+libs 70M, streamlit 29M, pydeck 15M, pillow.libs 14M) not imported anywhere since the Flask+vanilla-JS rewrite in commit ee243ee. Shipped: uninstalled them on live (/opt/gym-intelligence went 580M → 30M, -95%), gzipped the pre-promote DB backup (27M → 7M), VACUUM'd both DBs (28.5M → 23.9M each, 798 freelist pages reclaimed), added an idempotent `pip uninstall` of the same orphan list to `deploy/gym-intelligence.sh` so the pattern can't recur. RSS: unchanged (live 16MB, preview 51MB — still idle since app code is already lean). Deferred as separate investigation: why preview RSS is 3× live on the same codebase (fresh-start process, identical DB, identical code per rsync); likely worth ~35MB/process if root-caused. Also deferred: `/api/export` endpoint at app.py:476 builds a 4-table ZIP in memory via fetchall — big temporary allocation but admin-only and rarely hit; streaming refactor is out of easy-wins scope.
+No uncommitted code in worktree. Main is at commit 50c727f (backfill build + fix) + the pending LESSONS.md/state-file updates from this session. Pending commit + push will land those.
