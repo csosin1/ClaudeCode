@@ -13,7 +13,13 @@ _Last updated: 2026-04-14 (pre-resize checkpoint)_
 
 **PK-collision follow-up: RESOLVED** (`40b815d`). Both parsers now resolve (deal, distribution_date) PK collisions explicitly: amendments win over plain filings, later filing_date wins ties, and a 30-day stale-header guard skips writes when extracted distribution_date disagrees egregiously with filing_date. All 26 orphan filings re-ingested: **26 → 0**. Collision decisions logged to `<issuer>_abs/db/ingestion_decisions.log` for future audit. No regressions detected.
 
-**All data issues closed.** Data trusted, live dashboard updated, 7 commits of fixes in this session.
+**All prior data issues closed.** Data trusted, live dashboard updated, 7 commits of fixes in this session.
+
+**CarMax loan-level ingest in progress (resumed after OOM):**
+- 11 of 37 target deals have loan-level data (2017-1 through 2019-3). 909K loans so far.
+- OOM killed first run at 04:40 UTC mid-2019-4 (Python hit 2.5GB RSS). Relaunched for remaining 26 deals (2019-4 through 2026-1) with 2-sec breather between deals; fresh Python subprocess per deal bounds the heap.
+- If OOM recurs, switch ABS-EE XML parser to `iterparse` streaming to reduce peak memory.
+- Full scope reminder: after ingest done → fill missing CarMax renderer pieces (Cash Waterfall + Recovery sub-tabs) → prospectus parser for `deal_terms` → comprehensive QA audit (MAX_ITERATIONS=100) → unified Markov rebuild (Carvana Prime + CarMax loan-equal-weighted; separate Carvana N model) → landing-page residual-economics tab with writeup → deploy → final QA (MAX_ITER=10).
 
 ## Memory hygiene 2026-04-14
 Found 2 wins: (1) `export_dashboard_db.py` in both issuers materialized 417k-row `loans` table via `fetchall()` → converted to chunked cursor iteration (10k/batch). Peak RSS on export dropped to ~38MB. (2) WAL checkpoint on both 3GB source DBs — already clean (0 frames). Deferred as separate tasks: `.copy()` chains in `generate_dashboard.py` (intentional chart-data isolation, needs careful audit); `pd.read_sql_query` full-table load in `default_model.py:206` (417k-row loan frame — chunksize conversion is a small refactor, not hygiene); no `lru_cache` anywhere (cache-layer add, out of scope).
