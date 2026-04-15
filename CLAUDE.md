@@ -59,6 +59,9 @@ Situational skills (long-running jobs, secrets, deploy-and-rollback, worktrees, 
 ## Autonomy
 Do the work. Don't ask the user to run commands, read logs, or verify URLs. Escalate only after genuinely different approaches have failed. Never say "it should work" — verify, then share the link.
 
+## LLMs for Judgment, Code for Computation
+If the operation has a precise specification — sum a column, parse a known format, hit a known endpoint, apply a defined formula — write code. If it requires contextual judgment — classify ambiguous input, extract from narrative, pick among options where tradeoffs aren't numerical — use an LLM. A deterministic step inside a prompt is a tax; an LLM call inside a deterministic pipeline is a fragility. See `SKILLS/llm-vs-code.md`.
+
 ## Restore, Then Root-Cause
 When something breaks: patch fast to restore service if needed — then **always** RCA and fix the real cause. Never stop at the restore. Every incident ends with a `LESSONS.md` entry (root cause + fix + preventive rule) committed alongside the permanent fix. See `SKILLS/root-cause-analysis.md`.
 
