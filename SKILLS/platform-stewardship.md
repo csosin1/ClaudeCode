@@ -59,13 +59,24 @@ Not every SKILL gets a CLAUDE.md pointer. The default is NO pointer; SKILLS are 
 
 Everything else (secrets, deploys, worktrees, multi-project windows, new-project setup) lives in SKILLS only and is discovered when needed.
 
-### 3. Soft size cap with escalating review
+### 3. Paired-edit review — every CLAUDE.md change carries a trim
 
-- **≤100 lines**: target. Current state. Healthy.
-- **~110 lines**: flag in the next stewardship write-up. Mention the bloat.
-- **~120 lines**: mandatory slim-down pass BEFORE shipping any other CLAUDE.md edit. Find a section to compress or move.
+Line counts are a dumb proxy; a long CLAUDE.md of strictly always-on rules is fine, and a short one padded with situational pointers is bloat. The real enforcement is quality, applied every time something changes.
 
-Agents observing CLAUDE.md over cap either ship the slim-down themselves or file a task for the orchestrator. "It's not my job to clean CLAUDE.md" is not a valid excuse — stewardship is everyone's.
+**Rule:** every CLAUDE.md edit ships with a review pass over the *existing* sections. Before committing your new edit, run the thinness gate (Mechanism 1) on at least three current sections picked at random or by "oldest untouched." Find at least one thing to trim, compress, delete a pointer for, or relocate to SKILLS. Ship that cleanup in the same commit as your new edit.
+
+This creates compound improvement: every addition comes paired with a refinement, so CLAUDE.md gets *more refined* over time, not just larger. Five edits over a month = five sections re-evaluated and likely five small cleanups, without a scheduled "CLAUDE.md diet" that nobody gets around to.
+
+### 4. Event-triggered deeper reviews
+
+Beyond the paired-edit discipline, do a full CLAUDE.md sweep whenever:
+
+- The user asks something like "is CLAUDE.md getting thick?" or "what belongs in SKILLS?" — they've noticed drift.
+- A new SKILLS file lands that could absorb an existing CLAUDE.md section.
+- Stewardship or session-resilience rules change (those sections often have gravity and drag others along).
+- More than ~5 situational skills have been added since the last sweep (natural aggregation point).
+
+The sweep reads every CLAUDE.md section top to bottom, applies the thinness gate, and relocates everything that fails. Ship as one commit titled "CLAUDE.md sweep: <date> — N sections relocated / compressed."
 
 ### What the extraction looks like when you do need a pointer
 
