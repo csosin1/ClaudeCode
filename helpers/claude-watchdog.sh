@@ -82,6 +82,51 @@ def main():
 
         if tmux_has_window(name):
             cap = capture_pane(name)
+
+            # Stale-remote-control detection: window is alive but the status line
+            # no longer shows "Remote Control active". The chat itself is fine
+            # (JSONL intact) but the user's bookmark points at a dead URL.
+            # Auto-reactivate once per detection; re-notify if it keeps failing.
+            if "Remote Control active" not in cap and "Remote Control connecting" not in cap:
+                entry["remote_control"] = "stale"
+                stale_file = STATE_DIR / f"{name}.remote.stale"
+                stale_count = 0
+                if stale_file.exists():
+                    try:
+                        stale_count = int(stale_file.read_text().strip() or "0")
+                    except ValueError:
+                        pass
+                stale_count += 1
+                stale_file.write_text(str(stale_count))
+                # Attempt reactivation only if we haven't tried in this minute
+                last_try = STATE_DIR / f"{name}.remote.last_reactivate"
+                last_try_ts = 0
+                if last_try.exists():
+                    try:
+                        last_try_ts = int(last_try.read_text().strip() or "0")
+                    except ValueError:
+                        pass
+                if now - last_try_ts >= 120:  # don't retry more than every 2 min
+                    last_try.write_text(str(now))
+                    r = subprocess.run(
+                        ["/usr/local/bin/reactivate-remote.sh", name],
+                        capture_output=True, text=True, timeout=30,
+                    )
+                    if r.returncode == 0:
+                        stale_file.unlink(missing_ok=True)
+                        entry["remote_control"] = "reactivated"
+                        notify(f"{name} remote-control URL had gone stale; auto-reactivated. Re-tap bookmark.",
+                               f"Remote recovered: {name}", "default",
+                               f"https://casinv.dev/remote/{name}.html")
+                    elif stale_count == 3:
+                        # Three failures in a row — escalate
+                        notify(f"{name} remote-control auto-reactivation failing after 3 attempts. Manual recovery needed.",
+                               f"Remote stuck stale: {name}", "urgent",
+                               f"https://casinv.dev/remote/{name}.html")
+            else:
+                entry["remote_control"] = "active"
+                (STATE_DIR / f"{name}.remote.stale").unlink(missing_ok=True)
+
             if "esc to interrupt" in cap:
                 elapsed = parse_elapsed(cap)
                 activities = ACTIVITY_RE.findall(cap)

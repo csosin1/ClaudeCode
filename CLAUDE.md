@@ -180,6 +180,9 @@ Whenever you need the user to do something manual (sign up, paste a credential, 
 ## Capacity Awareness
 Before heavy work (batch scraping, concurrent builders, big model runs), check `/capacity.json` or `https://casinv.dev/capacity.html`. If state is `warn` or `urgent`, don't add load — notify the user with a concrete upgrade recommendation instead. Silent thrashing is the worst failure mode. See `SKILLS/capacity-monitoring.md`.
 
+## Session Resilience
+Any remote chat — including this one — can fail at any moment (relay blip, OOM, droplet reboot). The platform auto-recovers via watchdog + respawn cron + boot service. Your job: keep `PROJECT_STATE.md` current every 30 min of active work, commit + push every 10-15 min, and never hold load-bearing state only in conversation memory. Stale remote-control URLs are now auto-reactivated by the watchdog. See `SKILLS/session-resilience.md` for failure-mode table and handoff playbooks.
+
 ## Memory Hygiene
 Weekly per-chat pass — and on-demand whenever `/capacity.html` goes `warn`. Basic flossing only: streaming queries, closed handles, closed browsers, SQLite WAL checkpoint + VACUUM, bounded caches, log rotation, gzipped raw caches. Anything that needs a schema change, a new library, or a real perf tradeoff files a separate task instead. See `SKILLS/memory-hygiene.md`.
 
