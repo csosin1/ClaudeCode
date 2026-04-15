@@ -23,6 +23,40 @@ from browser_use import Agent, BrowserSession, BrowserProfile
 from browser_use.browser.profile import ProxySettings
 from browser_use.llm import ChatAnthropic
 
+
+def _ensure_mid_flight_swap_supported():
+    """Monkey-patch browser_use.Agent with an idempotent set_llm().
+
+    Verified against browser_use/agent/service.py (see SKILLS/browser-use-internals.md):
+      - Agent stores the LLM at self.llm (service.py:368) and reads it dynamically
+        on every step via self.llm.ainvoke (service.py:1940).
+      - browser-use itself already swaps self.llm for its own fallback path
+        (service.py:2003) and re-registers it with the token cost service
+        (service.py:2007) — we mirror that pattern exactly.
+      - model_name is baked into the initial system prompt (service.py:509); since
+        we only swap between Anthropic models, the is_anthropic flag stays correct
+        and the cached system prompt remains valid. Do NOT swap across providers
+        mid-flight without rebuilding the message manager.
+    """
+    if getattr(Agent, '_midflight_swap_patched', False):
+        return
+
+    def set_llm(self, new_llm):
+        self.llm = new_llm
+        # Let _verify_and_setup_llm short-circuit (no extra API call).
+        setattr(new_llm, '_verified_api_keys', True)
+        # Keep token accounting accurate for the new model.
+        try:
+            self.token_cost_service.register_llm(new_llm)
+        except Exception:
+            pass
+
+    Agent.set_llm = set_llm
+    Agent._midflight_swap_patched = True
+
+
+_ensure_mid_flight_swap_supported()
+
 HERE = pathlib.Path('/opt/site-deploy/car-offers/llm-nav')
 LOG_ROOT = HERE / 'logs'
 STEALTH_INIT = pathlib.Path('/opt/site-deploy/car-offers/lib/stealth-init.js').read_text()
@@ -295,7 +329,21 @@ Return your final verdict as a JSON object on a line by itself (the harness pars
 
 Do NOT fabricate an offer. If you don't see a dollar amount, status is not "ok".
 
-Start URL: {START_URLS[site]}
+CRITICAL — pre-warmup sequence (what avoids Cloudflare Turnstile at finalize):
+
+Before you touch the sell flow, build real session entropy. Prior attempts teleported straight to the sell URL and hit Turnstile at finalize 100% of the time. Real humans don't hit Turnstile because they arrive with referrer + cookie history + scroll entropy from browsing inventory first.
+
+Do this FIRST, in order, before the sell flow:
+  1. Navigate to the site's HOMEPAGE (not the sell URL). Scroll it slowly for 5–10 seconds.
+  2. Click into their shop/inventory/used-cars section via the site's own nav link.
+  3. Scroll search results. Click into ONE vehicle detail page. Scroll the photos, read a few seconds.
+  4. Navigate back. Optionally click into a second vehicle.
+  5. NOW click the site's own "Sell" or "Sell/Trade" nav link (don't type a URL) to enter the sell flow.
+
+When you reach the finalize/review/"Get My Offer" submit page, PAUSE 5–15 seconds and scroll once (as if double-checking your answers) BEFORE clicking the final submit. Don't rush the last click — that's the moment Turnstile scores you.
+
+Homepage URL (step 1): {START_URLS[site].split('/sell')[0] if '/sell' in START_URLS[site] else START_URLS[site]}
+Sell-flow URL (step 5 — reach via clicks, NOT direct navigation): {START_URLS[site]}
 """
 
     site_hints = {
@@ -393,15 +441,50 @@ async def run(args):
     # We'll add the stealth init script after the session starts.
     (log_dir / 'task_prompt.txt').write_text(task_prompt(args.site, args.vin, args.mileage, args.zip, args.condition))
 
-    llm = ChatAnthropic(model='claude-sonnet-4-5-20250929', temperature=0.0, api_key=os.environ['ANTHROPIC_API_KEY'])
+    # Early / late LLM selection. --model-early defaults to --model for
+    # backward compatibility; --model-late + --llm-switch-at-step together
+    # enable the mid-flight swap.
+    early_model_id = args.model_early or args.model
+    late_model_id = (args.model_late or '').strip()
+    switch_at = int(args.llm_switch_at_step or 0)
+    do_switch = bool(late_model_id) and switch_at > 0
+
+    llm = ChatAnthropic(model=early_model_id, temperature=0.0, api_key=os.environ['ANTHROPIC_API_KEY'])
+    late_llm = None
+    if do_switch:
+        late_llm = ChatAnthropic(model=late_model_id, temperature=0.0, api_key=os.environ['ANTHROPIC_API_KEY'])
+
+    base_task = task_prompt(args.site, args.vin, args.mileage, args.zip, args.condition)
+    if args.strategy_hint:
+        base_task += f"\n\nADDITIONAL STRATEGY-HYPOTHESIS DIRECTIVE (overrides general guidance when in conflict):\n{args.strategy_hint}\n"
+
+    # Mid-flight swap callback. browser-use calls this AFTER each step with
+    # (browser_state_summary, model_output, n_steps). When n_steps crosses the
+    # threshold we swap the Agent's LLM handle; the next step's ainvoke will
+    # hit the new model. See SKILLS/browser-use-internals.md.
+    swap_state = {'done': False}
+
+    async def _maybe_swap_llm(_browser_state_summary, _model_output, n_steps):
+        if swap_state['done'] or not do_switch:
+            return
+        # n_steps is 1-indexed (step that just completed). Swap takes effect
+        # for the step that follows switch_at.
+        if n_steps >= switch_at:
+            try:
+                agent.set_llm(late_llm)
+                swap_state['done'] = True
+                print(f"[mid-flight-swap] step {n_steps}: swapped llm {early_model_id} -> {late_model_id}", flush=True)
+            except Exception as e:
+                print(f"[mid-flight-swap] FAILED at step {n_steps}: {type(e).__name__}: {e}", flush=True)
 
     agent = Agent(
-        task=task_prompt(args.site, args.vin, args.mileage, args.zip, args.condition),
+        task=base_task,
         llm=llm,
         browser_session=session,
         use_vision=True,
         max_actions_per_step=3,
         save_conversation_path=str(log_dir / 'conversation'),
+        register_new_step_callback=_maybe_swap_llm if do_switch else None,
     )
 
     start = time.time()
@@ -465,5 +548,10 @@ if __name__ == '__main__':
     p.add_argument('--session-id', default='llmnav-session')
     p.add_argument('--consumer', type=int, default=1)
     p.add_argument('--max-steps', type=int, default=40)
+    p.add_argument('--strategy-hint', default='', help='Extra hypothesis-specific instructions appended to the prompt')
+    p.add_argument('--model', default='claude-sonnet-4-5-20250929', help='Anthropic model id (e.g. claude-opus-4-6-20260101, claude-sonnet-4-5-20250929). Used for the whole run unless --model-early / --model-late override.')
+    p.add_argument('--model-early', default='', help='Model id for the early part of the run (warmup + boring flow). Defaults to --model if unset.')
+    p.add_argument('--model-late', default='', help='Model id to swap to after --llm-switch-at-step. Empty = no swap. Use Opus here for high-stakes finalize/submit.')
+    p.add_argument('--llm-switch-at-step', type=int, default=0, help='Swap to --model-late after this many completed steps (1-indexed). 0 = never swap.')
     args = p.parse_args()
     sys.exit(asyncio.run(run(args)))
