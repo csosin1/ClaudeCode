@@ -67,6 +67,7 @@
   <a class="todo" id="nav-todo" href="/todo.html">📋 Your to-do<span class="count" id="todo-count" style="display:none"></span></a>
   <a href="/accounts.html">🔑 Accounts</a>
   <a class="capacity" id="nav-capacity" href="/capacity.html">💾 Capacity</a>
+  <a id="nav-telemetry" href="/telemetry.html">📊 Cost<span class="count" id="cost-today" style="display:none"></span></a>
 </div>
 <div id="cards"></div>
 
@@ -135,6 +136,18 @@ async function render() {
       capEl.classList.remove('warn', 'urgent');
       if (doc.overall === 'warn' || doc.overall === 'urgent') {
         capEl.classList.add(doc.overall);
+      }
+    }
+  } catch {}
+  try {
+    const r = await fetch('/tokens.json?v=' + Date.now(), { cache: 'no-cache' });
+    if (r.ok) {
+      const doc = await r.json();
+      const today = (doc.totals && doc.totals.today && doc.totals.today.cost) || 0;
+      const el = document.getElementById('cost-today');
+      if (today > 0) {
+        el.textContent = '$' + today.toFixed(0);
+        el.style.display = '';
       }
     }
   } catch {}

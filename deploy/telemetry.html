@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Telemetry · casinv.dev</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+    background: #0f172a; color: #e2e8f0; min-height: 100vh;
+    padding: 1rem; line-height: 1.4;
+  }
+  h1 { font-size: 1.4rem; margin-bottom: 0.25rem; }
+  h2 { font-size: 1rem; color: #f8fafc; margin: 1rem 0 0.5rem; }
+  .sub { color: #64748b; font-size: 0.8rem; margin-bottom: 1rem; }
+  .caveat { background: #1e293b; border-left: 3px solid #f59e0b;
+            padding: 0.5rem 0.75rem; font-size: 0.75rem; color: #94a3b8;
+            border-radius: 0 6px 6px 0; margin-bottom: 1rem; }
+  .card {
+    background: #1e293b; border: 1px solid #334155; border-radius: 12px;
+    padding: 0.9rem; margin-bottom: 0.6rem;
+  }
+  .chat-name { font-size: 0.95rem; color: #f8fafc; font-weight: 600; }
+  .cost-big { font-size: 1.25rem; color: #fbbf24; font-weight: 700;
+              margin-left: 0.5rem; }
+  .cost-sm { color: #94a3b8; font-size: 0.8rem; margin-left: 0.5rem; }
+  .metrics { display: grid; grid-template-columns: repeat(4, 1fr);
+             gap: 0.4rem; font-size: 0.75rem; color: #94a3b8; margin-top: 0.4rem; }
+  .metrics b { color: #cbd5e1; font-weight: 600; display: block; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  th, td { padding: 0.35rem 0.5rem; text-align: left; border-bottom: 1px solid #334155; }
+  th { color: #94a3b8; font-weight: 600; font-size: 0.75rem;
+       text-transform: uppercase; letter-spacing: 0.04em; }
+  td.n { text-align: right; color: #cbd5e1; font-variant-numeric: tabular-nums; }
+  tr.dead td { color: #64748b; font-style: italic; }
+  tr.hot td { color: #fbbf24; }
+
+  .total-row td { font-weight: 700; color: #f8fafc; background: #0f172a; }
+
+  .back { display: inline-block; color: #94a3b8; font-size: 0.85rem;
+          margin-top: 1.5rem; }
+  a { color: #60a5fa; }
+</style>
+</head>
+<body>
+<h1>Telemetry</h1>
+<div class="sub" id="sub">loading…</div>
+<div class="caveat">Dollar amounts are approximate — computed from JSONL token usage × list-price cards (Opus 4.6 by default). Actual billing may differ ±20%.</div>
+
+<h2>Cost by chat (approx)</h2>
+<div id="chats"></div>
+
+<h2>Skills usage (times referenced)</h2>
+<table id="skills-table">
+  <thead><tr><th>Skill</th><th class="n">Today</th><th class="n">7d</th><th class="n">All</th></tr></thead>
+  <tbody id="skills"></tbody>
+</table>
+
+<a class="back" href="/projects.html">← all projects</a>
+
+<script>
+function usd(n) { return '$' + (n || 0).toFixed(2); }
+function num(n) { return (n || 0).toLocaleString(); }
+
+async function render() {
+  let tok = { chats: {}, totals: {} };
+  let sk  = { skills: {} };
+  try { const r = await fetch('/tokens.json?v='+Date.now(), {cache:'no-cache'}); if (r.ok) tok = await r.json(); } catch {}
+  try { const r = await fetch('/skills-usage.json?v='+Date.now(), {cache:'no-cache'}); if (r.ok) sk = await r.json(); } catch {}
+
+  document.getElementById('sub').textContent =
+    'updated ' + (tok.updated_at || 'never') + ' · today total: ' + usd(tok.totals?.today?.cost) +
+    ' · 7d total: ' + usd(tok.totals?.last_7d?.cost);
+
+  // Per-chat cards sorted by today's cost
+  const chats = Object.entries(tok.chats || {}).sort((a,b) =>
+    (b[1].tokens.today.cost || 0) - (a[1].tokens.today.cost || 0)
+  );
+  document.getElementById('chats').innerHTML = chats.map(([name, c]) => {
+    const t = c.tokens;
+    return `<div class="card">
+      <span class="chat-name">${name}</span>
+      <span class="cost-big">${usd(t.today.cost)}</span>
+      <span class="cost-sm">today · ${usd(t.last_7d.cost)} past 7d · ${usd(t.all_time.cost)} all time</span>
+      <div class="metrics">
+        <div><b>${num(t.today.messages)}</b> msgs today</div>
+        <div><b>${num(t.today.input)}</b> input tok</div>
+        <div><b>${num(t.today.output)}</b> output tok</div>
+        <div><b>${num(t.today.cache_r + t.today.cache_w)}</b> cache tok</div>
+      </div>
+    </div>`;
+  }).join('');
+
+  // Skills table sorted by today's usage, then 7d, then all-time
+  const skills = Object.entries(sk.skills || {}).map(([name, d]) => ({name, ...d}));
+  skills.sort((a,b) => b.today - a.today || b.last_7d - a.last_7d || b.all_time - a.all_time);
+  const tb = document.getElementById('skills');
+  tb.innerHTML = skills.map(s => {
+    const cls = s.all_time === 0 ? 'dead' : (s.today >= 5 ? 'hot' : '');
+    return `<tr class="${cls}"><td>${s.name}</td><td class="n">${s.today}</td><td class="n">${s.last_7d}</td><td class="n">${s.all_time}</td></tr>`;
+  }).join('');
+}
+render();
+setInterval(render, 60000);
+</script>
+</body>
+</html>
