@@ -15,12 +15,21 @@ _Last updated: 2026-04-14 (pre-resize checkpoint)_
 
 **All prior data issues closed.** Data trusted, live dashboard updated, 7 commits of fixes in this session.
 
-**Markov training in progress (chunk 5/8, ~50 min remaining). All audit findings fixed.**
-- CarMax loan-level: 37/37 deals, 3.1M loans. Audit: clean (F-019 fixed).
-- Deal_terms: 65/67 deals extracted. Audit: 4 parser bugs found + fixed (a175004).
-- Markov: unified Carvana Prime + CarMax (equal-weight per loan), chunked covariates (5 deals/batch). RSS 541 MB.
-- Residual-economics tab: live with LR-model placeholders. Will auto-upgrade to Markov forecasts on regeneration.
-- After Markov: re-export DBs → regenerate dashboard → promote → final QA (MAX_ITER=10).
+**HALTED for infra migration (shutdown-safe).** Markov process killed at user's request pending infra work. No in-flight compute; all code pushed.
+
+**State snapshot when paused:**
+- CarMax loan-level: 37/37 deals, 3.1M loans. Audit clean. F-019 fixed (2019-3 loan_loss_summary recomputed).
+- Deal_terms: 65/67 deals extracted. Audit: 4 parser bugs fixed (a175004). 2021-N1 $40B bug corrected, DQ triggers extracted, note structures cleaned.
+- Markov: code committed (30e3546), last run OOM'd mid-forecast after 25 of 53 deals. Fix applied: offload all_latest dict to disk (temp SQLite) during forecast phase so RAM stays < 500 MB. **NOT YET VERIFIED E2E** — process killed before completing with the fix.
+- Residual-economics tab: LIVE with logistic-regression placeholders (commit 54a3556). Will auto-upgrade to real Markov forecasts when deal_forecasts table is populated on next regen.
+- Dashboard DBs and live site reflect everything EXCEPT the Markov forecasts.
+
+**Resume playbook (post-infra):**
+1. `cd /opt/abs-dashboard && nohup /opt/abs-venv/bin/python unified_markov.py > /var/log/abs-dashboard/markov_run.log 2>&1 &` — relaunch Markov (idempotent: rebuilds from DB).
+2. Wait ~3hr (training ~80min + offload 2min + forecasts ~90min + save 2min).
+3. Re-export dashboard DBs: `/opt/abs-venv/bin/python -m carvana_abs.export_dashboard_db && /opt/abs-venv/bin/python -m carmax_abs.export_dashboard_db`
+4. Regenerate + promote: `/opt/abs-venv/bin/python carvana_abs/generate_preview.py && /opt/abs-venv/bin/python carvana_abs/generate_preview.py promote`
+5. Dispatch final QA audit (MAX_ITER=10).
 ## Memory hygiene 2026-04-14
 Found 2 wins: (1) `export_dashboard_db.py` in both issuers materialized 417k-row `loans` table via `fetchall()` → converted to chunked cursor iteration (10k/batch). Peak RSS on export dropped to ~38MB. (2) WAL checkpoint on both 3GB source DBs — already clean (0 frames). Deferred as separate tasks: `.copy()` chains in `generate_dashboard.py` (intentional chart-data isolation, needs careful audit); `pd.read_sql_query` full-table load in `default_model.py:206` (417k-row loan frame — chunksize conversion is a small refactor, not hygiene); no `lru_cache` anywhere (cache-layer add, out of scope).
 
