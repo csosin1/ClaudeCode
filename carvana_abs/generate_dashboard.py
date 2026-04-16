@@ -765,6 +765,220 @@ def generate_carmax_deal_content(deal):
           "Pool-level losses above are parsed from the servicer certificate.</p>")
     sections["Losses"] = h
 
+    # ── CASH WATERFALL ──
+    # Mirrors the Carvana servicer-certificate waterfall.  CarMax pool_performance
+    # has: interest_collections, principal_collections, liquidation_proceeds,
+    # actual_servicing_fee, regular_pda, residual_cash, total_deposited.
+    h = ""
+    wf_avail = (not pool.empty
+                and any(c in pool.columns and pool[c].notna().any()
+                        for c in ["total_deposited", "interest_collections",
+                                  "principal_collections", "residual_cash"]))
+    if wf_avail:
+        # ── Stacked bar: collections breakdown ──
+        bar_traces = []
+        bar_cols = [
+            ("interest_collections", "Interest Collections", "#1976D2"),
+            ("principal_collections", "Principal Collections", "#388E3C"),
+            ("liquidation_proceeds", "Liquidation Proceeds", "#FF9800"),
+        ]
+        for col, name, color in bar_cols:
+            if col in pool.columns and pool[col].notna().any():
+                bar_traces.append({
+                    "x": x, "y": pool[col].fillna(0).tolist(),
+                    "name": name, "type": "bar",
+                    "marker": {"color": color},
+                })
+        # Line overlay: servicing fee, principal distributable, residual
+        line_cols = [
+            ("actual_servicing_fee", "Servicing Fee", "#9C27B0", "dot"),
+            ("regular_pda", "Principal Distributable", "#607D8B", "dash"),
+            ("residual_cash", "Residual (to Equity)", "#F47920", "solid"),
+        ]
+        for col, name, color, dash in line_cols:
+            if col in pool.columns and pool[col].notna().any():
+                bar_traces.append({
+                    "x": x, "y": pool[col].fillna(0).tolist(),
+                    "name": name, "type": "scatter",
+                    "line": {"color": color, "dash": dash},
+                })
+        if bar_traces:
+            h += chart(bar_traces, {
+                "title": "Monthly Cash Waterfall",
+                "barmode": "stack",
+                "yaxis": {"tickformat": "$,.0f"},
+                "hovermode": "x unified",
+            })
+
+        # ── Waterfall table ──
+        wf_cols = ["period"]
+        wf_names = ["Period"]
+        for col, name in [("total_deposited", "Total Deposited"),
+                          ("interest_collections", "Interest Collections"),
+                          ("principal_collections", "Principal Collections"),
+                          ("liquidation_proceeds", "Liquidation Proceeds"),
+                          ("actual_servicing_fee", "Servicing Fee"),
+                          ("regular_pda", "Principal Dist"),
+                          ("residual_cash", "Residual (to Equity)")]:
+            if col in pool.columns and pool[col].notna().any():
+                wf_cols.append(col)
+                wf_names.append(name)
+        if len(wf_cols) > 1:
+            wf_pool = pool[wf_cols].copy()
+            wf_pool.columns = wf_names
+            sums_wf = wf_pool.select_dtypes(include="number").sum()
+            sr_wf = pd.DataFrame([["TOTAL"] + sums_wf.tolist()], columns=wf_pool.columns)
+            wf_pool_all = pd.concat([wf_pool, sr_wf], ignore_index=True)
+            wf_pool_fmt = wf_pool_all.copy()
+            for c in wf_pool_fmt.columns[1:]:
+                wf_pool_fmt[c] = wf_pool_all[c].apply(lambda v: fm(v) if pd.notna(v) and v != 0 else "-")
+            h += table_html(wf_pool_fmt)
+
+        # ── Cumulative residual cash chart ──
+        if "residual_cash" in pool.columns and pool["residual_cash"].notna().any():
+            res_data = pool[pool["residual_cash"].notna()]
+            if not res_data.empty and ORIG_BAL and ORIG_BAL > 0:
+                cum_res = res_data["residual_cash"].cumsum()
+                cum_res_pct = cum_res / ORIG_BAL
+                h += chart([{"x": res_data["period"].tolist(), "y": cum_res_pct.tolist(),
+                             "type": "scatter", "fill": "tozeroy", "line": {"color": "#388E3C"}}],
+                           {"title": "Cumulative Cash to Residual (% of Original Balance)",
+                            "yaxis": {"tickformat": ".2%"}, "hovermode": "x unified"})
+
+    if not h:
+        h = "<p>No cash waterfall data available for this deal.</p>"
+    sections["Cash Waterfall"] = h
+
+    # ── RECOVERY ──
+    # Pool-level recovery analysis from pool_performance columns.
+    # CarMax doesn't have loan-level loan_loss_summary, so we use aggregate
+    # monthly flows: recoveries, gross_charged_off_amount, net_charged_off_amount,
+    # and cumulative counterparts.
+    h = ""
+    has_recovery_data = (not pool.empty
+                         and "recoveries" in pool.columns
+                         and pool["recoveries"].notna().any())
+    has_gross_co = (not pool.empty
+                    and "gross_charged_off_amount" in pool.columns
+                    and pool["gross_charged_off_amount"].notna().any())
+
+    if has_recovery_data or has_gross_co:
+        # ── Monthly flows: gross charge-offs vs recoveries vs net losses ──
+        flow_traces = []
+        if has_gross_co:
+            flow_traces.append({
+                "x": x, "y": pool["gross_charged_off_amount"].fillna(0).tolist(),
+                "name": "Gross Charge-Offs", "type": "bar",
+                "marker": {"color": "#D32F2F"},
+            })
+        if has_recovery_data:
+            flow_traces.append({
+                "x": x, "y": pool["recoveries"].fillna(0).tolist(),
+                "name": "Recoveries", "type": "bar",
+                "marker": {"color": "#4CAF50"},
+            })
+        net_co_col = None
+        if "net_charged_off_amount" in pool.columns and pool["net_charged_off_amount"].notna().any():
+            net_co_col = "net_charged_off_amount"
+        if net_co_col:
+            flow_traces.append({
+                "x": x, "y": pool[net_co_col].fillna(0).tolist(),
+                "name": "Net Losses", "type": "scatter",
+                "line": {"color": "#FF9800", "dash": "dash"},
+            })
+        if flow_traces:
+            h += chart(flow_traces, {
+                "title": "Monthly Gross Charge-Offs vs Recoveries",
+                "barmode": "group",
+                "yaxis": {"tickformat": "$,.0f"},
+                "hovermode": "x unified",
+            })
+
+        # ── Recovery rate over time ──
+        if has_gross_co and has_recovery_data:
+            # Trailing-12 recovery rate (smoothed) — ratio of sum(recoveries) / sum(gross_co) over rolling 12 periods
+            gross_s = pool["gross_charged_off_amount"].fillna(0)
+            rec_s = pool["recoveries"].fillna(0)
+            roll_gross = gross_s.rolling(12, min_periods=3).sum()
+            roll_rec = rec_s.rolling(12, min_periods=3).sum()
+            roll_rate = (roll_rec / roll_gross.replace(0, float("nan")))
+            if roll_rate.notna().any():
+                h += chart([{
+                    "x": x, "y": [round(v, 4) if pd.notna(v) else None for v in roll_rate.tolist()],
+                    "type": "scatter", "line": {"color": "#1976D2"},
+                }], {
+                    "title": "Trailing-12 Recovery Rate (Recoveries / Gross Charge-Offs)",
+                    "yaxis": {"tickformat": ".1%"},
+                    "hovermode": "x unified",
+                })
+
+        # ── Cumulative view ──
+        cum_traces = []
+        # Use reported cumulative columns if available, else cumsum
+        _cum_gross = pool.get("cumulative_gross_losses")
+        if _cum_gross is None or not _cum_gross.notna().any():
+            if has_gross_co:
+                _cum_gross = pool["gross_charged_off_amount"].fillna(0).cumsum()
+        _cum_rec = pool.get("cumulative_liquidation_proceeds")
+        if _cum_rec is None or not _cum_rec.notna().any():
+            if has_recovery_data:
+                _cum_rec = pool["recoveries"].fillna(0).cumsum()
+        _cum_net = pool.get("cumulative_net_losses")
+        if _cum_net is None or not _cum_net.notna().any():
+            if "cum_net_loss_derived" in pool.columns and pool["cum_net_loss_derived"].notna().any():
+                _cum_net = pool["cum_net_loss_derived"]
+
+        if _cum_gross is not None and _cum_gross.notna().any():
+            cum_traces.append({"x": x, "y": _cum_gross.tolist(),
+                               "name": "Cum Gross Losses", "line": {"color": "#D32F2F"}})
+        if _cum_rec is not None and _cum_rec.notna().any():
+            cum_traces.append({"x": x, "y": _cum_rec.tolist(),
+                               "name": "Cum Recoveries", "line": {"color": "#4CAF50"}})
+        if _cum_net is not None and _cum_net.notna().any():
+            cum_traces.append({"x": x, "y": _cum_net.tolist(),
+                               "name": "Cum Net Losses",
+                               "line": {"color": "#FF9800", "dash": "dash"}})
+        if cum_traces:
+            h += chart(cum_traces, {
+                "title": "Cumulative Gross Losses, Recoveries & Net Losses",
+                "yaxis": {"tickformat": "$,.0f"},
+                "hovermode": "x unified",
+            })
+
+        # ── Recovery data table ──
+        rec_tbl_cols = ["period"]
+        rec_tbl_names = ["Period"]
+        for col, name in [("gross_charged_off_amount", "Gross Charge-Offs"),
+                          ("recoveries", "Recoveries"),
+                          ("net_charged_off_amount", "Net Losses")]:
+            if col in pool.columns and pool[col].notna().any():
+                rec_tbl_cols.append(col)
+                rec_tbl_names.append(name)
+        if len(rec_tbl_cols) > 1:
+            rec_tbl = pool[rec_tbl_cols].copy()
+            rec_tbl.columns = rec_tbl_names
+            sums_r = rec_tbl.select_dtypes(include="number").sum()
+            sr_r = pd.DataFrame([["TOTAL"] + sums_r.tolist()], columns=rec_tbl.columns)
+            rec_tbl_all = pd.concat([rec_tbl, sr_r], ignore_index=True)
+            rec_tbl_fmt = rec_tbl_all.copy()
+            for c in rec_tbl_fmt.columns[1:]:
+                rec_tbl_fmt[c] = rec_tbl_all[c].apply(lambda v: fm(v) if pd.notna(v) and v != 0 else "-")
+            h += table_html(rec_tbl_fmt)
+
+        # ── Summary metrics ──
+        total_gross = pool["gross_charged_off_amount"].fillna(0).sum() if has_gross_co else 0
+        total_rec = pool["recoveries"].fillna(0).sum() if has_recovery_data else 0
+        overall_rate = total_rec / total_gross if total_gross > 0 else 0
+        h = (f'<div class="metrics">'
+             f'<div class="metric"><div class="mv">{fm(total_gross)}</div><div class="ml">Total Gross Charge-Offs</div></div>'
+             f'<div class="metric"><div class="mv">{fm(total_rec)}</div><div class="ml">Total Recoveries</div></div>'
+             f'<div class="metric"><div class="mv">{overall_rate:.1%}</div><div class="ml">Overall Recovery Rate</div></div>'
+             f'</div>') + h
+
+    if not h:
+        h = "<p>No recovery data available for this deal.</p>"
+    sections["Recovery"] = h
+
     # ── NOTES & OC ──
     # Mirrors the Carvana Notes & OC block (generate_deal_content). CarMax
     # ingestion now populates note_balance_a1..a4/b/c/d, aggregate_note_balance,
