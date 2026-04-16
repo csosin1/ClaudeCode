@@ -23,6 +23,9 @@ TMUX_SESSION = "claude"
 # its PROJECT_STATE.md hasn't been touched in this many seconds,
 # it's probably not following the update-every-30-min rule.
 STALE_PROJECT_STATE_SEC = 3600  # 60 min — generous, to avoid false positives
+CHECKIN_COOLDOWN_SEC = 7200    # 2 hours between check-in prompts to same chat
+                               # (prevents self-reinforcing loop: check-in → chat processes it →
+                               # watchdog sees "busy" → next check-in fires again)
 
 # If a long-running job's heartbeat file is older than this, alert.
 STALE_JOB_SEC = 1200  # 20 min
@@ -154,7 +157,7 @@ def main():
             age = now - mtime
             if age > STALE_PROJECT_STATE_SEC:
                 debounce = STATE_DIR / f"{name}.checkin_stale_ps"
-                if should_checkin(debounce, STALE_PROJECT_STATE_SEC):
+                if should_checkin(debounce, CHECKIN_COOLDOWN_SEC):
                     notify(
                         f"{name} has been busy but PROJECT_STATE.md is {int(age/60)}m stale. Sending check-in prompt.",
                         f"Stale state: {name}",
@@ -173,7 +176,7 @@ def main():
                 cur = proj_task.get("current_task")
                 if cur and cur.get("stage") not in ("done", "blocked", None):
                     debounce = STATE_DIR / f"{name}.checkin_idle_with_task"
-                    if should_checkin(debounce, 1800):
+                    if should_checkin(debounce, CHECKIN_COOLDOWN_SEC):
                         notify(
                             f"{name} is IDLE but has an in-progress task: '{cur.get('name', '?')}'. May need a nudge.",
                             f"Idle with task: {name}",
