@@ -1,0 +1,15 @@
+# __PROJECT__ — Project State
+
+_Last updated: __DATE__ by __SESSION___
+
+## Current focus
+<1–2 sentences: what we're working on right now and why. If nothing active, write "idle".>
+
+## Last decisions
+- <decision + 1-line rationale>
+
+## Open questions
+- <blocker / question awaiting user input, or unresolved trade-off. Remove section contents if none.>
+
+## Next step
+<the single next concrete action — file path + what to do. If idle, write "await next user request".>
