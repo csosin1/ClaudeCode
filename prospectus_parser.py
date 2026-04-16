@@ -279,8 +279,18 @@ def _clean_html(html: str) -> str:
 
 
 def _parse_dollar(s: str) -> Optional[float]:
-    """Parse a dollar amount string like '$1,039,515,050.84' → float."""
-    s = s.replace('$', '').replace(',', '').replace(' ', '').strip()
+    """Parse a dollar amount string like '$1,039,515,050.84' → float.
+
+    Also handles SEC EDGAR formatting quirk where the decimal point before
+    cents is rendered as a comma: '$400,000,003,21' → 400000003.21.
+    """
+    s = s.replace('$', '').replace(' ', '').strip()
+    # If the last comma-separated group is exactly 2 digits, treat as cents
+    # e.g. '400,000,003,21' → '400,000,003.21'
+    m = re.match(r'^([\d,]+),(\d{2})$', s)
+    if m:
+        s = m.group(1) + '.' + m.group(2)
+    s = s.replace(',', '')
     try:
         return float(s)
     except (ValueError, TypeError):
@@ -319,6 +329,7 @@ _NOTE_CLASS_MAP = {
     'A-2': 'a2', 'A2': 'a2', 'A-2a': 'a2', 'A-2A': 'a2', 'A-2b': 'a2', 'A-2B': 'a2',
     'A-3': 'a3', 'A3': 'a3',
     'A-4': 'a4', 'A4': 'a4',
+    'A': 'a1',   # N-series deals use single "Class A" (maps to a1 slot)
     'B': 'b',
     'C': 'c',
     'D': 'd',
@@ -339,7 +350,7 @@ def _extract_notes(text: str) -> dict:
     # CarMax: "Class A-1 Asset-backed Notes $ 291,000,000 1.77613%"
     cover_pattern = re.compile(
         r'\$\s*([\d,]+(?:\.\d+)?)\s+'
-        r'(?:Class\s+)?(A-?[1-4](?:[aAbB])?|[BCDN])\s+'
+        r'(?:Class\s+)?(A-?[1-4](?:[aAbB])?|[ABCDN])\s+'
         r'([\d]+\.[\d]+)\s*%\s*'
         r'(?:Asset[- ]?[Bb]acked\s+)?[Nn]otes?'
     )
@@ -354,7 +365,7 @@ def _extract_notes(text: str) -> dict:
     # Also: floating rate on cover: "$249,200,000 Class A-2b SOFR Rate + 0.47%"
     cover_float = re.compile(
         r'\$\s*([\d,]+(?:\.\d+)?)\s+'
-        r'(?:Class\s+)?(A-?[1-4](?:[aAbB])?|[BCDN])\s+'
+        r'(?:Class\s+)?(A-?[1-4](?:[aAbB])?|[ABCDN])\s+'
         r'(?:SOFR|LIBOR|Prime)\s*(?:Rate\s*)?\+\s*([\d]+\.[\d]+)\s*%'
     )
     for m in cover_float.finditer(text[:len(text) // 6]):
@@ -447,6 +458,31 @@ def _merge_note(notes: dict, class_key: str, balance: float, coupon: float):
         notes[class_key] = {'balance': balance, 'coupon': coupon}
 
 
+def _fill_balances_from_table(text: str, notes: dict):
+    """Fill in missing balances from Principal Amount table for N-series deals.
+
+    These deals have a table like:
+        Class A Notes  Class B Notes  Class C Notes  Class D Notes
+        Principal Amount  $185,400,000  $53,600,000  $58,200,000  $40,400,000
+    """
+    # Find "Principal Amount" row and extract dollar amounts
+    pa_idx = text.find('Principal Amount')
+    if pa_idx < 0:
+        return
+
+    # Get the chunk after "Principal Amount" up to next label
+    chunk = text[pa_idx:pa_idx + 500]
+    amounts = re.findall(r'\$\s*([\d,]+(?:\.\d+)?)', chunk)
+
+    # Map amounts to note classes in order
+    class_order = [k for k in ['a1', 'b', 'c', 'd', 'n'] if k in notes]
+    for i, cls in enumerate(class_order):
+        if i < len(amounts) and notes[cls]['balance'] == 0:
+            bal = _parse_dollar(amounts[i])
+            if bal:
+                notes[cls]['balance'] = bal
+
+
 def _extract_notes_from_table_block(text: str, notes: dict):
     """Parse note info from the structured table with Principal Amount + Interest Rate rows."""
     pa_idx = text.find('Principal Amount')
@@ -509,11 +545,14 @@ def _extract_notes_from_listing(text: str, notes: dict):
 def _extract_pool_balance(text: str) -> Optional[float]:
     """Extract initial pool balance."""
     # Carvana: "Initial Pool Balance $ 1,039,515,050.84"
+    # Also: "Pool Balance $ 405,000,000.11" (without "Initial" prefix)
     # CarMax: "pool balance of $1,553,875,032.29 as of the cutoff date"
     patterns = [
         r'Initial Pool Balance\s*\$\s*([\d,]+(?:\.\d+)?)',
         r'[Pp]ool [Bb]alance\s+(?:of\s+)?\$\s*([\d,]+(?:\.\d+)?)\s*(?:as of|on)\s*(?:the\s+)?[Cc]utoff',
         r'[Aa]ggregate.*?[Pp]rincipal [Bb]alance.*?\$\s*([\d,]+(?:\.\d+)?)\s*(?:as of|on)\s*(?:the\s+)?[Cc]utoff',
+        # "Pool Balance $ 405,000,000.11 Number of Receivables"
+        r'Pool Balance\s*\$\s*([\d,]+(?:\.\d+)?)\s*(?:Number|Aggregate)',
     ]
     for pat in patterns:
         m = re.search(pat, text[:200000])
@@ -737,12 +776,14 @@ def _extract_dq_trigger(text: str) -> tuple[Optional[float], Optional[str]]:
     # Also look for a single DQ trigger percentage
     single_pct = None
     # "Delinquency Trigger means 6.62%" or "Delinquency Trigger is 6.62%"
+    # Keep patterns tight (max 50 chars between "Trigger" and the pct) to avoid
+    # matching coupon rates hundreds of characters away.
     dq_patterns = [
         r'[Dd]elinquency [Tt]rigger\s+(?:means|is|equals?)\s+(\d+\.\d+)\s*%',
-        r'[Dd]elinquency [Tt]rigger.*?(?:means|is|equals?|set at)\s+(\d+\.\d+)\s*%',
+        r'[Dd]elinquency [Tt]rigger.{0,50}(?:means|is|equals?|set at)\s+(\d+\.\d+)\s*%',
     ]
     for dpat in dq_patterns:
-        m = re.search(dpat, text, re.DOTALL)
+        m = re.search(dpat, text)
         if m:
             val = float(m.group(1))
             if 1.0 < val < 20:  # sanity: DQ trigger between 1% and 20%
@@ -791,6 +832,18 @@ def _extract_cnl_trigger(text: str) -> Optional[str]:
         )
         if m:
             return json.dumps([{"threshold_pct": float(m.group(1))}])
+
+        # CarMax alternative: "cumulative net loss rate ... of X%"
+        # e.g. "cumulative net loss rate as a percentage of the Pool Balance as of the Cutoff Date of 1.25%"
+        m = re.search(
+            r'[Cc]umulative [Nn]et [Ll]oss [Rr]ate.{0,120}?(?:of|equals?|is)\s+(\d+\.\d+)\s*%',
+            text
+        )
+        if m:
+            val = float(m.group(1))
+            if 0.1 < val < 30:  # sanity
+                return json.dumps([{"threshold_pct": val}])
+
         return None
 
     # Parse the table (only in a small window after the header)

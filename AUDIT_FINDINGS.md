@@ -446,3 +446,63 @@ Per SKILLS/data-audit-qa.md: "Verification stopped at loan-level: ABS-EE XML cac
 **Tier-2 (source verification):** NOT POSSIBLE. ABS-EE XMLs deleted. Cannot verify that DB values match what was in the original SEC filings. The 2017 deals (previously audited against source) serve as an anchor — same parser produced consistent results for 2018+.
 
 **Overall:** Data is suitable for analytical use with the caveat that F-019 (2019-3 loss summary gap) should be investigated and that source-level verification was not performed on the 33 newly-ingested deals.
+
+---
+
+## deal_terms Prospectus Parser Audit — 2026-04-16
+
+_Audit date: 2026-04-16. Scope: 67 deals (18 Carvana, 49 CarMax) in deal_terms tables. Parser: prospectus_parser.py. Source: 424B prospectus supplements via EDGAR._
+
+### Parser Bugs Found and Fixed
+
+#### F-021 — 2021-N1 initial_pool_balance = $40B (CRITICAL, FIXED)
+- **Root cause:** SEC EDGAR HTML renders `$400,000,003,21` (comma instead of period before cents). `_parse_dollar()` stripped all commas yielding `40000000321`.
+- **Fix:** Added trailing-comma-cents detection: if last comma-separated group is exactly 2 digits, treat as decimal cents.
+- **After:** $400,000,003.21
+
+#### F-022 — N-series deals missing Class A notes + shifted amounts (CRITICAL, FIXED)
+- **Root cause:** Cover-page regex `A-?[1-4]` didn't match standalone "A" used by N-series deals. Strategy 1 mis-aligned amounts (A's dollar became B's, B's became C's, etc.).
+- **Fix:** Added 'A' to NOTE_CLASS_MAP and updated class regex to `[ABCDN]`.
+- **After:** All 4 N-series deals correctly extract 4 classes with proper amounts and OC of 11-16%.
+
+#### F-023 — dq_trigger_pct false positives (HIGH, FIXED)
+- **Root cause:** DQ pattern `[Dd]elinquency [Tt]rigger.*?(?:means|is|...)` with `re.DOTALL` matched coupon rates hundreds of characters away.
+- **Fix:** Constrained to `.{0,50}` max span, removed `re.DOTALL`.
+- **After:** Zero false positive dq_trigger_pct values.
+
+#### F-024 — CarMax CNL trigger not extracted (HIGH, FIXED)
+- **Root cause:** Parser only matched "Cumulative Net Loss Trigger means X%". CarMax uses "cumulative net loss rate ... of X%".
+- **Fix:** Added fallback pattern.
+- **After:** 37/49 CarMax deals now have CNL triggers. The 12 without (2014-2016) genuinely lack this in their prospectuses.
+
+### Not Bugs (Verified)
+
+- **cnl_trigger_schedule NULL for all Carvana:** Correct. Carvana uses DQ triggers, not CNL triggers.
+- **initial_oc_pct ~0%:** Correct. Auto ABS notes ≈ pool balance at issuance; OC builds through waterfall.
+- **Class A-1 coupons < 0.20%:** Expected for 2020-2021 money-market tranches.
+- **2020-P1 WAC 0.47%:** Correct note-weighted cost of debt for a 2020 deal.
+- **CarMax 2022-4 Class D coupon 8.08%:** Verified against prospectus.
+- **Carvana 2025-P3/P4 servicing fee 0.45%:** Verified — Carvana reduced fees for recent deals.
+- **Consumer WAC > Note WAC for all deals:** Confirmed. Positive spread on all 53 deals with loan data.
+
+### Remaining Gaps
+
+| Item | Status |
+|------|--------|
+| Carvana 2023-P5 | 424B not found on EDGAR (terms_extracted=0) |
+| Carvana 2024-N1 | 424B not found on EDGAR (terms_extracted=0) |
+| Carvana DQ schedule (6 deals) | 2021-N1 through N4 + 2023-P5 + 2024-N1 missing DQ schedules |
+| CarMax DQ schedule | CarMax uses single pct (6.54-6.62%), not schedules — correct |
+| CarMax CNL (12 deals) | 2014-2016 deals lack CNL trigger in prospectus — correct |
+
+### Post-Fix Quality Summary
+
+| Metric | Carvana (18) | CarMax (49) |
+|--------|-------------|-------------|
+| terms_extracted = 1 | 16 (89%) | 49 (100%) |
+| IPB in $200M-$2B | 16/16 | 49/49 |
+| WAC in 0.2%-8% | 16/16 | 49/49 |
+| Servicing fee extracted | 16/16 | 49/49 |
+| DQ info extracted | 12/16 | 49/49 |
+| CNL trigger | 0/16 (uses DQ) | 37/49 |
+| False positive values | 0 | 0 |
