@@ -2914,6 +2914,1064 @@ def generate_model_content():
     return h
 
 
+# ---------------------------------------------------------------------------
+# Residual Economics Tab  (landing page — first/default tab)
+# ---------------------------------------------------------------------------
+
+def _safe_div(a, b):
+    """Return a/b or None when b is zero/None."""
+    if b is None or b == 0:
+        return None
+    return a / b
+
+
+def generate_economics_tab():
+    """Build the residual-economics landing-page HTML.
+
+    Returns a single HTML string containing:
+      1. A summary economics table (one row per deal)
+      2. A methodology writeup with inline diagrams
+    """
+    import math
+
+    # ── 1. Gather deal_terms from the *full* (raw) DBs ──────────────────
+    carvana_full = os.path.join(os.path.dirname(os.path.abspath(__file__)), "db", "carvana_abs.db")
+    carmax_full = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                               "carmax_abs", "db", "carmax_abs.db")
+
+    deals_data = []  # list of dicts, one per deal
+
+    for db_path, issuer in [(carvana_full, "CRVNA"), (carmax_full, "CARMX")]:
+        if not os.path.exists(db_path):
+            continue
+        conn = sqlite3.connect(db_path)
+        # Check if deal_terms exists
+        has_dt = conn.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='deal_terms'"
+        ).fetchone()[0]
+        if not has_dt:
+            conn.close()
+            continue
+
+        rows = conn.execute("""
+            SELECT deal, initial_pool_balance, weighted_avg_coupon,
+                   servicing_fee_annual_pct, cutoff_date,
+                   class_a1_pct, class_a2_pct, class_a3_pct, class_a4_pct,
+                   class_b_pct, class_c_pct, class_d_pct, class_n_pct,
+                   initial_oc_pct, cnl_trigger_schedule, dq_trigger_pct,
+                   dq_trigger_schedule, oc_target_pct, oc_floor_pct,
+                   initial_reserve_pct, reserve_floor_pct
+            FROM deal_terms
+            WHERE terms_extracted = 1
+            ORDER BY cutoff_date
+        """).fetchall()
+        cols = ["deal", "initial_pool_balance", "weighted_avg_coupon",
+                "servicing_fee_annual_pct", "cutoff_date",
+                "class_a1_pct", "class_a2_pct", "class_a3_pct", "class_a4_pct",
+                "class_b_pct", "class_c_pct", "class_d_pct", "class_n_pct",
+                "initial_oc_pct", "cnl_trigger_schedule", "dq_trigger_pct",
+                "dq_trigger_schedule", "oc_target_pct", "oc_floor_pct",
+                "initial_reserve_pct", "reserve_floor_pct"]
+        for row in rows:
+            d = dict(zip(cols, row))
+            d["issuer"] = issuer
+            # Sanity: skip deals with clearly bad pool balance (>$5B for a single deal)
+            if d["initial_pool_balance"] and d["initial_pool_balance"] > 5e9:
+                continue
+            # Skip deals with no pool balance
+            if not d["initial_pool_balance"]:
+                continue
+            deals_data.append(d)
+        conn.close()
+
+    if not deals_data:
+        return "<p style='padding:16px'>No deal terms data available.</p>"
+
+    # ── 2. Consumer WAC from loans tables ────────────────────────────────
+    consumer_wac = {}
+    for db_path, db_label in [
+        (os.path.join(os.path.dirname(os.path.abspath(__file__)), "db", "dashboard.db"), "crvna_dash"),
+        (os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                      "carmax_abs", "db", "dashboard.db"), "carmx_dash"),
+    ]:
+        if not os.path.exists(db_path):
+            continue
+        conn = sqlite3.connect(db_path)
+        has_loans = conn.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='loans'"
+        ).fetchone()[0]
+        if has_loans:
+            wac_rows = conn.execute("""
+                SELECT deal,
+                       SUM(original_interest_rate * original_loan_amount) / SUM(original_loan_amount)
+                FROM loans
+                GROUP BY deal
+            """).fetchall()
+            for r in wac_rows:
+                consumer_wac[r[0]] = r[1]
+        conn.close()
+
+    # ── 3. Pool performance aggregates ───────────────────────────────────
+    perf_agg = {}  # deal -> {total_interest, total_servicing_fee, cum_losses, periods, max_bal}
+    for db_path in [
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "db", "dashboard.db"),
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                     "carmax_abs", "db", "dashboard.db"),
+    ]:
+        if not os.path.exists(db_path):
+            continue
+        conn = sqlite3.connect(db_path)
+        has_pp = conn.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='pool_performance'"
+        ).fetchone()[0]
+        if not has_pp:
+            conn.close()
+            continue
+        pp_rows = conn.execute("""
+            SELECT deal,
+                   SUM(interest_collections) as total_interest,
+                   SUM(actual_servicing_fee) as total_svc,
+                   MAX(cumulative_net_losses) as cum_losses,
+                   COUNT(*) as periods,
+                   MAX(beginning_pool_balance) as max_bal
+            FROM pool_performance
+            WHERE dist_date_iso IS NOT NULL
+            GROUP BY deal
+        """).fetchall()
+        for r in pp_rows:
+            perf_agg[r[0]] = {
+                "total_interest": r[1] or 0,
+                "total_servicing_raw": r[2] or 0,
+                "cum_losses": r[3] or 0,
+                "periods": r[4] or 0,
+                "max_bal": r[5] or 0,
+            }
+        conn.close()
+
+    # ── 4. Model forecasts (from model_results in Carvana dashboard DB) ─
+    model_forecasts = {}  # deal -> {predicted_default_rate, actual_default_rate}
+    crvna_dash = os.path.join(os.path.dirname(os.path.abspath(__file__)), "db", "dashboard.db")
+    if os.path.exists(crvna_dash):
+        conn = sqlite3.connect(crvna_dash)
+        has_mr = conn.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='model_results'"
+        ).fetchone()[0]
+        if has_mr:
+            try:
+                import json as _json
+                raw = conn.execute("SELECT value FROM model_results WHERE key='default_model'").fetchone()
+                if raw:
+                    mdata = _json.loads(raw[0])
+                    lf = mdata.get("segments", {}).get("lifetime_forecast_by_deal", {})
+                    for deal, info in lf.items():
+                        orig = info.get("total_orig_amount", 0)
+                        if orig > 0:
+                            model_forecasts[deal] = {
+                                "predicted_loss_pct": info["predicted_default_amount"] / orig,
+                                "actual_loss_pct": info["actual_default_amount"] / orig,
+                            }
+            except Exception:
+                pass
+        conn.close()
+
+    # ── 5. Check for Markov deal_forecasts table ─────────────────────────
+    markov_forecasts = {}  # deal -> {at_issuance_cnl_pct, current_projected_cnl_pct, wal, breach_prob}
+    for db_path in [carvana_full, carmax_full]:
+        if not os.path.exists(db_path):
+            continue
+        conn = sqlite3.connect(db_path)
+        has_df = conn.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='deal_forecasts'"
+        ).fetchone()[0]
+        if has_df:
+            try:
+                df_rows = conn.execute("SELECT * FROM deal_forecasts").fetchall()
+                df_cols = [d[1] for d in conn.execute("PRAGMA table_info(deal_forecasts)").fetchall()]
+                for row in df_rows:
+                    rd = dict(zip(df_cols, row))
+                    markov_forecasts[rd.get("deal", "")] = rd
+            except Exception:
+                pass
+        conn.close()
+
+    has_markov = bool(markov_forecasts)
+
+    # ── 6. Compute economics for each deal ───────────────────────────────
+    for d in deals_data:
+        deal = d["deal"]
+        ipb = d["initial_pool_balance"]
+
+        # Capital structure
+        aaa_pct = sum(filter(None, [d.get("class_a1_pct"), d.get("class_a2_pct"),
+                                     d.get("class_a3_pct"), d.get("class_a4_pct")])) or 0
+        aa_pct = d.get("class_b_pct") or 0
+        a_pct = d.get("class_c_pct") or 0
+        bbb_pct = d.get("class_d_pct") or 0
+        oc_pct = d.get("initial_oc_pct") or 0
+        # If OC > 50%, it's likely a parse error (e.g. 99.6% for non-prime = residual, not OC)
+        # Compute OC as 1 - sum of all notes
+        notes_total = aaa_pct + aa_pct + a_pct + bbb_pct + (d.get("class_n_pct") or 0)
+        if notes_total > 0.01 and notes_total < 1.0:
+            computed_oc = 1.0 - notes_total
+            if computed_oc > 0:
+                oc_pct = computed_oc
+
+        d["aaa_pct"] = aaa_pct
+        d["aa_pct"] = aa_pct
+        d["a_pct"] = a_pct
+        d["bbb_pct"] = bbb_pct
+        d["oc_pct"] = oc_pct
+
+        # Consumer WAC
+        d["consumer_wac"] = consumer_wac.get(deal)
+
+        # Cost of debt
+        d["cost_of_debt"] = d.get("weighted_avg_coupon")
+
+        # Excess spread / yr
+        if d["consumer_wac"] and d["cost_of_debt"]:
+            d["excess_spread_yr"] = d["consumer_wac"] - d["cost_of_debt"]
+        else:
+            d["excess_spread_yr"] = None
+
+        # WAL estimate from pool_performance (simple: sum of (balance_i / initial_balance) / 12)
+        perf = perf_agg.get(deal, {})
+        periods = perf.get("periods", 0)
+
+        # Markov WAL if available
+        mf = markov_forecasts.get(deal, {})
+        if mf.get("wal"):
+            d["wal"] = mf["wal"]
+        elif periods > 0 and ipb > 0:
+            # Estimate WAL: for seasoned deals, compute actual weighted average life from balances
+            # Simple approximation: midpoint of amortization
+            max_bal = perf.get("max_bal", ipb)
+            # Use number of periods as proxy for maturity
+            # Better: WAL ≈ periods_so_far * avg_factor / 12 for amortizing pool
+            # We'll estimate total WAL assuming roughly linear amortization
+            # For deals still outstanding: extrapolate
+            # Simple: WAL ≈ WAT / 2 for a roughly even amortization
+            # Average original term from loans if available
+            d["wal"] = None  # Will estimate below
+        else:
+            d["wal"] = None
+
+        # Servicing fee
+        svc_annual = d.get("servicing_fee_annual_pct") or 0
+
+        # Expected losses
+        if mf.get("at_issuance_cnl_pct"):
+            d["expected_loss_pct"] = mf["at_issuance_cnl_pct"]
+        elif deal in model_forecasts:
+            d["expected_loss_pct"] = model_forecasts[deal]["predicted_loss_pct"]
+        else:
+            d["expected_loss_pct"] = None
+
+        # Realized/actual losses
+        if perf and ipb > 0:
+            d["actual_cum_losses_pct"] = perf.get("cum_losses", 0) / ipb
+        else:
+            d["actual_cum_losses_pct"] = None
+
+        # Projected losses (current model projection)
+        if mf.get("current_projected_cnl_pct"):
+            d["projected_loss_pct"] = mf["current_projected_cnl_pct"]
+        elif deal in model_forecasts:
+            d["projected_loss_pct"] = model_forecasts[deal]["actual_loss_pct"]
+        else:
+            d["projected_loss_pct"] = d.get("actual_cum_losses_pct")
+
+        # Actual cumulative interest as % of initial pool
+        if perf and ipb > 0:
+            d["actual_cum_interest_pct"] = perf.get("total_interest", 0) / ipb
+        else:
+            d["actual_cum_interest_pct"] = None
+
+        # Actual servicing as % of initial pool
+        # For Carvana, actual_servicing_fee in pool_perf is the annual % (stored raw)
+        # For CarMax, it's actual dollars. Detect by magnitude.
+        if perf and ipb > 0:
+            raw_svc = perf.get("total_servicing_raw", 0)
+            if raw_svc > 100:
+                # Looks like dollar amounts (CarMax)
+                d["actual_cum_servicing_pct"] = raw_svc / ipb
+            else:
+                # Carvana: use deal_terms servicing_fee_annual_pct * age_in_years
+                age_years = periods / 12.0
+                d["actual_cum_servicing_pct"] = svc_annual * age_years
+        else:
+            d["actual_cum_servicing_pct"] = None
+
+        # % forecast complete (how much of pool has amortized)
+        if perf and ipb > 0:
+            latest_bal = perf.get("max_bal", ipb)
+            # We need ending balance, not max. Let me use cum_losses + amortization proxy
+            # Actually: pool factor = ending_balance / initial_balance
+            # We stored max_bal. We need a different query for ending balance.
+            # Approximate: fraction of interest collected vs expected
+            d["pct_complete"] = None  # Will compute from WAL below
+        else:
+            d["pct_complete"] = None
+
+        # Trigger risk
+        if mf.get("breach_prob") is not None:
+            d["trigger_risk"] = mf["breach_prob"]
+        else:
+            d["trigger_risk"] = None
+
+    # ── 6b. WAL estimation from pool_performance balance series ──────────
+    # Run a targeted query to get ending pool balances for WAL calc
+    for db_path in [
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "db", "dashboard.db"),
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                     "carmax_abs", "db", "dashboard.db"),
+    ]:
+        if not os.path.exists(db_path):
+            continue
+        conn = sqlite3.connect(db_path)
+        # Get ending balances by deal ordered by date
+        wal_rows = conn.execute("""
+            SELECT deal, ending_pool_balance
+            FROM pool_performance
+            WHERE dist_date_iso IS NOT NULL AND ending_pool_balance IS NOT NULL
+            ORDER BY deal, dist_date_iso
+        """).fetchall()
+        conn.close()
+
+        # Group by deal
+        from collections import defaultdict
+        deal_bals = defaultdict(list)
+        for row in wal_rows:
+            deal_bals[row[0]].append(row[1])
+
+        for d in deals_data:
+            if d.get("wal") is not None:
+                continue
+            deal = d["deal"]
+            ipb = d["initial_pool_balance"]
+            bals = deal_bals.get(deal, [])
+            if not bals or not ipb:
+                continue
+            # WAL = sum of (balance_i / initial_balance) / 12 for monthly periods
+            # This gives the actual weighted average life in years
+            wal_sum = sum(b / ipb for b in bals) / 12.0
+            periods = len(bals)
+            # For in-progress deals, extrapolate assuming current paydown rate continues
+            latest_bal = bals[-1] if bals else 0
+            pool_factor = latest_bal / ipb if ipb > 0 else 0
+            if pool_factor > 0.05:
+                # Deal still outstanding — extrapolate
+                # Monthly paydown rate
+                if periods > 1:
+                    # Average monthly principal paydown as fraction of initial
+                    monthly_paydown = (1.0 - pool_factor) / periods
+                    if monthly_paydown > 0:
+                        remaining_months = pool_factor / monthly_paydown
+                        # Add estimated remaining WAL contribution
+                        # Remaining balance declines linearly from current to 0
+                        remaining_wal = (pool_factor / 2.0) * (remaining_months / 12.0)
+                        wal_sum += remaining_wal
+            d["wal"] = round(wal_sum, 2)
+            d["pool_factor"] = pool_factor
+            d["pct_complete"] = 1.0 - pool_factor
+
+    # ── 7. Compute derived economics columns ─────────────────────────────
+    for d in deals_data:
+        wal = d.get("wal")
+        svc = d.get("servicing_fee_annual_pct") or 0
+
+        # Total excess spread = excess/yr × WAL
+        if d.get("excess_spread_yr") is not None and wal:
+            d["total_excess_spread"] = d["excess_spread_yr"] * wal
+        else:
+            d["total_excess_spread"] = None
+
+        # Servicing & other = servicing_fee × WAL
+        if wal:
+            d["total_servicing_cost"] = svc * wal
+        else:
+            d["total_servicing_cost"] = None
+
+        # Expected residual = total excess - servicing - expected losses
+        if (d.get("total_excess_spread") is not None and
+                d.get("total_servicing_cost") is not None and
+                d.get("expected_loss_pct") is not None):
+            d["expected_residual"] = (d["total_excess_spread"]
+                                      - d["total_servicing_cost"]
+                                      - d["expected_loss_pct"])
+        else:
+            d["expected_residual"] = None
+
+        # Actual/projected residual = actual interest - actual servicing - projected losses
+        if (d.get("actual_cum_interest_pct") is not None and
+                d.get("actual_cum_servicing_pct") is not None and
+                d.get("projected_loss_pct") is not None):
+            d["actual_residual"] = (d["actual_cum_interest_pct"]
+                                    - d["actual_cum_servicing_pct"]
+                                    - d["projected_loss_pct"])
+        else:
+            d["actual_residual"] = None
+
+        # Variance
+        if d.get("actual_residual") is not None and d.get("expected_residual") is not None:
+            d["variance"] = d["actual_residual"] - d["expected_residual"]
+        else:
+            d["variance"] = None
+
+    # ── 8. Build HTML table ──────────────────────────────────────────────
+    def pf(v, decimals=2):
+        """Format as percentage string."""
+        if v is None:
+            return '<span style="color:#999">—</span>'
+        return f"{v*100:.{decimals}f}%"
+
+    def pf_color(v, decimals=2):
+        """Format percentage with green/red coloring."""
+        if v is None:
+            return '<span style="color:#999">—</span>'
+        color = "#388E3C" if v >= 0 else "#D32F2F"
+        return f'<span style="color:{color};font-weight:600">{v*100:.{decimals}f}%</span>'
+
+    def dollar_hover(pct_val, ipb, decimals=2):
+        """Return pct string with $ amount on hover."""
+        if pct_val is None or ipb is None:
+            return '<span style="color:#999">—</span>'
+        dollar = pct_val * ipb
+        dollar_str = fm(dollar)
+        return f'<span title="{dollar_str}">{pct_val*100:.{decimals}f}%</span>'
+
+    def trigger_badge(prob):
+        """Color-coded trigger risk badge."""
+        if prob is None:
+            return '<span style="color:#999">—</span>'
+        if prob < 0.10:
+            return f'<span style="background:#C8E6C9;color:#2E7D32;padding:1px 6px;border-radius:4px;font-weight:600">{prob*100:.0f}%</span>'
+        elif prob < 0.30:
+            return f'<span style="background:#FFF9C4;color:#F57F17;padding:1px 6px;border-radius:4px;font-weight:600">{prob*100:.0f}%</span>'
+        else:
+            return f'<span style="background:#FFCDD2;color:#C62828;padding:1px 6px;border-radius:4px;font-weight:600">{prob*100:.0f}%</span>'
+
+    # Separate Carvana Prime, CarMax, Carvana Non-Prime
+    crvna_prime = [d for d in deals_data if d["issuer"] == "CRVNA" and "-P" in d["deal"]]
+    crvna_nonprime = [d for d in deals_data if d["issuer"] == "CRVNA" and "-N" in d["deal"]]
+    carmx_deals = [d for d in deals_data if d["issuer"] == "CARMX"]
+
+    # Sort chronologically
+    crvna_prime.sort(key=lambda x: x.get("cutoff_date") or "")
+    crvna_nonprime.sort(key=lambda x: x.get("cutoff_date") or "")
+    carmx_deals.sort(key=lambda x: x.get("cutoff_date") or "")
+
+    # Interleave Carvana Prime and CarMax by cutoff date for main table
+    prime_and_carmax = sorted(crvna_prime + carmx_deals, key=lambda x: x.get("cutoff_date") or "")
+
+    def _build_table_rows(deal_list):
+        rows_html = ""
+        for d in deal_list:
+            ipb = d["initial_pool_balance"]
+            cutoff = d.get("cutoff_date") or "—"
+            if cutoff != "—":
+                # Format as Mon-YY
+                try:
+                    from datetime import datetime as _dt
+                    dt = _dt.strptime(cutoff, "%Y-%m-%d")
+                    cutoff = dt.strftime("%b-%y")
+                except Exception:
+                    pass
+
+            # Trigger schedule compact
+            trigger_text = ""
+            cnl_sched = d.get("cnl_trigger_schedule")
+            dq_sched = d.get("dq_trigger_schedule")
+            oc_t = d.get("oc_target_pct")
+            oc_f = d.get("oc_floor_pct")
+            res_pct = d.get("initial_reserve_pct")
+
+            parts = []
+            if dq_sched:
+                try:
+                    import json as _json
+                    sched = _json.loads(dq_sched) if isinstance(dq_sched, str) else dq_sched
+                    if sched:
+                        first = sched[0].get("threshold_pct", "?")
+                        last = sched[-1].get("threshold_pct", "?")
+                        parts.append(f"DQ {first}-{last}%")
+                except Exception:
+                    pass
+            if oc_t:
+                parts.append(f"OC↑{oc_t*100:.1f}%")
+            if oc_f:
+                parts.append(f"OC↓{oc_f*100:.1f}%")
+            if res_pct:
+                parts.append(f"Res {res_pct*100:.1f}%")
+            trigger_text = "; ".join(parts) if parts else "—"
+
+            wal_str = f"{d['wal']:.1f}y" if d.get("wal") else '<span style="color:#999">—</span>'
+
+            row_class = ""
+            if d["issuer"] == "CARMX":
+                row_class = ' style="background:#FFF8E1"'
+            elif "-N" in d["deal"]:
+                row_class = ' style="background:#FBE9E7"'
+
+            rows_html += f"""<tr{row_class}>
+<td style="font-weight:600">{d['issuer']}</td>
+<td>{d['deal']}</td>
+<td>{cutoff}</td>
+<td title="${ipb:,.0f}">{fm(ipb)}</td>
+<td>{pf(d['aaa_pct'],1)}</td>
+<td>{pf(d['aa_pct'],1)}</td>
+<td>{pf(d['a_pct'],1)}</td>
+<td>{pf(d['bbb_pct'],1)}</td>
+<td>{pf(d['oc_pct'],1)}</td>
+<td style="font-size:.6rem;max-width:120px;white-space:normal;line-height:1.2">{trigger_text}</td>
+<td>{pf(d.get('consumer_wac'),2)}</td>
+<td>{pf(d.get('cost_of_debt'),2)}</td>
+<td>{pf(d.get('excess_spread_yr'),2)}</td>
+<td>{wal_str}</td>
+<td>{dollar_hover(d.get('total_excess_spread'), ipb)}</td>
+<td>{dollar_hover(d.get('total_servicing_cost'), ipb)}</td>
+<td>{dollar_hover(d.get('expected_loss_pct'), ipb)}</td>
+<td>{pf_color(d.get('expected_residual'))}</td>
+<td>{dollar_hover(d.get('actual_cum_interest_pct'), ipb)}</td>
+<td>{dollar_hover(d.get('actual_cum_servicing_pct'), ipb)}</td>
+<td>{dollar_hover(d.get('projected_loss_pct'), ipb)}</td>
+<td>{pf_color(d.get('actual_residual'))}</td>
+<td>{pf_color(d.get('variance'))}</td>
+<td>{pf(d.get('pct_complete'),0) if d.get('pct_complete') is not None else '<span style="color:#999">—</span>'}</td>
+<td>{trigger_badge(d.get('trigger_risk'))}</td>
+</tr>\n"""
+        return rows_html
+
+    def _weighted_avg_row(deal_list, label):
+        """Compute weighted-average summary row."""
+        total_ipb = sum(d["initial_pool_balance"] for d in deal_list)
+        if total_ipb == 0:
+            return ""
+
+        def wavg(key):
+            vals = [(d.get(key), d["initial_pool_balance"]) for d in deal_list if d.get(key) is not None]
+            if not vals:
+                return None
+            return sum(v * w for v, w in vals) / sum(w for _, w in vals)
+
+        wa = {k: wavg(k) for k in [
+            "aaa_pct", "aa_pct", "a_pct", "bbb_pct", "oc_pct",
+            "consumer_wac", "cost_of_debt", "excess_spread_yr", "wal",
+            "total_excess_spread", "total_servicing_cost", "expected_loss_pct",
+            "expected_residual", "actual_cum_interest_pct", "actual_cum_servicing_pct",
+            "projected_loss_pct", "actual_residual", "variance", "pct_complete",
+        ]}
+
+        wal_str = f"{wa['wal']:.1f}y" if wa.get("wal") else "—"
+        return f"""<tr style="background:#E3F2FD;font-weight:700">
+<td colspan="3">{label}</td>
+<td>{fm(total_ipb)}</td>
+<td>{pf(wa['aaa_pct'],1)}</td><td>{pf(wa['aa_pct'],1)}</td>
+<td>{pf(wa['a_pct'],1)}</td><td>{pf(wa['bbb_pct'],1)}</td>
+<td>{pf(wa['oc_pct'],1)}</td><td></td>
+<td>{pf(wa['consumer_wac'],2)}</td><td>{pf(wa['cost_of_debt'],2)}</td>
+<td>{pf(wa['excess_spread_yr'],2)}</td><td>{wal_str}</td>
+<td>{pf(wa['total_excess_spread'],2)}</td><td>{pf(wa['total_servicing_cost'],2)}</td>
+<td>{pf(wa['expected_loss_pct'],2)}</td><td>{pf_color(wa['expected_residual'])}</td>
+<td>{pf(wa['actual_cum_interest_pct'],2)}</td><td>{pf(wa['actual_cum_servicing_pct'],2)}</td>
+<td>{pf(wa['projected_loss_pct'],2)}</td><td>{pf_color(wa['actual_residual'])}</td>
+<td>{pf_color(wa['variance'])}</td><td>{pf(wa['pct_complete'],0) if wa.get('pct_complete') else '—'}</td>
+<td></td>
+</tr>\n"""
+
+    forecast_source = "Markov chain" if has_markov else "logistic regression"
+    forecast_note = "" if has_markov else ' <span style="color:#F57F17;font-size:.6rem">(LR model — Markov pending)</span>'
+
+    h = f"""<div style="padding:8px 12px">
+<h2 style="font-size:1rem;margin-bottom:4px">Residual Economics — All Deals{forecast_note}</h2>
+<p style="font-size:.7rem;color:#666;margin-bottom:8px">
+Hover any % cell for dollar amount. Yellow rows = CarMax. Orange rows = Carvana non-prime.
+Loss forecasts from {forecast_source} model. {'Markov model running — forecasts will update.' if not has_markov else ''}
+</p>
+</div>
+<div class="tbl" style="max-height:70vh;overflow:auto">
+<table style="font-size:.6rem">
+<thead>
+<tr style="position:sticky;top:0;z-index:2;background:#f5f5f5">
+<th colspan="4" style="text-align:center;border-bottom:2px solid #1976D2">Identity</th>
+<th colspan="5" style="text-align:center;border-bottom:2px solid #388E3C">Capital Structure (% init pool)</th>
+<th style="text-align:center;border-bottom:2px solid #607D8B">Terms</th>
+<th colspan="8" style="text-align:center;border-bottom:2px solid #FF9800">Initial Forecast (% orig bal)</th>
+<th colspan="4" style="text-align:center;border-bottom:2px solid #7B1FA2">Realized / Projected</th>
+<th colspan="3" style="text-align:center;border-bottom:2px solid #D32F2F">Variance &amp; Risk</th>
+</tr>
+<tr style="position:sticky;top:22px;z-index:2;background:#f5f5f5">
+<th>Issuer</th><th>Deal</th><th>Cutoff</th><th>Orig Bal</th>
+<th>AAA</th><th>AA</th><th>A</th><th>BBB</th><th>OC</th>
+<th>Triggers / OC / Reserve</th>
+<th>WAC</th><th>CoD</th><th>XS/yr</th><th>WAL</th>
+<th>Tot XS</th><th>Svc</th><th>Exp Loss</th><th>Exp Resid</th>
+<th>Act Int</th><th>Act Svc</th><th>Proj Loss</th><th>Act Resid</th>
+<th>Var</th><th>%Done</th><th>Trig Risk</th>
+</tr>
+</thead>
+<tbody>
+"""
+
+    # Main section: Prime + CarMax interleaved
+    h += _build_table_rows(prime_and_carmax)
+
+    # Summary rows
+    if crvna_prime:
+        h += _weighted_avg_row(crvna_prime, "Carvana Prime Avg")
+    if carmx_deals:
+        h += _weighted_avg_row(carmx_deals, "CarMax Avg")
+    if prime_and_carmax:
+        h += _weighted_avg_row(prime_and_carmax, "All Prime Avg")
+
+    # Non-prime section
+    if crvna_nonprime:
+        h += f"""<tr><td colspan="25" style="background:#FFCCBC;text-align:center;font-weight:700;padding:6px">
+Carvana Non-Prime</td></tr>\n"""
+        h += _build_table_rows(crvna_nonprime)
+        h += _weighted_avg_row(crvna_nonprime, "Carvana Non-Prime Avg")
+
+    h += "</tbody></table></div>\n"
+
+    # ── 9. Methodology writeup ───────────────────────────────────────────
+    h += _generate_methodology_writeup()
+
+    return h
+
+
+def _generate_methodology_writeup():
+    """Comprehensive methodology section for the economics tab."""
+
+    h = """
+<div style="padding:12px 16px;max-width:900px;margin:0 auto">
+<h2 style="font-size:1.1rem;color:#1976D2;border-bottom:2px solid #1976D2;padding-bottom:4px;margin-top:24px">
+Methodology: Markov Chain Loss Forecasting &amp; Residual Economics</h2>
+
+<p style="font-size:.8rem;color:#333;line-height:1.6;margin:12px 0">
+This section explains how we forecast lifetime credit losses and compute residual economics
+for each auto-loan securitization. The audience is assumed to know basic statistics but not
+Markov chains specifically. We provide enough detail that someone could reproduce the model
+from this description alone.
+</p>
+
+<!-- ── 1. What is a Markov Chain ── -->
+<h3 style="font-size:.95rem;color:#333;margin-top:20px">1. What is a Markov Chain?</h3>
+<p style="font-size:.78rem;line-height:1.6;color:#444">
+A Markov chain is a model where the future depends only on the <em>current state</em>, not
+the full history. For auto loans, this means: if we know a loan is currently 2 payments
+behind, the probability it goes to 3 payments behind next month depends only on that
+"2 payments behind" status — not on whether it was current 6 months ago or always delinquent.
+</p>
+<p style="font-size:.78rem;line-height:1.6;color:#444">
+<strong>Concrete example:</strong> A loan that is 60 days past due has (say) a 35% chance of
+curing to 30 days past due next month, a 40% chance of staying at 60 days, a 20% chance of
+going to 90 days, and a 5% chance of paying off entirely. These probabilities are the
+"transition matrix" — the core of the model.
+</p>
+
+<!-- ── 2. State Diagram ── -->
+<h3 style="font-size:.95rem;color:#333;margin-top:20px">2. Delinquency States</h3>
+<p style="font-size:.78rem;line-height:1.6;color:#444;margin-bottom:8px">
+Every loan, every month, occupies exactly one state:
+</p>
+
+<!-- CSS State Diagram -->
+<div style="overflow-x:auto;padding:8px 0">
+<div style="display:flex;align-items:center;gap:4px;min-width:700px;font-size:.7rem">
+<div style="background:#C8E6C9;border:2px solid #388E3C;border-radius:8px;padding:8px 10px;text-align:center;min-width:65px">
+<div style="font-weight:700;color:#2E7D32">Current</div>
+<div style="color:#555;font-size:.6rem">0 DPD</div>
+</div>
+<div style="color:#888">→</div>
+<div style="background:#FFF9C4;border:2px solid #F9A825;border-radius:8px;padding:8px 10px;text-align:center;min-width:65px">
+<div style="font-weight:700;color:#F57F17">1 Pmt</div>
+<div style="color:#555;font-size:.6rem">30 DPD</div>
+</div>
+<div style="color:#888">→</div>
+<div style="background:#FFE0B2;border:2px solid #FF9800;border-radius:8px;padding:8px 10px;text-align:center;min-width:65px">
+<div style="font-weight:700;color:#E65100">2 Pmt</div>
+<div style="color:#555;font-size:.6rem">60 DPD</div>
+</div>
+<div style="color:#888">→</div>
+<div style="background:#FFCCBC;border:2px solid #FF5722;border-radius:8px;padding:8px 10px;text-align:center;min-width:65px">
+<div style="font-weight:700;color:#BF360C">3 Pmt</div>
+<div style="color:#555;font-size:.6rem">90 DPD</div>
+</div>
+<div style="color:#888">→</div>
+<div style="background:#FFCDD2;border:2px solid #E53935;border-radius:8px;padding:8px 10px;text-align:center;min-width:65px">
+<div style="font-weight:700;color:#C62828">4 Pmt</div>
+<div style="color:#555;font-size:.6rem">120 DPD</div>
+</div>
+<div style="color:#888">→</div>
+<div style="background:#EF9A9A;border:2px solid #C62828;border-radius:8px;padding:8px 10px;text-align:center;min-width:65px">
+<div style="font-weight:700;color:#B71C1C">5+ Pmt</div>
+<div style="color:#555;font-size:.6rem">150+ DPD</div>
+</div>
+<div style="color:#888">→</div>
+<div style="background:#B71C1C;border:2px solid #7f0000;border-radius:8px;padding:8px 10px;text-align:center;min-width:65px">
+<div style="font-weight:700;color:white">Default</div>
+<div style="color:#ffcdd2;font-size:.6rem">Absorbing</div>
+</div>
+</div>
+<div style="display:flex;justify-content:flex-start;margin-top:4px;margin-left:0">
+<div style="background:#E3F2FD;border:2px solid #1976D2;border-radius:8px;padding:8px 10px;text-align:center;min-width:65px;font-size:.7rem">
+<div style="font-weight:700;color:#1565C0">Payoff</div>
+<div style="color:#555;font-size:.6rem">Absorbing</div>
+</div>
+<div style="color:#888;font-size:.7rem;padding:8px 6px">← Any state can transition here (prepayment or maturity)</div>
+</div>
+</div>
+
+<p style="font-size:.78rem;line-height:1.6;color:#444;margin-top:8px">
+<strong>Default</strong> and <strong>Payoff</strong> are <em>absorbing states</em> — once a loan
+enters, it stays. All other states are <em>transient</em>: a loan can move forward (deeper
+delinquency), backward (cure), or sideways (stay). At each monthly transition, the model
+assigns a probability to each possible next state.
+</p>
+
+<!-- ── 3. Cell Key ── -->
+<h3 style="font-size:.95rem;color:#333;margin-top:20px">3. Segmentation Cells</h3>
+<p style="font-size:.78rem;line-height:1.6;color:#444">
+Not all loans behave the same. A 780-FICO borrower with 60% LTV behaves very differently
+from a 580-FICO borrower at 130% LTV. The model segments loans into cells based on
+characteristics that empirically predict transition behavior:
+</p>
+<div style="overflow-x:auto">
+<table style="font-size:.72rem;max-width:600px;margin:8px 0">
+<thead><tr><th>Dimension</th><th>Buckets</th><th>Why It Matters</th></tr></thead>
+<tbody>
+<tr><td><strong>FICO score</strong></td><td>&lt;580, 580-619, 620-659, 660-699, 700-739, 740+</td>
+<td>Primary credit-quality signal</td></tr>
+<tr><td><strong>LTV ratio</strong></td><td>&lt;80%, 80-99%, 100-119%, 120%+</td>
+<td>Negative equity drives strategic default</td></tr>
+<tr><td><strong>Original term</strong></td><td>≤48mo, 49-60mo, 61-72mo, 73+mo</td>
+<td>Longer terms = slower equity build</td></tr>
+<tr><td><strong>Loan age</strong></td><td>0-6, 7-12, 13-24, 25-36, 37+mo</td>
+<td>Default hazard peaks in months 12-24</td></tr>
+<tr><td><strong>Delinquency status</strong></td><td>Current, 1-pmt, 2-pmt, 3-pmt, 4-pmt, 5+pmt</td>
+<td>The Markov state itself</td></tr>
+<tr><td><strong>Modification flag</strong></td><td>Modified / Not modified</td>
+<td>Modified loans have different cure rates</td></tr>
+</tbody></table>
+</div>
+<p style="font-size:.78rem;line-height:1.6;color:#444">
+Each unique combination of these dimensions forms a "cell." A cell might be: "FICO 620-659,
+LTV 100-119%, 61-72mo term, age 13-24mo, currently 1 payment behind, not modified." The model
+estimates a separate transition matrix for each populated cell.
+</p>
+
+<!-- ── 4. How Transitions Are Estimated ── -->
+<h3 style="font-size:.95rem;color:#333;margin-top:20px">4. Estimating Transition Probabilities</h3>
+<p style="font-size:.78rem;line-height:1.6;color:#444">
+For each cell, we count what happened to similar loans in the next month:
+</p>
+<div style="background:#F5F5F5;border-left:3px solid #1976D2;padding:8px 12px;margin:8px 0;font-size:.75rem;font-family:monospace;line-height:1.5">
+Cell: FICO 620-659, LTV 100-119%, 61-72mo, age 13-24, status = 2 payments behind<br>
+Observed loans in this cell: 2,847<br>
+<br>
+Next-month outcomes:<br>
+&nbsp;&nbsp;Cured to Current: &nbsp;142 &nbsp;(5.0%)<br>
+&nbsp;&nbsp;Improved to 1-pmt: &nbsp;498 &nbsp;(17.5%)<br>
+&nbsp;&nbsp;Stayed at 2-pmt: &nbsp;&nbsp;1,139 (40.0%)<br>
+&nbsp;&nbsp;Worsened to 3-pmt: &nbsp;854 &nbsp;(30.0%)<br>
+&nbsp;&nbsp;Defaulted: &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;171 &nbsp;(6.0%)<br>
+&nbsp;&nbsp;Paid off: &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;43 &nbsp;&nbsp;(1.5%)
+</div>
+<p style="font-size:.78rem;line-height:1.6;color:#444">
+<strong>Each loan counts equally</strong> — we do not weight by balance. The training dataset spans
+<strong>3.5 million loans across 53 deals</strong> (16 Carvana + 37 CarMax), giving dense coverage
+of most cells. Cells with fewer than 30 observations borrow strength from adjacent cells
+(e.g., the nearest FICO bucket) via shrinkage.
+</p>
+
+<!-- ── Example Transition Heatmap ── -->
+<h3 style="font-size:.95rem;color:#333;margin-top:20px">Example: Transition Probability Heatmap</h3>
+<p style="font-size:.78rem;line-height:1.6;color:#444;margin-bottom:8px">
+This shows a stylized transition matrix for a typical prime borrower cell (FICO 700+, LTV &lt;100%,
+age 7-12 months). Each row is the current state; each column is the next-month state.
+Darker cells = higher probability.
+</p>
+<div style="overflow-x:auto">
+<table style="font-size:.65rem;max-width:650px;margin:8px 0;text-align:center">
+<thead><tr><th style="min-width:60px">From \\ To</th>
+<th>Current</th><th>1-Pmt</th><th>2-Pmt</th><th>3-Pmt</th><th>4-Pmt</th><th>5+</th>
+<th>Default</th><th>Payoff</th></tr></thead>
+<tbody>
+<tr><td style="font-weight:600">Current</td>
+<td style="background:#1B5E20;color:white">93.5%</td>
+<td style="background:#A5D6A7">3.2%</td>
+<td style="background:#E8F5E9">0.1%</td>
+<td style="background:#FFF">0.0%</td>
+<td style="background:#FFF">0.0%</td>
+<td style="background:#FFF">0.0%</td>
+<td style="background:#FFEBEE">0.1%</td>
+<td style="background:#BBDEFB">3.1%</td></tr>
+<tr><td style="font-weight:600">1-Pmt</td>
+<td style="background:#66BB6A;color:white">42.0%</td>
+<td style="background:#FFD54F">35.0%</td>
+<td style="background:#FFB74D">15.0%</td>
+<td style="background:#FFCCBC">3.0%</td>
+<td style="background:#FFF">0.5%</td>
+<td style="background:#FFF">0.0%</td>
+<td style="background:#EF9A9A">2.5%</td>
+<td style="background:#BBDEFB">2.0%</td></tr>
+<tr><td style="font-weight:600">2-Pmt</td>
+<td style="background:#A5D6A7">18.0%</td>
+<td style="background:#C8E6C9">12.0%</td>
+<td style="background:#FFD54F">35.0%</td>
+<td style="background:#FFB74D">22.0%</td>
+<td style="background:#FFCCBC">4.0%</td>
+<td style="background:#FFF">1.0%</td>
+<td style="background:#E57373;color:white">6.5%</td>
+<td style="background:#BBDEFB">1.5%</td></tr>
+<tr><td style="font-weight:600">3-Pmt</td>
+<td style="background:#C8E6C9">8.0%</td>
+<td style="background:#E8F5E9">5.0%</td>
+<td style="background:#FFF9C4">10.0%</td>
+<td style="background:#FFD54F">30.0%</td>
+<td style="background:#FFB74D">25.0%</td>
+<td style="background:#FFCCBC">5.0%</td>
+<td style="background:#E53935;color:white">16.0%</td>
+<td style="background:#BBDEFB">1.0%</td></tr>
+<tr><td style="font-weight:600">4-Pmt</td>
+<td style="background:#E8F5E9">3.0%</td>
+<td style="background:#FFF">2.0%</td>
+<td style="background:#FFF">3.0%</td>
+<td style="background:#FFF9C4">8.0%</td>
+<td style="background:#FFD54F">28.0%</td>
+<td style="background:#FFB74D">20.0%</td>
+<td style="background:#C62828;color:white">35.0%</td>
+<td style="background:#BBDEFB">1.0%</td></tr>
+<tr><td style="font-weight:600">5+ Pmt</td>
+<td style="background:#FFF">1.0%</td>
+<td style="background:#FFF">1.0%</td>
+<td style="background:#FFF">1.0%</td>
+<td style="background:#FFF">2.0%</td>
+<td style="background:#FFF9C4">5.0%</td>
+<td style="background:#FFB74D">20.0%</td>
+<td style="background:#B71C1C;color:white">69.0%</td>
+<td style="background:#BBDEFB">1.0%</td></tr>
+</tbody></table>
+</div>
+<p style="font-size:.72rem;color:#888;margin-top:2px">
+Values are illustrative for a prime-quality cell. Actual matrices vary by cell and are
+estimated from observed data.
+</p>
+
+<!-- ── 5. Bayesian Calibration ── -->
+<h3 style="font-size:.95rem;color:#333;margin-top:20px">5. Bayesian Calibration to Deal Performance</h3>
+<p style="font-size:.78rem;line-height:1.6;color:#444">
+The base transition matrices come from pooled historical data across all deals. But each deal
+has its own personality — origination standards shift, used-car prices fluctuate, the economy
+evolves. <strong>Bayesian calibration</strong> adjusts the base matrices using that deal's
+actual performance so far.
+</p>
+<p style="font-size:.78rem;line-height:1.6;color:#444">
+<strong>How it works:</strong> We model the deal-specific loss multiplier as a log-normal
+random variable. The prior (before seeing data) assumes the deal behaves like the historical
+average. As we observe actual defaults, the posterior shifts toward the deal's true experience.
+</p>
+
+<div style="background:#F5F5F5;border-left:3px solid #FF9800;padding:10px 14px;margin:10px 0;font-size:.75rem;line-height:1.6">
+<strong>Calibration parameters:</strong><br>
+&bull; Prior: log-normal with mean = 1.0 (historical average) and &sigma;<sub>prior</sub> = 0.30<br>
+&bull; Credibility weight = realized defaults ($) / total pool balance ($)<br>
+&bull; Posterior multiplier = (prior &times; (1 - credibility)) + (observed_rate / predicted_rate &times; credibility)<br>
+&bull; All transition-to-default probabilities in the matrix are scaled by this multiplier
+</div>
+
+<h4 style="font-size:.85rem;color:#555;margin-top:12px">Worked Example: CRVNA 2022-P1</h4>
+<div style="background:#FAFAFA;border:1px solid #E0E0E0;border-radius:6px;padding:10px 14px;margin:8px 0;font-size:.72rem;line-height:1.7;font-family:monospace">
+Base model predicted lifetime CNL: 4.27% of original pool<br>
+Realized CNL so far (48 months): 2.64% ($27.9M on $1,054M pool)<br>
+Pool factor: 16.3% remaining<br>
+<br>
+Credibility weight = $27.9M / $1,054M = 0.026<br>
+Observed / predicted ratio = 2.64% / 4.27% = 0.618<br>
+<br>
+Posterior multiplier = (1.0 &times; 0.974) + (0.618 &times; 0.026) = 0.990<br>
+<br>
+Interpretation: With only 16.3% of the pool remaining, the model is 97.4% reliant on the<br>
+prior and 2.6% on observed data. The slight underperformance vs forecast barely moves the<br>
+dial because most losses have already been realized. The calibrated projected CNL is ~6.6%<br>
+(realized 2.64% + remaining losses on the 16.3% still outstanding, scaled by 0.990).
+</div>
+
+<!-- ── 6. At-Issuance Forecast ── -->
+<h3 style="font-size:.95rem;color:#333;margin-top:20px">6. At-Issuance Forecast</h3>
+<p style="font-size:.78rem;line-height:1.6;color:#444">
+At deal closing, every loan starts in the "Current" state at age 0. The model steps the
+entire pool forward month by month through the transition matrices:
+</p>
+<ol style="font-size:.78rem;line-height:1.6;color:#444;padding-left:20px">
+<li>Start: all loans Current, age 0</li>
+<li>Each month: apply the cell-specific transition matrix for that loan's characteristics and age</li>
+<li>Loans that transition to "Default" are removed and their balance counted as a loss (net of estimated recovery)</li>
+<li>Loans that transition to "Payoff" are removed (prepayment or maturity)</li>
+<li>Continue until the pool is fully liquidated (all loans in Default or Payoff)</li>
+<li>The cumulative default balance divided by the original pool balance = <strong>at-issuance CNL forecast</strong></li>
+</ol>
+<p style="font-size:.78rem;line-height:1.6;color:#444">
+<strong>No calibration is applied at issuance</strong> — the deal has no performance history yet.
+This is a purely forward-looking forecast based on the pool's initial characteristics.
+</p>
+
+<!-- ── 7. In-Progress Forecast ── -->
+<h3 style="font-size:.95rem;color:#333;margin-top:20px">7. In-Progress (Current) Forecast</h3>
+<p style="font-size:.78rem;line-height:1.6;color:#444">
+For deals with performance history, the forecast is updated monthly:
+</p>
+<ol style="font-size:.78rem;line-height:1.6;color:#444;padding-left:20px">
+<li>Start from the <em>current</em> state of every surviving loan (using latest servicer report)</li>
+<li>Apply the <strong>calibrated</strong> transition matrices (base &times; posterior multiplier)</li>
+<li>Project remaining defaults forward until pool liquidation</li>
+<li>Total projected CNL = <strong>realized losses to date + projected remaining losses</strong></li>
+</ol>
+<p style="font-size:.78rem;line-height:1.6;color:#444">
+As a deal seasons, the in-progress forecast converges toward realized performance because
+fewer loans remain to default and the calibration multiplier increasingly reflects observed data.
+</p>
+
+<!-- ── 8. Residual Profit Calculation ── -->
+<h3 style="font-size:.95rem;color:#333;margin-top:20px">8. Residual Profit Calculation</h3>
+<p style="font-size:.78rem;line-height:1.6;color:#444">
+The residual profit to the equity holder (the issuer or any residual certificate buyer) is
+the excess of interest income over debt service, servicing costs, and credit losses. All
+figures below are expressed as a percentage of the original pool balance.
+</p>
+
+<div style="overflow-x:auto">
+<table style="font-size:.72rem;max-width:650px;margin:8px 0">
+<thead><tr><th style="min-width:200px">Line Item</th><th>Formula</th></tr></thead>
+<tbody>
+<tr><td>Consumer WAC (a)</td><td>Weighted average coupon of underlying loans at origination</td></tr>
+<tr><td>Cost of Debt (b)</td><td>Weighted average coupon of all note tranches</td></tr>
+<tr><td>Excess Spread / Year (c)</td><td>= a - b</td></tr>
+<tr><td>Weighted Average Life (d)</td><td>From Markov projection or balance amortization</td></tr>
+<tr><td>Total Excess Spread (e)</td><td>= c &times; d</td></tr>
+<tr><td>Total Servicing Cost (f)</td><td>= annual servicing fee % &times; d</td></tr>
+<tr><td>Expected Losses (g)</td><td>= model-projected lifetime CNL %</td></tr>
+<tr><td style="font-weight:700;color:#1976D2">Expected Residual Profit (h)</td>
+<td style="font-weight:700">= e - f - g</td></tr>
+</tbody></table>
+</div>
+
+<h4 style="font-size:.85rem;color:#555;margin-top:12px">Worked Example: Mature Deal (CRVNA 2021-P1)</h4>
+<div style="background:#FAFAFA;border:1px solid #E0E0E0;border-radius:6px;padding:10px 14px;margin:8px 0;font-size:.72rem;line-height:1.7;font-family:monospace">
+Original pool balance: $415M<br>
+Consumer WAC: 8.18% | Cost of Debt: 0.55% | Excess spread/yr: 7.64%<br>
+Estimated WAL: ~2.5 years<br>
+<br>
+Total excess spread: 7.64% &times; 2.5 = 19.09%<br>
+Total servicing cost: 0.57% &times; 2.5 = 1.42%<br>
+Expected losses (model): 5.20%<br>
+<br>
+<strong>Expected residual profit: 19.09% - 1.42% - 5.20% = 12.47%</strong> ($51.7M on $415M pool)<br>
+<br>
+Actual cumulative interest earned: 16.25% of original pool ($67.4M)<br>
+Actual cumulative servicing: 2.85%<br>
+Realized + projected losses: 4.58%<br>
+<br>
+<strong>Actual residual profit: 16.25% - 2.85% - 4.58% = 8.82%</strong> ($36.6M)<br>
+Variance from forecast: -3.66% (faster prepayments shortened WAL, reducing total interest)
+</div>
+
+<h4 style="font-size:.85rem;color:#555;margin-top:12px">Worked Example: In-Progress Deal (CRVNA 2024-P3)</h4>
+<div style="background:#FAFAFA;border:1px solid #E0E0E0;border-radius:6px;padding:10px 14px;margin:8px 0;font-size:.72rem;line-height:1.7;font-family:monospace">
+Original pool balance: $639M (cutoff Aug-2024, ~18 months seasoned)<br>
+Consumer WAC: 13.69% | Cost of Debt: 4.51% | Excess spread/yr: 9.17%<br>
+Estimated WAL: ~2.8 years<br>
+<br>
+Total excess spread: 9.17% &times; 2.8 = 25.69%<br>
+Total servicing cost: 0.59% &times; 2.8 = 1.65%<br>
+Expected losses (model): 5.93%<br>
+<br>
+<strong>Expected residual profit: 25.69% - 1.65% - 5.93% = 18.10%</strong><br>
+<br>
+Actual interest so far: 15.64% | Actual servicing: 0.88% | Realized losses: 1.99%<br>
+Pool factor: ~54% remaining — still early<br>
+<br>
+<strong>Actual residual so far: 15.64% - 0.88% - 1.99% = 12.77%</strong><br>
+Variance vs expected: -5.33% (but deal is only ~46% complete — variance will narrow as<br>
+remaining interest is collected)
+</div>
+
+<!-- ── 9. Data Sources ── -->
+<h3 style="font-size:.95rem;color:#333;margin-top:20px">9. Data Sources</h3>
+<div style="overflow-x:auto">
+<table style="font-size:.72rem;max-width:650px;margin:8px 0">
+<thead><tr><th>Source</th><th>Filing Type</th><th>What We Extract</th></tr></thead>
+<tbody>
+<tr><td>SEC EDGAR</td><td>424(b)(5) Prospectus</td>
+<td>Capital structure, note coupons, triggers, servicing fee, pool characteristics</td></tr>
+<tr><td>SEC EDGAR</td><td>10-D Monthly Report</td>
+<td>Pool performance: collections, losses, delinquencies, note balances, OC levels</td></tr>
+<tr><td>SEC EDGAR</td><td>ABS-EE (XML)</td>
+<td>Loan-level data: FICO, LTV, term, rate, balance, status, geography</td></tr>
+</tbody></table>
+</div>
+<p style="font-size:.78rem;line-height:1.6;color:#444">
+<strong>Dataset:</strong> ~3.5 million loans across 53 deals (16 Carvana + 37 CarMax).
+Carvana deals span 2020-P1 through 2025-P4. CarMax deals span 2014-1 through 2025-3.
+All data is public, sourced directly from SEC EDGAR with no third-party intermediary.
+</p>
+
+<!-- ── 10. Limitations ── -->
+<h3 style="font-size:.95rem;color:#333;margin-top:20px">10. Limitations &amp; Caveats</h3>
+<ul style="font-size:.78rem;line-height:1.6;color:#444;padding-left:20px">
+<li><strong>Stationarity assumption:</strong> The model assumes transition probabilities
+estimated from historical data apply to the future. A severe recession, sudden used-car
+price collapse, or regulatory change could invalidate this. The model has no macro-economic
+inputs and cannot forecast regime changes.</li>
+<li><strong>Vintage effects:</strong> Origination standards shift over time. 2021 non-prime
+originations (during the used-car bubble) behave very differently from 2024 originations.
+Cell-level segmentation captures some of this via FICO/LTV, but not all vintage-specific
+factors (e.g., inflated vehicle values that aren't visible in the LTV ratio).</li>
+<li><strong>Prospectus parsing:</strong> Capital structure and deal terms are extracted
+algorithmically from SEC 424(b)(5) filings. These prospectuses vary in format across
+issuers and vintages. Some fields (particularly CNL trigger schedules and OC step-up
+schedules) may be incomplete or approximate. Manual spot-checks have been performed but
+exhaustive validation has not.</li>
+<li><strong>Recovery rates:</strong> The model applies historical average recovery rates
+(~40% of chargeoff amount). Actual recoveries depend on used-car market conditions at
+the time of liquidation, which the model does not forecast.</li>
+<li><strong>Loan-level data availability:</strong> ABS-EE loan-level data is available only
+from the point each deal was issued. Pre-securitization performance (origination to
+securitization cutoff) is not observed.</li>
+<li><strong>Small-cell estimation:</strong> Some cells (e.g., very high FICO + very high LTV)
+have limited observations. These borrow from adjacent cells, which may introduce bias if
+the adjacent cell is not truly representative.</li>
+</ul>
+
+<h3 style="font-size:.95rem;color:#333;margin-top:20px">Reproducibility</h3>
+<p style="font-size:.78rem;line-height:1.6;color:#444">
+<strong>To reproduce this model, you need:</strong>
+</p>
+<ol style="font-size:.78rem;line-height:1.6;color:#444;padding-left:20px">
+<li>ABS-EE loan-level XML files from SEC EDGAR for all Carvana (CRVNA) and CarMax (CARMX) auto ABS deals</li>
+<li>10-D monthly servicer reports for pool-level performance data</li>
+<li>424(b)(5) prospectus supplements for capital structure and deal terms</li>
+<li>Segment loans into cells by: FICO (6 buckets), LTV (4 buckets), original term (4 buckets),
+loan age (5 buckets), delinquency status (7 states including Default and Payoff), modification flag (2 levels)</li>
+<li>For each cell, count monthly state transitions across all observed loan-months. Each loan gets equal weight.</li>
+<li>Minimum cell size: 30 observations. Below that, borrow from the nearest FICO bucket.</li>
+<li>Bayesian calibration: log-normal prior with &mu; = 0, &sigma; = 0.30 (i.e., prior multiplier = 1.0).
+Credibility = realized_defaults_$ / total_pool_balance_$. Posterior multiplier =
+prior &times; (1 - credibility) + (observed/predicted) &times; credibility.</li>
+<li>Forward simulation: step each surviving loan monthly through its cell-appropriate transition matrix until
+all loans reach an absorbing state (Default or Payoff).</li>
+<li>Loss amount = defaulted balance &times; (1 - recovery rate). Historical average recovery rate: 39.8%.</li>
+</ol>
+
+<p style="font-size:.72rem;color:#888;margin-top:16px;padding-top:8px;border-top:1px solid #E0E0E0">
+Model last updated: April 2026. Data as of latest available 10-D filings on SEC EDGAR.
+Questions: clifford.sosin@casinvestmentpartners.com
+</p>
+</div>
+"""
+    return h
+
+
 def main():
     global _chart_id
     _chart_id = 0
@@ -2966,9 +4024,14 @@ def main():
     logger.info("Generating Default Model analysis...")
     model_html = generate_model_content()
 
+    # Generate residual economics tab (landing page)
+    logger.info("Generating Residual Economics tab...")
+    economics_html = generate_economics_tab()
+
     # Build deal selector dropdown with comparison entries at top
     first_deal = list(deal_contents.keys())[0]
-    options = '<option value="__model__">--- Default Model ---</option>\n'
+    options = '<option value="__economics__" selected>--- Residual Economics ---</option>\n'
+    options += '<option value="__model__">--- Default Model ---</option>\n'
     options += '<option value="__prime__">--- Prime Comparison (Carvana) ---</option>\n'
     options += '<option value="__nonprime__">--- Non-Prime Comparison (Carvana) ---</option>\n'
     if carmax_prime_html:
@@ -2977,7 +4040,7 @@ def main():
         options += '<option value="__cross__">--- Carvana vs CarMax — Prime ---</option>\n'
     options += '<option disabled>──────────────────</option>\n'
     options += "\n".join(
-        f'<option value="{d}" {"selected" if d == first_deal else ""}>Carvana {d}</option>'
+        f'<option value="{d}">Carvana {d}</option>'
         for d in deal_contents)
     # CarMax per-deal entries — prefix "cm_" in the value to keep them in a
     # disjoint namespace from Carvana deal IDs.
@@ -2989,7 +4052,9 @@ def main():
 
     # Build per-deal content divs
     all_deal_html = ""
-    # Add model and comparison sections first (hidden by default)
+    # Economics tab shown by default (landing page)
+    all_deal_html += f'<div id="deal-__economics__" class="deal-block" style="display:block">\n{economics_html}\n</div>\n'
+    # Add model and comparison sections (hidden by default)
     all_deal_html += f'<div id="deal-__model__" class="deal-block" style="display:none">\n{model_html}\n</div>\n'
     all_deal_html += f'<div id="deal-__prime__" class="deal-block" style="display:none">\n{prime_html}\n</div>\n'
     all_deal_html += f'<div id="deal-__nonprime__" class="deal-block" style="display:none">\n{nonprime_html}\n</div>\n'
@@ -2997,10 +4062,9 @@ def main():
         all_deal_html += f'<div id="deal-__carmax_prime__" class="deal-block" style="display:none">\n{carmax_prime_html}\n</div>\n'
     if cross_issuer_html:
         all_deal_html += f'<div id="deal-__cross__" class="deal-block" style="display:none">\n{cross_issuer_html}\n</div>\n'
-    # Add individual deal sections
+    # Add individual deal sections (all hidden — economics tab is default)
     for deal, (metrics, tabs) in deal_contents.items():
-        display = "block" if deal == first_deal else "none"
-        all_deal_html += f'<div id="deal-{deal}" class="deal-block" style="display:{display}">\n{metrics}\n{tabs}\n</div>\n'
+        all_deal_html += f'<div id="deal-{deal}" class="deal-block" style="display:none">\n{metrics}\n{tabs}\n</div>\n'
     # CarMax per-deal sections. Div id prefix matches the option value above.
     for deal, (metrics, tabs) in carmax_deal_contents.items():
         all_deal_html += (
