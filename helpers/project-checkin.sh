@@ -151,11 +151,13 @@ def main():
         is_busy = "esc to interrupt" in cap
 
         # Check PROJECT_STATE.md freshness only if the chat looks active
+        # AND the file hasn't been touched within the cooldown window (if it was,
+        # the chat is clearly stewarding — no nudge needed, avoids self-reinforcing loop).
         ps_path = Path(cwd) / "PROJECT_STATE.md"
         if ps_path.exists() and is_busy:
             mtime = ps_path.stat().st_mtime
             age = now - mtime
-            if age > STALE_PROJECT_STATE_SEC:
+            if age > STALE_PROJECT_STATE_SEC and age > CHECKIN_COOLDOWN_SEC:
                 debounce = STATE_DIR / f"{name}.checkin_stale_ps"
                 if should_checkin(debounce, CHECKIN_COOLDOWN_SEC):
                     notify(
