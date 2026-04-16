@@ -741,17 +741,23 @@ def run():
             by_db[db_path].append(deal)
 
         for db_path, deals in by_db.items():
-            logger.info(f"Loading covariates from {os.path.basename(db_path)} ({len(deals)} deals)...")
-            covariates = load_covariates(db_path, deals)
-            logger.info(f"  {len(covariates):,} loan covariates loaded, RSS={_rss_mb():.0f} MB")
+            # Process in chunks of 5 deals to cap covariate memory.
+            # Loading all 3.1M CarMax loans at once OOM'd the 4GB droplet.
+            DEAL_CHUNK = 5
+            for ci in range(0, len(deals), DEAL_CHUNK):
+                chunk = deals[ci:ci + DEAL_CHUNK]
+                logger.info(f"Loading covariates from {os.path.basename(db_path)} "
+                            f"chunk {ci // DEAL_CHUNK + 1}/{(len(deals) + DEAL_CHUNK - 1) // DEAL_CHUNK} "
+                            f"({len(chunk)} deals)...")
+                covariates = load_covariates(db_path, chunk)
+                logger.info(f"  {len(covariates):,} loan covariates loaded, RSS={_rss_mb():.0f} MB")
 
-            logger.info(f"Streaming transitions from {os.path.basename(db_path)}...")
-            latest = agg.ingest_db(db_path, deals, covariates)
-            all_latest.update(latest)
+                logger.info(f"Streaming transitions...")
+                latest = agg.ingest_db(db_path, chunk, covariates)
+                all_latest.update(latest)
 
-            # Free covariates after ingestion
-            del covariates
-            gc.collect()
+                del covariates
+                gc.collect()
 
         logger.info(f"\n{model_type.upper()} aggregation complete:")
         logger.info(f"  Total transition observations: {agg.total_obs:,}")
