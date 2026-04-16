@@ -187,7 +187,14 @@ XBRL_VINTAGE_TAG_OFFSETS: list[tuple[str, int]] = [
 # fetcher then captures a bounded window around the first match.
 
 NARRATIVE_SECTION_PATTERNS: dict[str, list[str]] = {
-    "delinquency": [r"delinqu", r"past due", r"aging"],
+    "delinquency": [
+        r"\bdelinquen",                       # delinquency/delinquent (word boundary avoids false matches)
+        r"\bpast\s+due\b",                    # "past due" as a phrase
+        r"\baging\b",                         # standalone "aging" (avoids "managing", "packaging")
+        r"\b(?:30|60|90)\s*(?:to|-)\s*(?:59|89|more)\s*days",  # table headers: "30-59 days", "90 or more days"
+        r"\b90\s*(?:days?\s+)?(?:or\s+more|past\s+due|\+)",    # "90 days or more", "90+ days"
+        r"\bnon[- ]?accrual\b",               # non-accrual status (HGV/VAC use this)
+    ],
     "fico": [r"\bFICO\b", r"credit score"],
     "vintage": [
         r"vintage",
