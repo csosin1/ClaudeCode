@@ -15,14 +15,12 @@ _Last updated: 2026-04-14 (pre-resize checkpoint)_
 
 **All prior data issues closed.** Data trusted, live dashboard updated, 7 commits of fixes in this session.
 
-**Ingest complete. Build pipeline dispatched (targeting user's morning deadline).**
-- CarMax loan-level: 37/37 target deals, 3,097,086 loans. Carvana: 16/16 deals, 417,074 loans. Total: 3.5M loans across 53 deals.
-- XML cache deleted to free disk (91% → 73%). Data is in DB; XMLs re-downloadable from EDGAR if needed.
-- Two parallel agents dispatched:
-  - (a) Dashboard fill-in: Cash Waterfall + Recovery sub-tabs for CarMax
-  - (b) Prospectus parser: extract deal_terms (note coupons, triggers, OC, reserve, servicing fee) from 424B for all 65 deals
-- After both: QA audit → unified Markov rebuild → residual-economics landing tab + writeup → deploy → final QA.
-
+**Markov training in progress (chunk 5/8, ~50 min remaining). All audit findings fixed.**
+- CarMax loan-level: 37/37 deals, 3.1M loans. Audit: clean (F-019 fixed).
+- Deal_terms: 65/67 deals extracted. Audit: 4 parser bugs found + fixed (a175004).
+- Markov: unified Carvana Prime + CarMax (equal-weight per loan), chunked covariates (5 deals/batch). RSS 541 MB.
+- Residual-economics tab: live with LR-model placeholders. Will auto-upgrade to Markov forecasts on regeneration.
+- After Markov: re-export DBs → regenerate dashboard → promote → final QA (MAX_ITER=10).
 ## Memory hygiene 2026-04-14
 Found 2 wins: (1) `export_dashboard_db.py` in both issuers materialized 417k-row `loans` table via `fetchall()` → converted to chunked cursor iteration (10k/batch). Peak RSS on export dropped to ~38MB. (2) WAL checkpoint on both 3GB source DBs — already clean (0 frames). Deferred as separate tasks: `.copy()` chains in `generate_dashboard.py` (intentional chart-data isolation, needs careful audit); `pd.read_sql_query` full-table load in `default_model.py:206` (417k-row loan frame — chunksize conversion is a small refactor, not hygiene); no `lru_cache` anywhere (cache-layer add, out of scope).
 
