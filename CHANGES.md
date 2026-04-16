@@ -11,6 +11,21 @@ Builder appends a per-task entry here after each build. Format:
 - **Things for the reviewer:**
 ```
 
+## 2026-04-16 — abs-dashboard: proposal to infra from per-project CLAUDE.md cleanup
+
+Cleaning up 752-line /opt/abs-dashboard/CLAUDE.md (stale fork of old master). Walked every non-master section. Most is obsolete harness spec already superseded by master + SKILLS/. These items NOT found in current master/SKILLS and worth consideration for promotion. Infra agent to decide.
+
+- **[HIGH] Task sizing rule:** "No single Builder task should touch more than ~5 files or span more than one logical feature. Complex tasks must be broken into sequential sub-tasks before delegation. If a task requires more than 10 agent delegations total, stop and surface — it needs scoping down." Concrete numeric guardrail complementing "Spec Before Any Code." Candidate: new line in master or SKILLS/parallel-execution.md.
+- **[MED] Builder scope discipline:** "Builder only touches files directly required by the task. No opportunistic refactoring or reorganizing. Anything else goes in CHANGES.md for a future task." Master's Three Gates implies but doesn't state it. Candidate: addition to "Spec Before Any Code" or a new builder-conventions skill.
+- **[MED] Auto-FAIL criteria:** "Blank/NaN data fields, page load >8 seconds, broken mobile layout at 390px, unhandled JS error, regression in existing features, webhook health check failure." Data-audit-qa has criteria but not this compact user-facing failure-mode list. Candidate: extend SKILLS/data-audit-qa.md or SKILLS/new-project-checklist.md.
+- **[MED] Link Audit pattern:** full 27-line playbook for detecting drift between hub pages and deployed projects (dead links, unlinked projects, empty hubs). Deploy-time check that catches a recurring drift class. Candidate: **new SKILL `link-audit.md`**.
+- **[MED] Move/Delete project playbooks:** detailed step-by-step for safely relocating/deleting a project (nginx redirect, flag-file-gated cleanup, update hub cards, log-rotation/cron cleanup). Candidate: **new SKILL `project-lifecycle.md`** or extend SKILLS/new-project-checklist.md.
+- **[LOW] Observability baseline emphasis:** "every project must have error log + 5-min uptime cron + logrotate." new-project-checklist has logrotate + uptime cron but less emphasis on error logs for server-side processes. Candidate: one-line addition.
+
+**Confirmed obsolete (not proposing):** Agent Team Structure table, Workflow diagram, Stage 1-7 flow, TASK_STATE.md template, Session Recovery section, Deployment System internals, Security per-stage expansions. All replaced by current master + SKILLS/session-resilience.md / security-baseline.md / deploy-rollback.md / new-project-checklist.md.
+
+Post-cleanup /opt/abs-dashboard/CLAUDE.md trimmed to ~50 lines of genuinely project-specific content (Python venv, SEC EDGAR source chain, deal-naming conventions, filing-cache structure, source-faithful data quirks). Committed on branch `claude/carvana-loan-dashboard-4QMPM`.
+
 ## 2026-04-13 — car-offers (/setup humanloop credentials)
 
 - **What was built:**
