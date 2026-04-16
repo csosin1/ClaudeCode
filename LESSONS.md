@@ -78,3 +78,20 @@ service starts cleanly. `modprobe zram` confirms the module loads.
 (zram, nbd, dummy, ipvs, etc.) should install `linux-modules-extra-$(uname -r)`
 before `apt install`-ing the tool that depends on them. Add to the
 new-droplet bootstrap checklist once we have one.
+
+## 2026-04-16 — Carvana Loan Dashboard overnight OOM; chat respawned but didn't notice dead ingestion
+
+**Symptom:** User arrived in the morning to find carvana-abs-2 "working" (dispatching agents) but the carmax ingestion that was supposed to complete overnight had died silently. The chat didn't realize the ingestion was gone.
+
+**Root cause (compound):**
+1. **OOM kill at 02:19 UTC.** Markov model loaded all covariate data at once → 912 MB Python process on a 4 GB box with 5 Claude chats (1.2 GB) + zram. Kernel OOM-killed the Python process + the Claude CLI in the same tmux cgroup scope.
+2. **Ingestion ran as `nohup &`, not `systemd-run`.** No MemoryMax cap, no auto-restart, no heartbeat. `SKILLS/long-running-jobs.md` prescribes `systemd-run` but was never applied to this job. Third incident with this root cause.
+3. **Respawned chat didn't verify background work survived.** `claude-project.sh` sent "read PROJECT_STATE.md" but not "check if your background processes are still alive." Chat resumed from JSONL, continued dispatching new agents, never noticed the ingestion was dead.
+4. **No project-progress cron.** Watchdog checks "is the chat alive?" not "is the project making progress?" An overnight stall went undetected for hours.
+
+**Fix:**
+1. `project-checkin.sh` — new cron every 30 min. Detects: busy chat with stale PROJECT_STATE.md (>60 min), idle chat with in-progress task (should be doing something), dead long-running jobs. Sends status-check prompt + notifies.
+2. `claude-project.sh` updated: post-spawn prompt now includes "check if background processes from prior work are alive via `ps`." Catches the respawn-after-OOM blind spot.
+3. OOM fix already committed by the carvana-abs-2 chat (`0e7ab53`: chunked covariate loading, 5 deals/batch).
+
+**Preventive rule:** Long-running jobs (>15 min) MUST use `systemd-run` with `MemoryMax` per `SKILLS/long-running-jobs.md`. Agents that launch `nohup ... &` for >15-min processes are violating the skill. The project-checkin cron is the oversight mechanism. PROJECT_STATE.md must be updated every 30 min during active work — stale state during active work is now an alertable condition.

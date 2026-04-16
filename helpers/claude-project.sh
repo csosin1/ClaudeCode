@@ -78,3 +78,11 @@ HTML
 else
     echo "WARNING: couldn't capture remote-control URL for $PROJECT"
 fi
+
+# Post-spawn: prompt chat to verify state + background processes.
+# Critical for respawn-after-OOM: the chat must realize if a prior background
+# job (ingestion, model training, etc.) died when the old session did.
+sleep 2
+tmux send-keys -t "$SESSION:$PROJECT" \
+    "Session (re)started. Read PROJECT_STATE.md. Then: (1) check if any background processes from prior work should be running (ps -ef | grep relevant-name). If dead, note in PROJECT_STATE.md and decide whether to restart. (2) Verify current focus is still accurate. (3) One-line status ack." Enter
+sleep 2
