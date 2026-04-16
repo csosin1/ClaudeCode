@@ -99,6 +99,20 @@ def _derive(records: list[dict]) -> list[dict]:
     for ticker, seq in by_ticker.items():
         seq.sort(key=_as_date_key)
         for i, r in enumerate(seq):
+            # Guard: if gross == net and allowance is material (>$50M), the
+            # "gross" is almost certainly the net figure mis-labeled by the
+            # narrative extractor (common when a filing only discloses
+            # "notes receivable, net" and Claude copies it into both fields).
+            # Null-out gross so downstream doesn't treat it as a real gross.
+            g, a, n = (r.get("gross_receivables_total_mm"),
+                       r.get("allowance_for_loan_losses_mm"),
+                       r.get("net_receivables_mm"))
+            if (g is not None and n is not None and a is not None
+                    and abs(g - n) < 1.0 and a > 50):
+                log.info("merge: nulling gross for %s %s (gross==net=%s with allow=%s — likely mis-labeled net)",
+                         r.get("ticker"), r.get("period_end"), g, a)
+                r["gross_receivables_total_mm"] = None
+
             # Derive allowance_coverage_pct from allowance/gross when the
             # upstream extractors didn't fill it in (common when XBRL
             # provides both scalars but no pre-computed ratio).
