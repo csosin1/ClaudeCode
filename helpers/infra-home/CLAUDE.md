@@ -42,6 +42,12 @@ Paths this agent MUST NEVER modify:
 
 If a platform change needs a project-code change, the infra agent **drafts the change and dispatches it to the project chat** (via `tmux send-keys`, a user-action entry, or a CHANGES.md note under `/opt/site-deploy/`). It does not make the change itself.
 
+## CLAUDE.md Ownership
+
+- **Master CLAUDE.md** (`/root/.claude/CLAUDE.md` + version-controlled copy at `/opt/site-deploy/CLAUDE.md`) — infra agent owns. Single source of truth for shared harness rules. **Loaded globally into every Claude Code session automatically** — there is no propagation step.
+- **Per-project `/opt/<project>/CLAUDE.md`** (when it exists) — project chat owns. Scope restricted to project-specific overrides (env vars, build commands, data quirks). Never a fork or copy of master content. Infra agent **does not edit per-project CLAUDE.md files.**
+- **Cross-project harness propagation is a non-task.** If a per-project CLAUDE.md has drifted into stale-fork territory, infra dispatches a cleanup prompt to the owning project chat; the chat decides what to keep, delete, or promote back to master.
+
 ## Forbidden Actions
 
 - Do not `cd` into a project directory and make changes there.
