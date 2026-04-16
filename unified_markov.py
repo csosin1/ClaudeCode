@@ -777,6 +777,28 @@ def run():
         del agg
         gc.collect()
 
+        # ── Offload all_latest to disk (was OOM'ing at ~1GB for 3.3M loans) ──
+        import tempfile
+        temp_db_path = os.path.join(tempfile.gettempdir(), f"markov_latest_{model_type}.db")
+        logger.info(f"Offloading {len(all_latest):,} loan states to {temp_db_path}...")
+        temp_conn = sqlite3.connect(temp_db_path)
+        temp_conn.execute("DROP TABLE IF EXISTS latest_state")
+        temp_conn.execute("CREATE TABLE latest_state (deal TEXT, asset TEXT, state_json TEXT)")
+        batch = []
+        for (deal_key, asset_key), loan_state in all_latest.items():
+            batch.append((deal_key, asset_key, json.dumps(loan_state, default=str)))
+            if len(batch) >= 50000:
+                temp_conn.executemany("INSERT INTO latest_state VALUES (?,?,?)", batch)
+                batch.clear()
+        if batch:
+            temp_conn.executemany("INSERT INTO latest_state VALUES (?,?,?)", batch)
+        temp_conn.execute("CREATE INDEX idx_ls_deal ON latest_state(deal)")
+        temp_conn.commit()
+        logger.info(f"  Offloaded. Freeing memory...")
+        del all_latest
+        gc.collect()
+        logger.info(f"  RSS after offload: {_rss_mb():.0f} MB")
+
         # ── Per-deal forecasts ────────────────────────────────────────
         logger.info(f"\nRunning per-deal forecasts for {model_type}...")
 
@@ -784,9 +806,16 @@ def run():
             # At-issuance forecast
             ai_cnl_pct, ai_loss, ai_bal = at_issuance_forecast(model, db_path, deal)
 
+            # Load per-deal latest states from temp DB (not all_latest in RAM)
+            deal_latest = {}
+            for asset, state_json in temp_conn.execute(
+                    "SELECT asset, state_json FROM latest_state WHERE deal=?", (deal,)):
+                deal_latest[(deal, asset)] = json.loads(state_json)
+
             # In-progress forecast
             fwd_loss, lb_loss, n_active, active_bal, n_total = \
-                in_progress_forecast(model, all_latest, deal)
+                in_progress_forecast(model, deal_latest, deal)
+            del deal_latest
 
             # Realized losses
             realized = get_realized_losses(db_path, [deal])
