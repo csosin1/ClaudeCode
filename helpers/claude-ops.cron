@@ -11,3 +11,7 @@
 */30 * * * * root /usr/local/bin/chat-telemetry.py >/dev/null 2>&1
 # Project check-in: every 30 min, verify active chats are making progress
 */30 * * * * root /usr/local/bin/project-checkin.sh >/dev/null 2>&1
+# Branch audit: every Monday 09:00 UTC, surface stale/behind branches
+0 9 * * 1 root /usr/local/bin/branch-audit.sh >/dev/null 2>&1
+# Projects smoketest (report-only): every hour, records 200/regression state
+17 * * * * root /usr/local/bin/projects-smoketest.sh report --quiet >/dev/null 2>&1

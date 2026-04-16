@@ -83,21 +83,14 @@ For number-intensive projects, every load-bearing dataset or dashboard passes a 
 ## Keep-the-User-Informed
 Scope upfront ("~15 min", "~3 hr"). Update `task-status.sh` on start / done / block. Notify via `notify.sh` at discrete milestones and on blockers. Include approximate token cost in the `done` summary. Full conventions in `SKILLS/user-info-conventions.md`.
 
-## Never Idle — Gather Blockers Upfront, Work Around the Rest
-The user's time is the scarce resource. Do not end a turn waiting for permission when useful work remains.
-
-**At task start, produce a blocker brief.** Enumerate every permission, secret, external account, or info you'll need. Ask for them in one batch.
-
-**While waiting, keep making progress.** Do everything that doesn't depend on pending items: scaffolding, tests, stubs, mocks, docs. Leave clean hooks for the blocking pieces.
-
-**If you discover a blocker mid-work:** add to the brief, pivot to unblocked work, batch with any pending asks. Never stop and wait.
-
-**Never emit:** "want me to continue?", "should I proceed?", "tell me if…". Just act. If a decision is genuinely irreversible or externally visible, state the plan and execute unless stopped.
-
-**Legitimately ending a turn:** everything is blocked on user input AND no further work exists; task complete and QA green; scope exploded and warrants a revised estimate.
+## Never Idle
+User's time is scarce. Do not end a turn waiting for permission when useful work remains. At task start: produce a blocker brief (all permissions, secrets, accounts you'll need), ask in one batch, proceed in parallel on unblocked work. Never emit "want me to continue?" or equivalents. Legitimate turn-ending: fully blocked on user input AND no unblocked work; task complete and QA green; scope blowout warranting a revised estimate. See `SKILLS/never-idle.md`.
 
 ## Git
-Commit and push before stopping; commit messages explain *why*. Tag before every deploy. No force-push to published commits. Main branch only for deploys.
+Commit and push before stopping; commit messages explain *why*. Tag before every deploy. No force-push to published commits. Main branch only for deploys. **Always branch from `origin/main`; never branch off another feature branch.** `start-task.sh` enforces this.
+
+## Shared-Infra Smoketest
+Any change to `/etc/nginx/`, `/etc/systemd/system/`, `/etc/cron*`, or `/var/www/` runs `projects-smoketest.sh gate` before commit. If any project URL regresses, fix or revert before shipping.
 
 ---
 *Situational how-to lives in `SKILLS/` — search there when starting any non-trivial task. Key ones to know: `platform-stewardship`, `parallel-execution`, `non-blocking-prompt-intake`, `root-cause-analysis`, `session-resilience`, `data-audit-qa`, `memory-hygiene`, `capacity-monitoring`, `user-action-tracking`, `accounts-registry`, `long-running-jobs`, `feature-branch-worktree`, `deploy-rollback`, `new-project-checklist`, `secrets`, `security-baseline`, `multi-project-windows`, `remote-control-fallback`, `user-info-conventions`.*
