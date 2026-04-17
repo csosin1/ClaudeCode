@@ -36,6 +36,20 @@ EXCLUDES=(
     --exclude='node_modules/'
     --exclude='.chrome-profile*/'
     --exclude='*.log'
+    # Stateful DB files: post-migration, prod is the authoritative writer
+    # for SQLite state (gyms.db, offers.db, dashboard.db, etc.). rsync's
+    # default "source wins when mtime/content differs" would let a stale
+    # dev copy clobber a freshly-written prod DB. Exclude all SQLite
+    # variants + their WAL/shared-memory sidecars. Audit discovered
+    # 2026-04-17 in response to "make sure writes land in the right place."
+    --exclude='*.db'
+    --exclude='*.db-wal'
+    --exclude='*.db-journal'
+    --exclude='*.db-shm'
+    --exclude='*.sqlite'
+    --exclude='*.sqlite-wal'
+    --exclude='*.sqlite-journal'
+    --exclude='*.sqlite-shm'
 )
 
 NOW=$(date -Iseconds)

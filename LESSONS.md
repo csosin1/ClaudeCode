@@ -167,6 +167,16 @@ new-droplet bootstrap checklist once we have one.
 
 **Preventive rule:** Infra-QA position coverage must include **request-origin characteristics** (IP, UA, TLS fingerprint where testable) of the *actual consumer*, not just generalized external fetches. Default-curl responses are insufficient evidence that a bot-fingerprinted consumer will succeed. When a consumer can't be fully fingerprint-simulated (e.g., Claude web-fetch uses TLS details we can't replicate), explicitly flag the coverage gap and require user-manual confirmation as an observation-required item — same pattern as phone-receipt for ntfy.
 
+## 2026-04-17 — rsync excludes didn't protect per-project SQLite DBs at project root
+
+**Symptom:** post-migration audit (in response to "make sure writes land in the right place") revealed `/opt/gym-intelligence/gyms.db`, `/opt/car-offers-preview/offers.db`, and `/opt/abs-dashboard/carvana_abs/db/dashboard.db` were NOT excluded from the dev→prod rsync. Rsync with default behavior (`-a` preserves mtimes, source wins when content differs) would let a stale dev DB overwrite a freshly-written prod DB. Not yet observed in practice — caught at audit.
+
+**Root cause:** `post-deploy-rsync.sh` excluded `data/`, `venv/`, `.env`, `__pycache__`, `*.pyc`, `*.log`, `.git/`, `.claude/`, `node_modules/`, `.chrome-profile*/`. These cover scratch state, secrets, and code-but-not-state. But per-project SQLite files live at the project root (not under `data/`) with names like `gyms.db`, `offers.db`. They are state, but they look like project files.
+
+**Fix:** added `*.db`, `*.db-wal`, `*.db-journal`, `*.db-shm`, `*.sqlite` (same four suffixes) to EXCLUDES. Verified post-install that rsync no longer transfers DB files even when mtime differs. Config-level only — no downstream reconfiguration needed since dev stopped writing to these files post-migration and prod is the sole writer.
+
+**Preventive rule:** rsync exclusion lists must be enumerated by *ownership semantic*, not by path convention. When adding a new project to a dev↔prod rsync pipeline, list its state stores explicitly (SQLite DBs, LevelDB dirs, on-disk caches, uploaded-file stores) and exclude them. Never assume a `data/` prefix convention is universal — projects that predate the convention or that use library defaults will not match.
+
 ## 2026-04-17 — post-deploy-rsync ran POST_CMD every cron cycle, killing long-sleeping service
 
 **Symptom:** `timeshare-surveillance-watcher.service` on prod was getting SIGTERM'd and restarted every ~5 minutes for at least 4 hours (49+ restarts observed). `active (running)` from systemd's perspective, but its 900-second sleep between EDGAR fetch cycles never completed, so no new filings were pulled. `/opt/timeshare-surveillance-live/dashboard/data/combined.json` mtime frozen at 2026-04-13 01:40 UTC — 4 days stale. Classic silent-write-failure: health checks pass (HTTP 200 serving the stale file) while the underlying data pipeline hasn't fired in days.
