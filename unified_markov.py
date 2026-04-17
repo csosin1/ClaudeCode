@@ -1024,12 +1024,17 @@ def run():
                         f"realized={realized_pct:.2f}%  cal={cal:.2f}x  "
                         f"complete={pct_complete:.0%}")
 
-        # Free latest state for this model
-        del all_latest
+        # all_latest was already deleted after offload (line 937); do not
+        # delete again — the second del raises UnboundLocalError.
+
+        # ── Persist THIS model's results incrementally ────────────────
+        # If a later model_type crashes, earlier model's forecasts are saved.
+        logger.info(f"\nPersisting {model_type} results... RSS={_rss_mb():.0f} MB")
+        _persist_results({d: r for d, r in results.items() if r["model_type"] == model_type})
         gc.collect()
 
-    # ── Persist results ───────────────────────────────────────────────
-    logger.info(f"\nPersisting results... RSS={_rss_mb():.0f} MB")
+    # ── Persist all results (safety: also at end) ─────────────────────
+    logger.info(f"\nFinal persist... RSS={_rss_mb():.0f} MB")
     _persist_results(results)
 
     logger.info(f"\nDone. Peak RSS: {_rss_mb():.0f} MB")
