@@ -15,7 +15,13 @@ _Last updated: 2026-04-14 (pre-resize checkpoint)_
 
 **All prior data issues closed.** Data trusted, live dashboard updated, 7 commits of fixes in this session.
 
-**MIGRATED TO PROD + RESUMED 2026-04-17 12:10 UTC.** abs-dashboard now runs on prod droplet (10.116.0.3, `ssh prod-private`), 8GB RAM / 4 CPUs. Chunk size bumped 5→12 for faster training (all Carvana deals fit in 1 chunk, CarMax in 4 chunks). Markov PID 161684 on prod. Dev copy preserved 24h as rollback only (/opt/abs-dashboard on 159.223.127.125 is deprecated — do not write there). ETA ~90-120min end-to-end on prod vs 3-4hr on dev.
+**🟢 DELIVERY COMPLETE 2026-04-17 23:00 UTC.** Full build pipeline done + final QA PASS. Live at https://casinv.dev/CarvanaLoanDashBoard/
+- 53 Markov deal_forecasts (16 Carvana + 37 CarMax)
+- Residual Economics landing tab with real at-issuance, projected, realized values + cap structure + Other Terms col
+- 1,978-word methodology writeup + state-transition diagram + worked examples
+- Final commits: `127a6a4` (rendering 100× bug fix), `600cf79` (numpy vectorization, 14× speedup), `ce22886` (Markov OOM + incremental save), `71b28e2` (chunk=12), `71f18e2` prior audit pass
+- Non-blocking follow-on: Trigger Risk column shows "—" (Markov doesn't yet emit OC-breach probability; follow-on task to add to unified_markov.py)
+- Fix-forward: vectorized forecast_loan validated to 2e-13 float precision against legacy loop; independent numerical cross-check of the model math
 
 **State snapshot when paused:**
 - CarMax loan-level: 37/37 deals, 3.1M loans. Audit clean. F-019 fixed (2019-3 loan_loss_summary recomputed).
