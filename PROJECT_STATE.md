@@ -15,7 +15,7 @@ _Last updated: 2026-04-14 (pre-resize checkpoint)_
 
 **All prior data issues closed.** Data trusted, live dashboard updated, 7 commits of fixes in this session.
 
-**HALTED for infra migration (shutdown-safe).** Markov process killed at user's request pending infra work. No in-flight compute; all code pushed.
+**RESUMED 2026-04-17 11:36 UTC.** Markov relaunched (PID 896768) with disk-offload fix. ETA ~3hr end-to-end. Pipeline autonomous from here: Markov → re-export → regenerate+promote → final QA audit → done.
 
 **State snapshot when paused:**
 - CarMax loan-level: 37/37 deals, 3.1M loans. Audit clean. F-019 fixed (2019-3 loan_loss_summary recomputed).
