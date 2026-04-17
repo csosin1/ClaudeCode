@@ -11,6 +11,26 @@ Builder appends a per-task entry here after each build. Format:
 - **Things for the reviewer:**
 ```
 
+## 2026-04-17 — infra: migration phase notifications (Track B alert #4)
+
+- **What was built:**
+  - `helpers/migrate-phase.sh` (also installed to `/usr/local/bin/migrate-phase.sh`, 0755): three subcommands `start <phase> "<desc>"`, `done <phase> "<summary>"`, `fail <phase> "<reason>"`. Each appends an event to `/var/www/landing/migration-status.json` (`.phases[]` array, append-only) and fires `notify.sh` with priority default / high / urgent respectively, click URL `https://casinv.dev/migration.html`.
+  - `deploy/migration.html` (installed to `/var/www/landing/migration.html`): mobile-first dark-mode page that fetches `/migration-status.json` and renders a phase timeline table (phase, status color-coded, start, end, notes). Reversed order so newest first. Nav links to home/projects/tasks. Start/End columns hide at <500px.
+  - `/var/www/landing/migration-status.json` seeded with `{"last_updated":null,"phases":[]}`.
+- **Files modified:**
+  - New: `helpers/migrate-phase.sh`, `deploy/migration.html`.
+  - Installed (not in git): `/usr/local/bin/migrate-phase.sh`, `/var/www/landing/migration.html`, `/var/www/landing/migration-status.json`.
+- **Tests added:** Builder-level smoke only — ran `start`/`done`/`fail` against a scratch state file, verified three events appended with correct `status`, `start_time` vs `end_time` placement, and `notes`; HTML parses cleanly via `html.parser`; `/migration.html` and `/migration-status.json` both return 200 through nginx.
+- **Assumptions:**
+  - `notify.sh` exists at `/usr/local/bin/notify.sh` (it does). Helper uses absolute path so PATH tricks can't hijack it.
+  - Orchestrator is responsible for calling `migrate-phase.sh` at phase transitions. Phase 1 (timeshare) already shipped without this; Phase 2+ will use it.
+  - The state file is append-only — no "update in place" subcommand. A start followed later by done produces two events, which is what the HTML reverses-to-newest-first rendering expects.
+- **Things for the reviewer / infra-QA:**
+  - Confirm `/migration.html` renders empty state legibly at 390px and populated state correctly (can pre-populate JSON with a fake `done` event to see the green row).
+  - Confirm notify payloads match the brief's three examples (title casing, priority, click URL).
+  - No nginx/systemd/cron touched, so projects-smoketest gate not required — but `/var/www/landing/` additions could be gated if reviewer wants belt-and-braces.
+  - I fired 3 real test ntfy notifications during smoke-testing and followed up with a fourth "ignore prior 3 test notifications" clarification push.
+
 ## 2026-04-16 — abs-dashboard: proposal to infra from per-project CLAUDE.md cleanup
 
 Cleaning up 752-line /opt/abs-dashboard/CLAUDE.md (stale fork of old master). Walked every non-master section. Most is obsolete harness spec already superseded by master + SKILLS/. These items NOT found in current master/SKILLS and worth consideration for promotion. Infra agent to decide.
