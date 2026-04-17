@@ -105,3 +105,15 @@ new-droplet bootstrap checklist once we have one.
 **Fix:** Corrected the line in ADVISOR_CONTEXT.md to explicitly state "NOT YET added as of writing; correction 2026-04-17."
 
 **Preventive rule:** When writing state-of-the-world documents (ADVISOR_CONTEXT, RUNBOOK, any snapshot), only assert as actual state what was directly verified at write time. If a state was *instructed but not confirmed*, write it explicitly: "user was asked to X at <date>; as of this writing, not yet verified." This is a direct application of the data-audit-qa principle ("honest stopping conditions — verification stopped at layer N") to our own documentation, not just external data sources.
+
+## 2026-04-17 — Shipped advisor-docs endpoint; Anthropic IP ranges not publicly published
+
+**Symptom / context:** user asked for a read-only view of /opt/site-deploy/ advisor-relevant files at a public URL, gated by IP allow-list restricting access to Anthropic's web-fetcher ranges.
+
+**Finding:** Anthropic does not publish an authoritative IP range list as of 2026-04-17. Checked docs.anthropic.com/ip-ranges.json (301 → 404), docs.claude.com (same), console.anthropic.com, api.anthropic.com, and the agent-tool documentation pages. No authoritative source.
+
+**Decision per user instruction:** fell back to HTTP basic auth with a generated per-session password stored in `/opt/site-deploy/.env.docs-credential` (gitignored). nginx location block `/docs/` at `/var/www/docs/`, auth_basic via `/etc/nginx/docs.htpasswd`. Password shared with user for each advisor-session URL.
+
+**Future state:** `/usr/local/bin/refresh-docs-ip-allowlist.sh` runs weekly (`0 8 * * 1` in `/etc/cron.d/claude-ops`) to probe candidate endpoints. When Anthropic publishes, implement parsing in that stub + remove auth_basic.
+
+**Preventive rule:** when a requested mechanism depends on an upstream not-yet-shipping capability (published IP ranges, a webhook, a new API), don't block on it. Ship an equivalent-security fallback now + plant a dated probe script + LESSONS entry. Revisit quarterly. Document the fallback explicitly as a fallback, not as the intended design.

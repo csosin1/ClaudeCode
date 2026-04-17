@@ -15,3 +15,7 @@
 0 9 * * 1 root /usr/local/bin/branch-audit.sh >/dev/null 2>&1
 # Projects smoketest (report-only): every hour, records 200/regression state
 17 * * * * root /usr/local/bin/projects-smoketest.sh report --quiet >/dev/null 2>&1
+# Docs mirror: every 15 min, refresh /var/www/docs/ from /opt/site-deploy/
+*/15 * * * * root /usr/local/bin/refresh-docs.sh >/dev/null 2>&1
+# IP allow-list: weekly check for Anthropic CIDR publication (stub until they publish)
+0 8 * * 1 root /usr/local/bin/refresh-docs-ip-allowlist.sh >/dev/null 2>&1

@@ -74,6 +74,16 @@ Last updated: 2026-04-12
 - Deps: weasyprint system libs; python deps in `/opt/abs-venv/` from `carvana_abs/requirements.txt`
 - **Shared-infra deps:** nginx location blocks `/CarvanaLoanDashBoard/` (live) + `/CarvanaLoanDashBoard/preview/`; `/opt/auto_deploy.sh` + `auto-deploy.timer` (shared across repo); `/opt/abs-venv/` shared Python env; `/var/log/auto-deploy.log`. **This project's auto-deploy is the one variant from the standard flow — worth normalizing eventually.**
 
+## Advisor-docs endpoint
+- URL: https://casinv.dev/docs/
+- Served from: /var/www/docs/ (mirror of allow-listed subset of /opt/site-deploy/)
+- Auth: HTTP basic auth; password in /opt/site-deploy/.env.docs-credential (gitignored)
+- nginx: `location /docs/` in `/etc/nginx/sites-available/abs-dashboard` with `auth_basic` + `/etc/nginx/docs.htpasswd`
+- Refresh: `/usr/local/bin/refresh-docs.sh` every 15 min via cron + triggered post-commit
+- IP allow-list stub: `/usr/local/bin/refresh-docs-ip-allowlist.sh` runs weekly; will replace basic-auth when Anthropic publishes a public IP range list (404 as of 2026-04-17)
+- What's served: CLAUDE.md, RUNBOOK.md, LESSONS.md, ADVISOR_CONTEXT.md, MIGRATION_RUNBOOK.md, SKILLS/*.md, reflections/*.md, helpers/infra-home/*.md, helpers/migration-inventory-*.md, 7 bundle chunks
+- What's NOT served: ACCOUNTS.md, .env*, .sh scripts, project source, .git, CHANGES.md
+
 ## Auto-Deploy
 - Push to `main` → GitHub webhook → nginx → Python listener on `127.0.0.1:9000` → deploy in 2–3s
 - Fallback: 5-minute timer

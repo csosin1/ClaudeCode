@@ -13,3 +13,4 @@ carvana_abs/filing_cache/
 results/
 */results/
 deploy/dashboard_check.txt
+.env.docs-credential
