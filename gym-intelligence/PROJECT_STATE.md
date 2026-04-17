@@ -1,6 +1,6 @@
 # Gym Intelligence — Project State
 
-_Last updated: 2026-04-17 post-migration by Gym Intelligence session (slug: gym-intelligence)_
+_Last updated: 2026-04-17 ~20:40 UTC — present-day coverage validation shipped (commit 479852a)_
 
 ## Host topology (post-migration 2026-04-17)
 
@@ -17,7 +17,7 @@ _Last updated: 2026-04-17 post-migration by Gym Intelligence session (slug: gym-
 
 - **Thesis writeup shipped on preview** (chapters 1–6, 11.6k words, inline SVG chart, PDF download). Live at `/gym-intelligence/preview/thesis`. Audit findings (F-001–F-010) documented in `AUDIT_FINDINGS.md`. Scope narrowed to honest investor-grade diagnosis + directional evidence from the clean subset (Germany +55.6pp excess clustering) + remediation plan.
 - **16-quarter OHSOME backfill complete** (2022-Q2 through 2026-Q1, 0 failures). Time-series artifact at `writeup/data/clean-subset-timeseries.json`. Germany BF share 18.5% → 23.8% monotonic rise. Per-gym lat/lon not stored (aggregate counts only) — flagged in chapter 6 as a remediation item.
-- **Wayback validation attempted, failed, not yet retried.** First Builder picked single-gym detail pages as locator URLs (97800% deltas); API 500'd mid-run. Correct locator URLs hardcoded for 19 chains; retry ready on user go. This is the critical-path blocker: determines whether OHSOME is usable for the rigorous hypothesis test or we fall back to Google Places + present-day-only.
+- **Present-day coverage validation shipped** (commit 479852a, `writeup/data/present-day-coverage-validation.json`). 19 chains compared OHSOME 2026-Q1 vs live/public sources. Aggregate 97.8% coverage; per-chain 3 at <60% (KeepCool, EasyFitness, L'Appart — French suburban OSM gaps), 3 at >150% (Fitness Park, PureGym, Activ Fitness — matcher false-positives). Basic-Fit 98.9% — trustworthy for hypothesis test. Historical (Wayback) validation not yet run.
 - **Altafit ownership corrected** public → private on both DBs (prod).
 - **Live venv orphan purge shipped** (580MB → 30MB); deploy script self-cleans on future deploys.
 
