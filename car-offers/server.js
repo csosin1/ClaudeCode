@@ -385,6 +385,17 @@ app.get('/setup', (_req, res) => {
     <div class="row"><input type="number" id="humanloopDailyCapUsd" name="humanloopDailyCapUsd" placeholder="50" inputmode="numeric" min="1" step="1" value="${escapeAttr(config.HUMANLOOP_DAILY_CAP_USD || 50)}"><button type="button" class="save-one" data-field="humanloopDailyCapUsd">Save</button></div>
     <p class="help">Hard daily cap across Prolific + MTurk. Orchestrator pauses paid tasks after this.</p>
 
+    <h2 class="section">CAPTCHA solver (CapSolver)</h2>
+    <p class="section-sub">Auto-solves Cloudflare Turnstile on Carvana finalize. ~$0.80/solve.</p>
+
+    <label for="capsolverApiKey">CapSolver API key <span class="check" data-for="capsolverApiKey"></span></label>
+    <div class="row"><input type="password" id="capsolverApiKey" name="capsolverApiKey" placeholder="${config.CAPSOLVER_API_KEY ? '••••••••' : 'Paste CapSolver API key'}" value="" autocomplete="off"><button type="button" class="save-one" data-field="capsolverApiKey">Save</button></div>
+    <p class="help">From dashboard.capsolver.com → Settings → API Keys.</p>
+
+    <label for="capsolverHardCapUsd">CapSolver spend cap per run (USD) <span class="check" data-for="capsolverHardCapUsd"></span></label>
+    <div class="row"><input type="number" id="capsolverHardCapUsd" name="capsolverHardCapUsd" placeholder="20" inputmode="numeric" min="1" step="1" value="${escapeAttr(config.CAPSOLVER_HARD_CAP_USD || 20)}"><button type="button" class="save-one" data-field="capsolverHardCapUsd">Save</button></div>
+    <p class="help">Hard cap per session. Default $20. Orchestrator refuses to solve if cumulative spend exceeds this.</p>
+
     <button type="submit">Save everything at once</button>
   </form>
 
@@ -456,6 +467,8 @@ app.get('/setup', (_req, res) => {
           mturkSecretAccessKey: s.mturk === true,
           mturkBalanceUsd: typeof s.mturk_balance === 'number' && s.mturk_balance > 0,
           humanloopDailyCapUsd: typeof s.daily_cap === 'number' && s.daily_cap > 0,
+          capsolverApiKey: s.capsolver === true,
+          capsolverHardCapUsd: typeof s.capsolver_hard_cap === 'number' && s.capsolver_hard_cap > 0,
         };
         document.querySelectorAll('.check').forEach(function (el) {
           var key = el.getAttribute('data-for');
@@ -536,6 +549,9 @@ app.post('/api/setup', (req, res) => {
   if (!mturkBal.ok) return fail(mturkBal.error, 'mturkBalanceUsd');
   const dailyCap = parseIntField(req.body.humanloopDailyCapUsd, 'Daily cap', config.HUMANLOOP_DAILY_CAP_USD, { min: 1 });
   if (!dailyCap.ok) return fail(dailyCap.error, 'humanloopDailyCapUsd');
+  const capsolverApiKey = keep(req.body.capsolverApiKey, config.CAPSOLVER_API_KEY);
+  const capsolverHardCap = parseIntField(req.body.capsolverHardCapUsd, 'CapSolver spend cap', config.CAPSOLVER_HARD_CAP_USD, { min: 1 });
+  if (!capsolverHardCap.ok) return fail(capsolverHardCap.error, 'capsolverHardCapUsd');
 
   // MTurk access key id: only validate when a NEW non-empty value is submitted.
   // Blank means "don't change"; anything present must match the AWS IAM pattern.
@@ -562,6 +578,8 @@ app.post('/api/setup', (req, res) => {
     `MTURK_SECRET_ACCESS_KEY=${mturkSecretAccessKey}`,
     `MTURK_BALANCE_USD=${mturkBal.value}`,
     `HUMANLOOP_DAILY_CAP_USD=${dailyCap.value}`,
+    `CAPSOLVER_API_KEY=${capsolverApiKey}`,
+    `CAPSOLVER_HARD_CAP_USD=${capsolverHardCap.value}`,
   ].join('\n') + '\n';
 
   // Dry-run mode: validate everything, don't persist, return {ok,saved:0,dry_run:true}.
@@ -637,6 +655,8 @@ app.get('/api/setup/status', (_req, res) => {
     daily_cap: Number(config.HUMANLOOP_DAILY_CAP_USD) || 50,
     prolific_balance: Number(config.PROLIFIC_BALANCE_USD) || 0,
     mturk_balance: Number(config.MTURK_BALANCE_USD) || 0,
+    capsolver: !!config.CAPSOLVER_API_KEY,
+    capsolver_hard_cap: Number(config.CAPSOLVER_HARD_CAP_USD) || 20,
   });
 });
 

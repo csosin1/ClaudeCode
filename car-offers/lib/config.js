@@ -19,6 +19,9 @@ const config = {
   MTURK_SECRET_ACCESS_KEY: process.env.MTURK_SECRET_ACCESS_KEY || '',
   MTURK_BALANCE_USD: parseInt(process.env.MTURK_BALANCE_USD, 10) || 0,
   HUMANLOOP_DAILY_CAP_USD: parseInt(process.env.HUMANLOOP_DAILY_CAP_USD, 10) || 50,
+  // CAPTCHA solver (CapSolver) — Cloudflare Turnstile auto-solve for Carvana finalize.
+  CAPSOLVER_API_KEY: process.env.CAPSOLVER_API_KEY || '',
+  CAPSOLVER_HARD_CAP_USD: parseInt(process.env.CAPSOLVER_HARD_CAP_USD, 10) || 20,
 };
 
 /**
@@ -47,6 +50,8 @@ config.reloadConfig = function () {
   config.MTURK_SECRET_ACCESS_KEY = parsed.MTURK_SECRET_ACCESS_KEY || '';
   config.MTURK_BALANCE_USD = parseInt(parsed.MTURK_BALANCE_USD, 10) || 0;
   config.HUMANLOOP_DAILY_CAP_USD = parseInt(parsed.HUMANLOOP_DAILY_CAP_USD, 10) || 50;
+  config.CAPSOLVER_API_KEY = parsed.CAPSOLVER_API_KEY || '';
+  config.CAPSOLVER_HARD_CAP_USD = parseInt(parsed.CAPSOLVER_HARD_CAP_USD, 10) || 20;
 };
 
 module.exports = config;
