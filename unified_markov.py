@@ -882,7 +882,7 @@ def run():
         for db_path, deals in by_db.items():
             # Process in chunks of 5 deals to cap covariate memory.
             # Loading all 3.1M CarMax loans at once OOM'd the 4GB droplet.
-            DEAL_CHUNK = 5
+            DEAL_CHUNK = 12
             for ci in range(0, len(deals), DEAL_CHUNK):
                 chunk = deals[ci:ci + DEAL_CHUNK]
                 logger.info(f"Loading covariates from {os.path.basename(db_path)} "
