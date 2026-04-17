@@ -1,0 +1,194 @@
+Data Validation Report (dashboard.db)
+======================================================================
+
+=== Table Row Counts ===
+  filings                      1,277 rows
+  pool_performance               620 rows
+  monthly_summary                620 rows
+  loans                      417,074 rows
+  loan_loss_summary           42,435 rows
+  notes                            2 rows
+
+=== Deal Coverage ===
+  OK    2020-P1      monthly= 60 pool= 60 loans=20,351 notes=1
+  OK    2021-N1      monthly= 60 pool= 60 loans=22,397 notes=0
+  OK    2021-N2      monthly= 58 pool= 58 loans=20,928 notes=0
+  OK    2021-N3      monthly= 55 pool= 55 loans=19,997 notes=0
+  OK    2021-N4      monthly= 52 pool= 52 loans=21,856 notes=0
+  OK    2021-P1      monthly= 60 pool= 60 loans=21,606 notes=0
+  OK    2021-P2      monthly= 57 pool= 58 loans=35,797 notes=0
+  OK    2022-P1      monthly= 49 pool= 49 loans=41,229 notes=0
+  OK    2022-P2      monthly= 47 pool= 47 loans=25,052 notes=0
+  OK    2022-P3      monthly= 43 pool= 43 loans=15,329 notes=0
+  EMPTY 2023-P5      monthly=  0 pool=  0 loans=     0 notes=0
+  EMPTY 2024-N1      monthly=  0 pool=  0 loans=     0 notes=0
+  OK    2024-P2      monthly= 22 pool= 22 loans=20,884 notes=0
+  OK    2024-P3      monthly= 19 pool= 19 loans=26,064 notes=0
+  OK    2024-P4      monthly= 16 pool= 15 loans=25,122 notes=0
+  OK    2025-P2      monthly= 10 pool= 10 loans=25,968 notes=1
+  OK    2025-P3      monthly=  7 pool=  7 loans=38,802 notes=0
+  OK    2025-P4      monthly=  5 pool=  5 loans=35,692 notes=0
+
+=== Monthly Summary Sanity Checks ===
+  OK     2020-P1: 60 periods checked
+  OK     2021-N1: 60 periods checked
+  OK     2021-N2: 58 periods checked
+  OK     2021-N3: 55 periods checked
+  OK     2021-N4: 52 periods checked
+  OK     2021-P1: 60 periods checked
+  OK     2021-P2: 57 periods checked
+  OK     2022-P1: 49 periods checked
+  OK     2022-P2: 47 periods checked
+  OK     2022-P3: 43 periods checked
+  OK     2024-P2: 22 periods checked
+  OK     2024-P3: 19 periods checked
+  OK     2024-P4: 16 periods checked
+  OK     2025-P2: 10 periods checked
+  OK     2025-P3: 7 periods checked
+  OK     2025-P4: 5 periods checked
+
+=== Pool Performance Sanity Checks ===
+  ISSUES 2020-P1: 9 problems
+    - 1/8/2021: note sum=399,369,231 vs aggregate=384,369,231
+    - 2/8/2021: note sum=386,523,887 vs aggregate=371,523,887
+    - 3/8/2021: note sum=372,608,292 vs aggregate=359,100,457
+    - 4/8/2021: note sum=357,543,292 vs aggregate=345,721,080
+    - 5/10/2021: note sum=343,908,184 vs aggregate=333,850,433
+    ... and 4 more
+  ISSUES 2021-N1: 60 problems
+    - 5/10/2021: note sum=20,863,032 vs aggregate=376,345,312
+    - 6/10/2021: note sum=20,680,746 vs aggregate=361,812,921
+    - 7/12/2021: note sum=20,954,502 vs aggregate=349,384,305
+    - 8/10/2021: note sum=21,715,046 vs aggregate=337,661,192
+    - 9/10/2021: note sum=23,244,450 vs aggregate=325,869,394
+    ... and 55 more
+  ISSUES 2021-N2: 58 problems
+    - 7/12/2021: note sum=397,276,623 vs aggregate=379,435,512
+    - 8/10/2021: note sum=383,236,505 vs aggregate=365,348,743
+    - 9/10/2021: note sum=369,064,185 vs aggregate=350,972,998
+    - 10/12/2021: note sum=359,532,855 vs aggregate=340,804,736
+    - 11/10/2021: note sum=350,018,779 vs aggregate=329,894,078
+    ... and 53 more
+  ISSUES 2021-N3: 55 problems
+    - 10/12/2021: note sum=26,298,708 vs aggregate=403,475,979
+    - 11/10/2021: note sum=26,528,566 vs aggregate=390,411,002
+    - 12/10/2021: note sum=27,102,639 vs aggregate=376,324,834
+    - 1/10/2022: note sum=28,325,634 vs aggregate=364,174,140
+    - 2/10/2022: note sum=30,628,351 vs aggregate=353,160,155
+    ... and 50 more
+  ISSUES 2021-N4: 52 problems
+    - 1/10/2022: note sum=24,987,488 vs aggregate=444,519,286
+    - 2/10/2022: note sum=25,103,582 vs aggregate=430,197,902
+    - 3/10/2022: note sum=25,619,883 vs aggregate=416,334,163
+    - 4/11/2022: note sum=26,535,763 vs aggregate=401,762,732
+    - 5/10/2022: note sum=28,895,408 vs aggregate=388,988,506
+    ... and 47 more
+  ISSUES 2021-P1: 10 problems
+    - 4/12/2021: note sum=413,704,875 vs aggregate=396,704,875
+    - 5/10/2021: note sum=398,465,667 vs aggregate=381,611,480
+    - 6/10/2021: note sum=383,194,255 vs aggregate=368,373,660
+    - 7/12/2021: note sum=367,860,957 vs aggregate=354,998,279
+    - 8/10/2021: note sum=353,202,100 vs aggregate=342,210,931
+    ... and 5 more
+  ISSUES 2021-P2: 9 problems
+    - 7/12/2021: note sum=773,875,980 vs aggregate=746,445,980
+    - 8/10/2021: note sum=743,216,263 vs aggregate=715,786,263
+    - 9/10/2021: note sum=713,817,010 vs aggregate=687,240,775
+    - 10/12/2021: note sum=686,746,190 vs aggregate=663,739,487
+    - 11/10/2021: note sum=660,878,797 vs aggregate=641,033,883
+    ... and 4 more
+  ISSUES 2022-P1: 8 problems
+    - 4/11/2022: note sum=1,021,140,568 vs aggregate=1,004,890,568
+    - 5/10/2022: note sum=983,069,030 vs aggregate=966,819,030
+    - 6/10/2022: note sum=948,684,755 vs aggregate=932,434,755
+    - 7/11/2022: note sum=914,859,638 vs aggregate=899,089,463
+    - 8/10/2022: note sum=885,396,201 vs aggregate=871,676,828
+    ... and 3 more
+  ISSUES 2022-P2: 8 problems
+    - 6/10/2022: note sum=592,465,244 vs aggregate=581,878,244
+    - 7/11/2022: note sum=567,420,949 vs aggregate=556,833,949
+    - 8/10/2022: note sum=548,269,245 vs aggregate=537,682,245
+    - 9/12/2022: note sum=528,236,939 vs aggregate=517,649,939
+    - 10/11/2022: note sum=511,163,445 vs aggregate=501,758,393
+    ... and 3 more
+  ISSUES 2022-P3: 2 problems
+    - 11/10/2022: note sum=333,711,266 vs aggregate=330,396,266
+    - 12/12/2022: note sum=323,392,212 vs aggregate=320,077,212
+  ISSUES 2024-P2: 3 problems
+    - 7/10/2024: note sum=496,059,261 vs aggregate=483,836,963
+    - 8/12/2024: note sum=476,144,160 vs aggregate=466,574,539
+    - 9/10/2024: note sum=457,401,159 vs aggregate=450,653,949
+  ISSUES 2024-P3: 4 problems
+    - 10/10/2024: note sum=631,496,649 vs aggregate=612,763,637
+    - 11/12/2024: note sum=606,159,508 vs aggregate=591,308,788
+    - 12/10/2024: note sum=584,278,616 vs aggregate=573,546,526
+    - 1/10/2025: note sum=561,357,288 vs aggregate=554,234,127
+  ISSUES 2024-P4: 3 problems
+    - 2/10/2025: note sum=592,698,958 vs aggregate=580,089,968
+    - 3/10/2025: note sum=571,278,037 vs aggregate=562,088,342
+    - 4/10/2025: note sum=549,705,694 vs aggregate=543,298,042
+  ISSUES 2025-P2: 4 problems
+    - 7/10/2025: note sum=644,052,601 vs aggregate=627,562,479
+    - 8/11/2025: note sum=619,802,382 vs aggregate=606,902,382
+    - 9/10/2025: note sum=597,910,071 vs aggregate=588,643,589
+    - 10/10/2025: note sum=577,550,880 vs aggregate=571,525,363
+  ISSUES 2025-P3: 6 problems
+    - 10/10/2025: note sum=1,006,207,518 vs aggregate=979,354,474
+    - 11/10/2025: note sum=973,060,860 vs aggregate=949,757,682
+    - 12/10/2025: note sum=945,101,655 vs aggregate=925,261,561
+    - 1/12/2026: note sum=914,085,099 vs aggregate=897,407,338
+    - 2/10/2026: note sum=886,228,003 vs aggregate=872,867,431
+    ... and 1 more
+  ISSUES 2025-P4: 5 problems
+    - 12/10/2025: note sum=926,215,876 vs aggregate=906,130,596
+    - 1/12/2026: note sum=897,524,462 vs aggregate=880,228,509
+    - 2/10/2026: note sum=872,773,381 vs aggregate=858,447,564
+    - 3/10/2026: note sum=847,046,319 vs aggregate=835,395,122
+    - 4/10/2026: note sum=819,093,518 vs aggregate=809,715,343
+
+=== Cross-Reference: monthly_summary vs pool_performance ===
+  2020-P1      monthly_summary=60 pool_performance=60
+  2021-N1      monthly_summary=60 pool_performance=60
+  2021-N2      monthly_summary=58 pool_performance=58
+  2021-N3      monthly_summary=55 pool_performance=55
+  2021-N4      monthly_summary=52 pool_performance=52
+  2021-P1      monthly_summary=60 pool_performance=60
+  2021-P2      monthly_summary=57 pool_performance=58
+  2022-P1      monthly_summary=49 pool_performance=49
+  2022-P2      monthly_summary=47 pool_performance=47
+  2022-P3      monthly_summary=43 pool_performance=43
+  2024-P2      monthly_summary=22 pool_performance=22
+  2024-P3      monthly_summary=19 pool_performance=19
+  2024-P4      monthly_summary=16 pool_performance=15
+  2025-P2      monthly_summary=10 pool_performance=10
+  2025-P3      monthly_summary=7 pool_performance=7
+  2025-P4      monthly_summary=5 pool_performance=5
+
+=== Notes Table (Coupon Rates) ===
+  OK     2020-P1      1 classes: A1=0.50%
+  EMPTY  2021-N1      no note rates
+  EMPTY  2021-N2      no note rates
+  EMPTY  2021-N3      no note rates
+  EMPTY  2021-N4      no note rates
+  EMPTY  2021-P1      no note rates
+  EMPTY  2021-P2      no note rates
+  EMPTY  2022-P1      no note rates
+  EMPTY  2022-P2      no note rates
+  EMPTY  2022-P3      no note rates
+  EMPTY  2023-P5      no note rates
+  EMPTY  2024-N1      no note rates
+  EMPTY  2024-P2      no note rates
+  EMPTY  2024-P3      no note rates
+  EMPTY  2024-P4      no note rates
+  OK     2025-P2      1 classes: A3=4.75%
+  EMPTY  2025-P3      no note rates
+  EMPTY  2025-P4      no note rates
+
+=== Cost of Debt (from notes × balances) ===
+  2020-P1      INIT: CoD=0.5000% (weighted avg of 1 classes, bal=$35,369,231)
+  2025-P2      INIT: CoD=4.7500% (weighted avg of 1 classes, bal=$229,000,000)
+  2025-P2      CURR: CoD=4.7500% (weighted avg of 1 classes, bal=$229,000,000)
+
+======================================================================
+TOTAL: 2 errors, 312 warnings
+STATUS: FAILED

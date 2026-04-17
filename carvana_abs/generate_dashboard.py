@@ -3161,7 +3161,7 @@ def generate_economics_tab():
 
         # Expected losses
         if mf.get("at_issuance_cnl_pct"):
-            d["expected_loss_pct"] = mf["at_issuance_cnl_pct"]
+            d["expected_loss_pct"] = mf["at_issuance_cnl_pct"] / 100.0  # DB stores percent; formatter expects fraction
         elif deal in model_forecasts:
             d["expected_loss_pct"] = model_forecasts[deal]["predicted_loss_pct"]
         else:
@@ -3175,7 +3175,7 @@ def generate_economics_tab():
 
         # Projected losses (current model projection)
         if mf.get("current_projected_cnl_pct"):
-            d["projected_loss_pct"] = mf["current_projected_cnl_pct"]
+            d["projected_loss_pct"] = mf["current_projected_cnl_pct"] / 100.0  # DB stores percent; formatter expects fraction
         elif deal in model_forecasts:
             d["projected_loss_pct"] = model_forecasts[deal]["actual_loss_pct"]
         else:

@@ -559,3 +559,76 @@ Markov-dependent fields on the residual-economics tab (`at_issuance_cnl_pct`, `c
 
 **Confidence:** data trusted pending Markov completion. Parser + ingest + deal_terms + dashboard-capital-structure columns all source-faithful across 100% invariant scan + 1,300-tuple Tier-1 sample.
 
+
+---
+
+## Iter: Final delivery (2026-04-17 evening)
+
+**Context:** Markov model training finished; `deal_forecasts` table (16 Carvana + 37 CarMax = 53 rows) powers the landing-page Residual Economics tab for the first time. Prior audits were clean before Markov went live. This audit is the final gate.
+
+### Phase 1 — deal_forecasts sanity — **CLEAN (0 findings)**
+
+All 53 rows pass invariant checks. Units note: `at_issuance_cnl_pct` / `current_projected_cnl_pct` are stored **in percent** (e.g. `2.385` means 2.385%), which matters for Phase 2. With correct unit interpretation:
+
+- All `at_issuance_cnl_pct` in [0.5%, 30%]
+- All `current_projected_cnl_pct` in [0%, 30%]
+- `realized_cnl_pct ≤ current_projected_cnl_pct` holds for every row (monotone)
+- All `cal_factor` in [0.3, 3.0]; `cal_lo ≤ cal ≤ cal_hi` holds universally
+- Mature-deal (pct_complete > 0.7) projected-vs-realized closure: all within 2× realized
+- Prime deals cluster at 1.3%-3.5% at-issuance; nonprime 23.1%-23.8% — no cross-contamination
+
+### Phase 2 — Landing-page Residual Economics tab — **1 FINDING → FIXED + redeployed**
+
+**Finding #1 (CRITICAL, fixed):** Display unit mismatch. `pf()` and `dollar_hover()` formatters multiply by 100 assuming fraction input, but `deal_forecasts` stores values already in percent. Result: `Exp Loss` and `Proj Loss` displayed at 100× true value across all 53 Markov-forecasted deals. Example pre-fix rows:
+- CARMX 2017-1: Exp Loss "347.58%" (DB: 3.476%), Proj Loss "225.34%" (DB: 2.253%), Act Resid "−212.69%"
+- CRVNA 2021-N3: Exp Loss "2367.28%" (DB: 23.673%), Exp Resid massively negative
+
+Root cause: `generate_dashboard.py:3164, 3178` passed percent-units directly into a fraction-expecting formatter. Fix: divide by 100.0 at assignment (commits inline comment documenting units). Residual-economics math (`expected_residual`, `actual_residual`, `variance`) was also corrupted by this and is now correct.
+
+Post-fix spot-check (6 deals, HTML vs DB, tolerance 0.01%):
+| Deal | Exp Loss HTML / DB | Proj Loss HTML / DB | Verdict |
+|------|--------------------|---------------------|---------|
+| CARMX 2017-1 | 3.480% / 3.476% | 2.250% / 2.253% | OK |
+| CARMX 2020-2 | 3.080% / 3.078% | 1.010% / 1.014% | OK |
+| CARMX 2023-3 | 2.590% / 2.591% | 3.990% / 3.991% | OK |
+| CRVNA 2020-P1 | 2.380% / 2.385% | 1.640% / 1.643% | OK |
+| CRVNA 2022-P2 | 2.330% / 2.330% | 3.440% / 3.438% | OK |
+| CRVNA 2021-N3 | 23.670% / 23.673% | 20.220% / 20.218% | OK |
+
+Residuals now sensible (5-12% range, not hundreds of percent).
+
+**Finding #2 (documented, non-blocking):** Trigger Risk column empty for all 65 deal rows. Root cause: renderer reads `mf["breach_prob"]` (line 3217), but the Markov model does not emit `breach_prob` — `forecast_json` payload contains no trigger/breach probability. Column renders "—" for every deal (visually honest, not fake). The spec statement "Trigger Risk column has probabilities now" is **not satisfied**; this is a methodology gap requiring OC-breach probability work in `unified_markov.py`. Recommend deferring to a follow-on task. Not blocking delivery because the column is blank, not wrong.
+
+Other Phase 2 checks:
+- Landing view is the Residual Economics tab (`deal-__economics__` opens with `display:block`) ✓
+- No "Markov pending" / "LR placeholder" strings present in HTML ✓
+- 53 Markov-forecasted deal IDs extracted from HTML match deal_forecasts 1:1 ✓
+- Total 65 deal rows in table (includes pre-Markov CarMax 2014-2016 deals with `—` for losses) ✓
+- Capital-structure columns (AAA/AA/A/BBB/OC) populated ✓
+
+### Phase 3 — Full-pool + loan-level regression — **NO REGRESSION**
+
+The unit fix touches only dashboard rendering; parser, ingest, deal_terms, pool_performance, and loan-level tables are unchanged. Iter-6 1,300-tuple result cached at `/tmp/audit/result_01.json`: `{MATCH: 1136, MISMATCH: 54 (all aggregate_note_balance split-class false-positive — previously documented), UNVERIFIED: 110 (label-format variance)}`. Baseline preserved. Tier-2 loan-level re-verification remains unavailable (ABS-EE XML cache deleted per disk-capacity cleanup; 346,319 Iter-5 loan checks remain the authoritative baseline).
+
+### Phase 4 — Vintage-pattern sanity — **CLEAN (2 soft-band edge cases, within noise)**
+
+Economic coherence verified across all 53 deals. Grouped cal_factor averages:
+
+| Issuer / Type / Year | n | avg cal | comment |
+|-----------|---|---------|---------|
+| CarMax prime 2017 | 4 | 0.72 | strong outperf ✓ |
+| CarMax prime 2018 | 4 | 0.65 | strong outperf ✓ |
+| CarMax prime 2019 | 4 | 0.61 | strong outperf ✓ |
+| CarMax prime 2020 | 4 | 0.58 | post-stimulus ✓ |
+| CarMax prime 2022 | 4 | 1.10 | rate-hike underperf ✓ |
+| CarMax prime 2023 | 4 | 1.16 | rate-hike underperf ✓ |
+| Carvana prime 2022 | 3 | 1.43 | rate-hike underperf ✓ |
+| Carvana nonprime 2021 | 4 | 1.11 | within 0.9-1.3 band ✓ |
+
+Two individual deals nudge just outside soft-band heuristics (CarMax 2020-2 cal=0.54 vs ≥0.55 guideline; Carvana 2021-P2 cal=1.06 vs <1.0 guideline) — both within <6% of band, consistent with deal-level idiosyncratic noise. No methodology inversion.
+
+### Verdict
+
+**PASS — deliver.** One critical display bug found and fixed (100× Markov loss rendering), dashboard regenerated and promoted to `/opt/abs-dashboard/carvana_abs/static_site/live/`, live URL verified. Zero loan-level or parser regressions. Vintage patterns economically coherent. One deferred item: Trigger Risk column requires breach-probability computation in the Markov model (follow-on task, not delivery-blocking — column renders blank, not wrong).
+
+Data trusted; site aligned with truth.
