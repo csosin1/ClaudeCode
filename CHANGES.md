@@ -672,3 +672,50 @@ epoch after successful alerting.
   - `auto-deploy.timer` on prod: push a trivial commit to `claude/carvana-loan-dashboard-4QMPM`, confirm prod picks it up within 30–60s (systemd timer period).
   - Dev `auto-deploy.timer` stays `disabled` across nginx reloads and not restarted by anything (should not be — only explicit `start` would bring it back).
   - Delta rsync caught everything: `curl https://casinv.dev/CarvanaLoanDashBoard/` content identical to `curl http://10.116.0.3/CarvanaLoanDashBoard/` (first byte match over HTTP response body).
+
+## 2026-04-17 — infra: post-migration mop-up (pre-rollback-expiry verification + fixes)
+
+Runs in the 24h rollback window after Phases 2/3/4 completed overnight. User asked for (1) Playwright sweep, (2) write-path verification, (3) log migration verification, (4) DO backups confirmation, and to "make sure all agents write to the correct places." Session worked autonomously while user was offline.
+
+- **Verify #1 (Playwright sweep)**: all 8 migrated URL/viewport pairs returned 200 with no page errors. Screenshots in /tmp/verify-*.png. Two tooling hints flagged (Carvana's `document.fonts` hangs Playwright's `networkidle` — use `waitUntil: 'commit'` + CDP for future Carvana QA) — not prod defects.
+- **Verify #2 (write-paths)**: caught the silent write-failure. `timeshare-surveillance-watcher` stuck in a 5-min restart loop, combined.json stale since 04-13. Details + fix below.
+- **Verify #3 (log migration)**: all prod services log to prod; no writes leaking back to dev. One minor note: no `/var/log/abs-dashboard/` on prod (static-site app, uses /var/log/general-deploy.log via auto-deploy — correct, not a gap).
+- **Verify #4 (DO backups)**: filed as `ua-3ecff92f` — inside-droplet evidence (DO monitoring agent active, droplet ID 565394739 NYC1) doesn't prove backups are *running*. User verifies via DO console.
+
+### Fix 1: timeshare-surveillance watcher restart loop (commit f52483b)
+
+`post-deploy-rsync.sh` is cron'd every 5 min on dev. For each entry in `/etc/deploy-to-prod.conf` with a POST_CMD, it fired the command unconditionally after rsync exit 0 — regardless of whether any files changed. Timeshare's POST_CMD is `systemctl try-restart timeshare-surveillance-watcher*`. Watcher's sleep is 900s → killed every 5 min before its cycle could complete → 4 days of zero writes while HTTP 200 kept serving the frozen file.
+
+Fix: rsync now runs with `--stats`, we parse "Number of regular files transferred: N" from the output, and only fire POST_CMD when N > 0. Verified 11:20Z cron cycle did not restart the watcher. First clean cycle completed at 11:30:27Z.
+
+### Fix 2: rsync exclusion gap for SQLite DBs (commit 6e1c25d)
+
+Exclusion list had `data/`, `.env`, `venv/`, `*.log`, `__pycache__`, etc. but not SQLite DBs at project root: `gyms.db`, `offers.db`, `dashboard.db`. Rsync's default would let a stale dev copy clobber a freshly-written prod copy on next cron tick if prod ever diverged. Added `*.db*`, `*.sqlite*` (+ WAL/journal/shm variants). Verified post-install: no .db files transfer even with existing mtime differences.
+
+### Fix 3: post-migration cron orphans (no commit — live crontab edits on both droplets)
+
+Found three crons on dev that should have been migrated:
+- `17 14 * * * /opt/abs-dashboard/deploy/cron_ingest.sh` — daily Carvana EDGAR ingest. Would have regenerated the dashboard on dev's frozen /opt/abs-dashboard copy today at 14:17Z. Moved to prod.
+- `0 6 * * 0 /opt/timeshare-surveillance-live/watcher/cron_refresh.sh` — weekly timeshare fallback. Would have fired Sunday 06:00 on dev. Moved to prod.
+- `0 * * * * curl -sf -X POST http://127.0.0.1:3100/api/panel/run` — hourly car-offers trigger, now hitting dev's stopped service (silent 502s). Removed from dev; prod already had an equivalent entry.
+
+Also de-duped one repeated car-offers uptime line, removed the orphaned `/opt/car-offers-preview/offers.db` backup cron (source frozen post-migration).
+
+### Fix 4: infra-qa write-path category (commit fec0581)
+
+Added a new category to `.claude/agents/infra-qa.md`: Write-path verification. Forces future QA to identify the state store, check mtime/freshness vs declared cadence, and specifically flags the unconditional-restart-plus-long-sleeping-service class. Directly implements LESSONS rule #2 from the restart-loop entry.
+
+### Option C follow-through (commit fb2450c, earlier in this same session)
+
+Disabled `general-deploy.timer` on prod (was running all project deploy scripts every 5 min, including Carvana ML retrain). Extended `/etc/deploy-to-prod.conf` to cover gym-intelligence + car-offers via the dev→prod rsync pattern that Phase 1 built. abs-dashboard stays on its own auto-deploy.timer on prod (pulls from git — dev→prod rsync would clobber 34G of SQLite state).
+
+### Smoketest
+
+17/17 PASS at final check.
+
+### Things for Infra-QA to verify (next pass)
+
+- Watcher: combined.json on prod should update when next new EDGAR filing appears (new filings irregular — observation-required, not a failure if mtime stays static).
+- 14:17Z cron_ingest fire today: check /var/log/abs-ingestion.log on prod for "start"/"done" pair.
+- Sunday 06:00Z cron_refresh fire: same pattern on prod.
+- Confirm DB exclusions hold: run post-deploy-rsync.sh manually, verify *.db never appears in rsync transfer output regardless of source mtime.
