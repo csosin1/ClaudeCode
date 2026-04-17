@@ -160,3 +160,20 @@ new-droplet bootstrap checklist once we have one.
 3. Explicit note in the agent definition: position 4 (user's fetcher) + position 5 (simulated fetcher fingerprints) together cover the bot-mode class of gap that positions 1-3 miss.
 
 **Preventive rule:** Infra-QA position coverage must include **request-origin characteristics** (IP, UA, TLS fingerprint where testable) of the *actual consumer*, not just generalized external fetches. Default-curl responses are insufficient evidence that a bot-fingerprinted consumer will succeed. When a consumer can't be fully fingerprint-simulated (e.g., Claude web-fetch uses TLS details we can't replicate), explicitly flag the coverage gap and require user-manual confirmation as an observation-required item — same pattern as phone-receipt for ntfy.
+
+## 2026-04-17 — Fresh prod droplet shipped with ufw inactive; app ports reached public internet during Phase 2
+
+**Symptom:** During Phase 2 (gym-intelligence) migration, infra-QA flagged that prod's Flask services bound `0.0.0.0:8502/:8503`. Confirmed from dev: `curl http://67.205.140.167:8502/ → HTTP 404` (port open, app just doesn't route `/`). `ufw status` on prod: **inactive**. `iptables -L`: default ACCEPT on all chains. Phase 1 timeshare was unaffected only because those services bind `127.0.0.1` and sit behind a prod-local nginx — an accidental protection, not a designed one.
+
+**Root cause:** DigitalOcean's stock Ubuntu 24.04 image ships with ufw installed but disabled, no DO cloud firewall attached by default, and no droplet bake-in step in our Phase 0 runbook to enable one. We only noticed because QA's Position-independent check observed the 0.0.0.0 bind — without that check, Phases 3+ would have widened the exposure silently (abs-dashboard has no 0.0.0.0 bind today; car-offers Playwright services would).
+
+**Fix applied 2026-04-17 02:36Z:**
+```
+ufw default deny incoming ; ufw default allow outgoing
+ufw allow 22/tcp ; ufw allow 80/tcp ; ufw allow 443/tcp
+ufw allow from 10.116.0.0/20  # DO VPC NYC1 — dev↔prod private traffic
+ufw --force enable
+```
+Verified: dev→prod-private-IP:8502 still HTTP 200 (VPC rule), public-IP:8502 times out (no match → deny), SSH still reachable, smoketest 17/17 green.
+
+**Preventive rule:** Any new prod droplet's Phase 0 bake-in **must** end with ufw enabled + default-deny-incoming + explicit allow-list for 22/80/443 and the VPC CIDR. Add to `MIGRATION_RUNBOOK.md` Phase 0 checklist and any future droplet-provisioning automation. An app-port bound to 0.0.0.0 is a pre-existing vulnerability when the surrounding network has no default filter — the fix belongs at the network boundary, not per-service.

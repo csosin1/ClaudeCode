@@ -91,7 +91,28 @@ EOF
 # Don't actually install until we have prod serving something
 ```
 
-After 0.2 + 0.3 pass: **CHECKPOINT 0**. Prod droplet is reachable + bootstrapped + we have rsync-ready private IP. Say "proceed to Phase 1" to move on.
+### 0.4 Firewall bake-in (mandatory — learned 2026-04-17)
+
+DO ships Ubuntu images with ufw **inactive**. Any future app that binds 0.0.0.0 will be publicly reachable on the prod droplet's public IP. Close this at the network boundary before any app migrates.
+
+```bash
+ssh prod-private 'bash -s' <<'SCRIPT'
+ufw default deny incoming
+ufw default allow outgoing
+ufw allow 22/tcp comment "ssh"
+ufw allow 80/tcp comment "nginx"
+ufw allow 443/tcp comment "nginx-tls"
+ufw allow from 10.116.0.0/20 comment "DO VPC NYC1"
+ufw --force enable
+ufw status verbose
+SCRIPT
+```
+
+Verify from dev:
+- `curl --max-time 5 http://<PROD_PUBLIC_IP>:<APP_PORT>/` → `HTTP 000` (deny-filtered)
+- `curl http://<PROD_PRIVATE_IP>:<APP_PORT>/` → `HTTP 200` (VPC-allow passes)
+
+After 0.2–0.4 pass: **CHECKPOINT 0**. Prod droplet is reachable + bootstrapped + firewalled + we have rsync-ready private IP. Say "proceed to Phase 1" to move on.
 
 ---
 
