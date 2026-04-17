@@ -11,6 +11,35 @@ Builder appends a per-task entry here after each build. Format:
 - **Things for the reviewer:**
 ```
 
+## 2026-04-17 — infra: Phase 2 migration — gym-intelligence dev → prod droplet
+
+- **What was built:**
+  - Rsync'd `/opt/gym-intelligence/` (96M) and `/opt/gym-intelligence-preview/` (180M) from dev → prod-private (10.116.0.3). `.env` files copied.
+  - Recreated Python venvs on prod (`python3 -m venv venv && venv/bin/pip install -r requirements.txt`) for both, run from inside each project dir so venv lands in project dir (NOT ~/venv — per prior LESSONS).
+  - Installed both systemd unit files on prod (`scp` of `gym-intelligence.service` and `gym-intelligence-preview.service`), `daemon-reload`, `enable --now`. Both active on prod, listening on 127.0.0.1:8502 and :8503.
+  - Flipped `/etc/nginx/sites-available/abs-dashboard` (and mirrored to `helpers/nginx-abs-dashboard.conf` in repo): the two `location /gym-intelligence/` and `location /gym-intelligence/preview/` blocks now `proxy_pass` to `http://10.116.0.3:8502/...` and `:8503/...` respectively. Nginx reloaded after `nginx -t` passed.
+  - Stopped + disabled dev's `gym-intelligence.service` and `gym-intelligence-preview.service`. Project dirs `/opt/gym-intelligence` and `/opt/gym-intelligence-preview` left in place on dev for 24h rollback window.
+- **Files modified:**
+  - `helpers/nginx-abs-dashboard.conf` (tracked in repo) — 2 proxy_pass lines swapped.
+  - `/etc/nginx/sites-available/abs-dashboard` (live) — same 2 edits, reloaded.
+  - Prod droplet: new `/opt/gym-intelligence/`, `/opt/gym-intelligence-preview/`, `/var/log/gym-intelligence/`, `/etc/systemd/system/gym-intelligence{,preview}.service`, two enable symlinks.
+  - Dev droplet: both services now `inactive`, `disabled`.
+- **Evidence it's working:**
+  - `projects-smoketest.sh gate` — 17/17 PASS after flip, including `gym-intelligence-live` (200) and `gym-intelligence-preview` (200).
+  - `curl https://casinv.dev/gym-intelligence/` → HTTP 200, 25.7 KB, contains `<title>Gym Intelligence</title>`.
+  - `curl https://casinv.dev/gym-intelligence/preview/` → HTTP 200, 30.1 KB, same HTML title.
+  - Prod internal: `curl http://127.0.0.1:8502/gym-intelligence/` → 200; `:8503/gym-intelligence/preview/` → 200. (Root `/` returns 404 by app design — it uses prefix routing, matches dev behavior exactly.)
+- **Assumptions:**
+  - Prod droplet had Python 3.12 + build tooling already in place (Phase 1 did this). Confirmed — venv+pip install succeeded both times in <2 min each.
+  - The two systemd unit files reference `/opt/gym-intelligence/venv/bin/python app.py` and the equivalent preview path — which exist identically on prod post-rsync. No unit-file edits needed.
+  - Dev's rsync source was stable (live service was idle at time of copy; preview was serving cached data, no write traffic).
+- **Things for Infra-QA to verify:**
+  - Public URLs: `https://casinv.dev/gym-intelligence/` and `https://casinv.dev/gym-intelligence/preview/` — load + render (Leaflet map tiles load, no JS console errors, charts draw).
+  - Mobile 390px and desktop 1280px (Playwright).
+  - Navigation under each app (tab switches, history API, etc.) still proxies correctly — prefix `/gym-intelligence/` is preserved on the way through.
+  - Dev-side services are fully stopped and stay stopped after reboot would be ideal but not required (they're `disabled`).
+  - Observation window: 60-min stability watch before declaring Phase 2 done.
+
 ## 2026-04-17 — infra: migration phase notifications (Track B alert #4)
 
 - **What was built:**
