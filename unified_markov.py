@@ -42,6 +42,10 @@ CARMAX_DASHBOARD_DB  = os.path.join(BASE, "carmax_abs/db/dashboard.db")
 STATES = [0, 1, 2, 3, 4, 5]
 N_STATES = 6
 AGE_BUCKETS  = [(0, 6), (6, 12), (12, 24), (24, 36), (36, 48), (48, 60), (60, 999)]
+# Precomputed for vectorized age-bucket lookup in forecast_loan — must match
+# AGE_BUCKETS' upper edges exactly.
+_AGE_BUCKET_EDGES = np.array([hi for _lo, hi in AGE_BUCKETS], dtype=np.int64)
+_N_AGE_BUCKETS = len(AGE_BUCKETS)
 FICO_BUCKETS = [(0, 620), (620, 660), (660, 700), (700, 740), (740, 999)]
 LTV_BUCKETS  = [(0, 0.90), (0.90, 1.00), (1.00, 1.10), (1.10, 1.20), (1.20, 99)]
 TERM_BUCKETS = [36, 48, 60, 72, 84]
@@ -385,11 +389,79 @@ class MarkovModel:
         self.perf_curve, self.mod_curve = self._build_paydown(paydown_perf, paydown_mod)
         self._agg_cache = {}
         self._lgd_agg_cache = {}
+        # Vectorization caches: keyed by (fico_b, ltv_b, mod) → (7, 8, 8) tensor
+        # and (fico_b, ltv_b) → (7,) LGD vector, (term_bucket, is_mod) → paydown
+        # ratio lookup table indexed by age-month.
+        self._Q_tensor_cache = {}
+        self._lgd_vec_cache = {}
+        self._paydown_table_cache = {}
         # Stats
         self.n_cells = len(trans)
         n_with_30 = sum(1 for cell, d in trans.items()
                         if sum(d.values()) >= MIN_CELL_OBS)
         self.fill_rate = n_with_30 / max(len(trans), 1)
+
+    def build_transition_tensor(self, fico_b, ltv_b, mod):
+        """Return a (N_AGE_B, N_STATES+2, N_STATES+2) tensor of transition matrices
+        for every age bucket, given fixed (fico_b, ltv_b, mod).
+
+        Identical semantics to building Q with cell_transition in forecast_loan —
+        for each row (state s in 0..5) in each age_b, use cell_transition(s, age_b,
+        fico_b, ltv_b, mod); if None, the row is identity (Q[s, s] = 1.0).
+        Default (row N_STATES) and Payoff (row N_STATES+1) are absorbing.
+        """
+        key = (fico_b, ltv_b, mod)
+        cached = self._Q_tensor_cache.get(key)
+        if cached is not None:
+            return cached
+
+        n_age_b = len(AGE_BUCKETS)
+        dim = N_STATES + 2
+        T = np.zeros((n_age_b, dim, dim))
+        for ab in range(n_age_b):
+            # Absorbing rows
+            T[ab, N_STATES, N_STATES] = 1.0
+            T[ab, N_STATES + 1, N_STATES + 1] = 1.0
+            for s in STATES:
+                row, _n = self.cell_transition(s, ab, fico_b, ltv_b, mod)
+                if row is None:
+                    T[ab, s, s] = 1.0
+                else:
+                    T[ab, s, :] = row
+        self._Q_tensor_cache[key] = T
+        return T
+
+    def build_paydown_table(self, term_bucket, is_modified, max_age):
+        """Return a dense array of paydown ratios indexed by age-month, covering
+        at least ages 0..max_age. Cached by (term_bucket, is_modified); grows
+        the cached table if a larger max_age is later requested.
+
+        Uses the same lookup_paydown semantics (piecewise-linear interpolation
+        over sorted (age, ratio) pairs, clamped to endpoints).
+        """
+        key = (term_bucket, bool(is_modified))
+        tbl = self._paydown_table_cache.get(key)
+        need = int(max_age) + 1
+        if tbl is not None and tbl.shape[0] >= need:
+            return tbl
+        new_tbl = np.empty(need)
+        for a in range(need):
+            new_tbl[a] = self.lookup_paydown(term_bucket, a, is_modified=is_modified)
+        self._paydown_table_cache[key] = new_tbl
+        return new_tbl
+
+    def build_lgd_vector(self, fico_b, ltv_b):
+        """Return an (N_AGE_B,) array of LGD by age bucket for (fico_b, ltv_b)."""
+        key = (fico_b, ltv_b)
+        cached = self._lgd_vec_cache.get(key)
+        if cached is not None:
+            return cached
+        n_age_b = len(AGE_BUCKETS)
+        v = np.empty(n_age_b)
+        for ab in range(n_age_b):
+            v[ab] = self.lookup_lgd(ab, fico_b, ltv_b)
+        self._lgd_vec_cache[key] = v
+        return v
 
     def cell_transition(self, state, age_b, fico_b, ltv_b, mod):
         """Return (probability_row, obs_count) with fallback ladder."""
@@ -542,13 +614,11 @@ class MarkovModel:
 
 # ── Per-loan forecast engine ─────────────────────────────────────────
 
-def forecast_loan(model, loan, start_state=None, start_age=None, end_age=None):
-    """Forward-simulate a single loan through the Markov chain.
+def _forecast_loan_legacy(model, loan, start_state=None, start_age=None, end_age=None):
+    """Original per-loan simulation — retained for parity testing only.
 
-    Two modes:
-      - At-issuance: start_state=0, start_age=0, end_age=term
-      - In-progress: start from current state/age, run to term
-      - Lookback:    start_state=0, start_age=0, end_age=current_age
+    Kept byte-for-byte identical to the pre-vectorization implementation so
+    tests/test_forecast_vectorized.py can assert the new path matches.
     """
     state = loan["state"] if start_state is None else start_state
     age   = loan["age_months"] if start_age is None else start_age
@@ -570,8 +640,8 @@ def forecast_loan(model, loan, start_state=None, start_age=None, end_age=None):
         cur_age += 1
         age_b = _bucket(cur_age, AGE_BUCKETS)
         Q = np.zeros((N_STATES + 2, N_STATES + 2))
-        Q[N_STATES, N_STATES] = 1.0      # Default absorbing
-        Q[N_STATES + 1, N_STATES + 1] = 1.0  # Payoff absorbing
+        Q[N_STATES, N_STATES] = 1.0
+        Q[N_STATES + 1, N_STATES + 1] = 1.0
         for s in STATES:
             row, n = model.cell_transition(s, age_b, fico_b, ltv_b, mod)
             if row is None:
@@ -586,6 +656,75 @@ def forecast_loan(model, loan, start_state=None, start_age=None, end_age=None):
             lgd = model.lookup_lgd(age_b, fico_b, ltv_b)
             expected_loss += new_def_mass * balance_at_default * lgd
         sv = new_sv
+
+    return expected_loss
+
+
+def forecast_loan(model, loan, start_state=None, start_age=None, end_age=None):
+    """Forward-simulate a single loan through the Markov chain (vectorized).
+
+    Numerically identical to `_forecast_loan_legacy` but:
+      - Builds (or reuses) a cached (age_b, state, state) transition tensor for
+        the loan's (fico_b, ltv_b, mod) bucket — so the 6 cell_transition calls
+        per month collapse to 7 tensor builds per covariate-combo per model.
+      - Steps the state vector through months with numpy matmul, no Python dict
+        lookups in the hot loop.
+
+    Modes (unchanged):
+      - At-issuance: start_state=0, start_age=0, end_age=term
+      - In-progress: start from current state/age, run to term
+      - Lookback:    start_state=0, start_age=0, end_age=current_age
+    """
+    state = loan["state"] if start_state is None else start_state
+    age   = loan["age_months"] if start_age is None else start_age
+    term  = loan["term"] or 60
+    final_age = term if end_age is None else end_age
+    months_remaining = max(0, final_age - age)
+    if months_remaining <= 0:
+        return 0.0
+
+    fico_b = loan["fico_b"]
+    ltv_b  = loan["ltv_b"]
+    mod    = loan.get("modified", 0)
+    orig   = loan["orig_amount"] or loan.get("balance", 0) or 10000
+    tb     = loan["term_bucket"]
+    is_mod = bool(mod)
+
+    dim = N_STATES + 2
+    T = model.build_transition_tensor(fico_b, ltv_b, mod)  # (n_age_b, dim, dim)
+    lgd_vec = model.build_lgd_vector(fico_b, ltv_b)        # (n_age_b,)
+
+    # Precompute per-step age_b, paydown ratio, and LGD for each month.
+    # This matches the legacy loop's bucket = _bucket(cur_age, AGE_BUCKETS)
+    # where cur_age = age + 1, age + 2, ..., age + months_remaining.
+    ages = np.arange(age + 1, age + 1 + months_remaining, dtype=np.int64)
+
+    # Vectorized age-bucket mapping — AGE_BUCKETS is a fixed contiguous
+    # partition so np.searchsorted on the bucket upper edges reproduces _bucket
+    # exactly (see _AGE_BUCKET_EDGES definition at module top).
+    age_bs = np.searchsorted(_AGE_BUCKET_EDGES, ages, side="right")
+    if age_bs[-1] >= _N_AGE_BUCKETS:
+        np.clip(age_bs, 0, _N_AGE_BUCKETS - 1, out=age_bs)
+
+    # Paydown ratios — depends on (tb, cur_age, is_mod); use cached dense table.
+    paydown_tbl = model.build_paydown_table(tb, is_mod, int(ages[-1]))
+    ratios = paydown_tbl[ages]
+
+    lgds = lgd_vec[age_bs]
+
+    sv = np.zeros(dim)
+    sv[state] = 1.0
+    prev_def = sv[N_STATES]
+    expected_loss = 0.0
+
+    for i in range(months_remaining):
+        Q = T[age_bs[i]]
+        sv = sv @ Q
+        new_def = sv[N_STATES]
+        delta = new_def - prev_def
+        if delta > 0:
+            expected_loss += delta * orig * ratios[i] * lgds[i]
+        prev_def = new_def
 
     return expected_loss
 
