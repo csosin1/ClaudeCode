@@ -5,10 +5,11 @@ The user is non-technical and prompts from an iPhone. Claude owns technical deci
 
 **URLs in messages must be plain, never wrapped in markdown.** iOS URL detection grabs surrounding characters like `**`, `)`, or backticks and includes them in the tap target, producing 404s. Write URLs on their own line with a space before and after — never `**https://...**` or `[text](https://...)` or \`\`https://...\`\`.
 
-## Setup
-- Droplet: DigitalOcean Ubuntu 22.04 at 159.223.127.125. nginx in front, systemd for services.
-- Mobile-first output. Every project reachable in one tap from http://159.223.127.125/.
-- Repos auto-deploy to `/opt/<project>/` on push to `main` via webhook (2–3s).
+## Setup & host topology
+- **Dev droplet** (this box, 159.223.127.125, 4GB/2-core, Ubuntu 22.04): nginx edge + Claude Code chats. Code edits happen here.
+- **Prod droplet** (`ssh prod-private` → 10.116.0.3, 8GB/4-core, Ubuntu 24.04, NYC1 VPC): runs all migrated app services. **Heavy compute (Markov training, batch scrape, ML regen, big rsync) MUST run on prod** — `ssh prod-private <cmd>`. Dev is a 4GB box; running compute there starves everyone. Writes to `/opt/<project>/` on dev go to a rollback copy that Phase 5 deletes.
+- **Deploy pipeline**: push to main on dev → webhook (2–3s) → `/opt/site-deploy/deploy/auto_deploy_general.sh` on dev → `/etc/deploy-to-prod.conf` rsyncs code to prod. abs-dashboard is the exception: its own auto-deploy.timer on prod tracks `claude/carvana-loan-dashboard-4QMPM`. `*.db`/`*.sqlite`/WAL/journal/shm are rsync-excluded — databases on prod are authoritative.
+- Mobile-first output. Every project reachable in one tap from https://casinv.dev/.
 
 ## Clarify Before Building
 iPhone prompts are short and sometimes autocorrected. If a request is ambiguous, state your interpretation and ask one focused question. A wrong build done confidently is the most expensive outcome.
@@ -36,13 +37,7 @@ Surface to the user and wait for "go": what will be built (1-2 sentences), succe
 **The main thread is a coordinator, not an executor.** When a new user prompt arrives while other work is in flight, hand it off to a fresh subagent immediately (if independent) — don't make the user wait for the in-flight stack to drain. Status questions always spawn; corrections interrupt; clarifications refine. See `SKILLS/non-blocking-prompt-intake.md`.
 
 ## Project Isolation
-Multiple projects share this droplet. Each project touches only its own files.
-
-**Each project owns:** `/opt/<project>/`, `deploy/<project>.sh`, `tests/<project>.spec.ts`, `PROJECT_STATE.md`, its nginx location block, systemd unit, `/var/log/<project>/`, logrotate config, uptime cron.
-
-**Shared — never modify from a project chat; propose via `CHANGES.md`:** `deploy/auto_deploy_general.sh`, `deploy/update_nginx.sh`, `deploy/NGINX_VERSION`, `deploy/landing.html`, `.github/workflows/*`, `CLAUDE.md`, `LESSONS.md`, `RUNBOOK.md`, `.claude/agents/*.md`, `SKILLS/*.md`.
-
-A project chat writing outside its own paths is a bug.
+Each project owns only: `/opt/<project>/`, `deploy/<project>.sh`, `tests/<project>.spec.ts`, `PROJECT_STATE.md`, its nginx location block, systemd unit, `/var/log/<project>/`, logrotate, uptime cron. Shared paths (`deploy/auto_deploy_general.sh`, `deploy/update_nginx.sh`, `deploy/landing.html`, `.github/workflows/*`, `CLAUDE.md`, `LESSONS.md`, `RUNBOOK.md`, `.claude/agents/*.md`, `SKILLS/*.md`) are modified only via `CHANGES.md` proposals from project chats. Writing outside own paths is a bug.
 
 ## Continuous Platform Improvement
 **A problem solved once should never need to be solved again.** Every session leaves one artifact that makes future sessions cheaper: a new skill, a sharper rule, a removed manual step, or a trimmed doc. CLAUDE.md stays thin — it's the constitution. Power lives in `SKILLS/`. See `SKILLS/platform-stewardship.md` for where different kinds of learning belong and when to write them up.
