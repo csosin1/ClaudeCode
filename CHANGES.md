@@ -11,6 +11,60 @@ Builder appends a per-task entry here after each build. Format:
 - **Things for the reviewer:**
 ```
 
+## 2026-04-17 — infra: Phase 4 migration — car-offers dev → prod droplet
+
+- **What was built:**
+  - Stopped + disabled car-offers/car-offers-preview/xvfb on dev (4.1). Files preserved for 24h rollback.
+  - Rsync'd `/opt/car-offers/` (37M source), `/opt/car-offers-preview/` (1.4G — mostly `public-debug/` screenshots), and `/opt/car-offers-data/` (19M SQLite + backups) from dev → prod-private (10.116.0.3). `.env` files copied via scp (md5 match). `/var/log/car-offers/` created on prod.
+  - **Deviation from runbook — node_modules.** `npm ci --quiet` on prod FAILED with `Missing: playwright-core@1.59.1 from lock file`. Dev's `package-lock.json` has `playwright: "*"` (unpinned) while `node_modules/playwright` is actually at 1.59.1. This is a pre-existing dev lockfile inconsistency, not caused by migration. Fallback: rsynced `node_modules/` directly from dev (both droplets Ubuntu 22.04 / Node v22.22.2, ABI-compatible). Preserves exact running state. Lockfile repair is a car-offers chat task, not infra.
+  - `npx playwright install chromium --with-deps` on prod: apt deps already present from prior phases; chromium-1217 cache populated (631M `/root/.cache/ms-playwright/`). Preview uses the same cache (verified via `pw.chromium.executablePath()` resolves to the shared `chromium-1217/chrome-linux64/chrome`).
+  - Copied `car-offers.service`, `car-offers-preview.service`, `xvfb.service` to `/etc/systemd/system/` on prod. `daemon-reload`, `enable --now` for all three. xvfb active, car-offers + car-offers-preview active, ports 3100/3101 responding.
+  - **Pre-existing service on prod.** The car-offers unit on prod had already been started at 04:05:46Z (before migration at 05:09Z — possibly a test start earlier in the evening). That process had read an empty/missing .env at startup and logged `pass=NOT SET`; `systemctl enable --now` didn't restart it (already active). `curl /` initially returned 302→/setup. Fix: `systemctl restart xvfb car-offers car-offers-preview` to pick up the synced .env. `/` then returned 200. Calling this out because smoketest initially failed on this path and it was the only real head-scratcher of the phase.
+  - Flipped `/etc/nginx/sites-available/abs-dashboard` (and `helpers/nginx-abs-dashboard.conf`): `location /car-offers/` and `location /car-offers/preview/` now `proxy_pass` to `http://10.116.0.3:3100/` and `:3101/` respectively. Added `X-Forwarded-Proto $scheme` to match other migrated blocks. `nginx -t` passed, reload ok.
+  - Smoketest gate PASS (17/17) after restart + flip. `/car-offers/setup/` returns 200 (auth/config gate page reachable).
+  - Stopped + disabled car-offers/car-offers-preview/xvfb on dev (4.6). Project dirs `/opt/car-offers*` and `/opt/car-offers-data` left in place on dev for 24h rollback. Playwright cache on dev untouched.
+
+- **Files modified:**
+  - `helpers/nginx-abs-dashboard.conf` (tracked in repo) — 2 proxy_pass lines swapped to 10.116.0.3.
+  - `/etc/nginx/sites-available/abs-dashboard` (live) — same edits, reloaded.
+  - Prod droplet: new `/opt/car-offers/`, `/opt/car-offers-preview/`, `/opt/car-offers-data/`, `/var/log/car-offers/`, `/etc/systemd/system/{car-offers,car-offers-preview,xvfb}.service`, three enable symlinks. `/root/.cache/ms-playwright/chromium-1217` populated.
+  - Dev droplet: all three services now `inactive`, `disabled`.
+
+- **Evidence it's working:**
+  - `projects-smoketest.sh gate` — 17/17 PASS:
+    ```
+    PASS  car-offers-live  (https://casinv.dev/car-offers/)
+    PASS  car-offers-preview  (https://casinv.dev/car-offers/preview/)
+    ```
+    (Full smoketest output in /var/log/migration-overnight-2026-04-16.log.)
+  - `curl -sI https://casinv.dev/car-offers/` → HTTP/2 200 (was 302→/setup before the service-restart; see pre-existing-service note above).
+  - `curl -sI https://casinv.dev/car-offers/preview/` → HTTP/2 200.
+  - `curl -sI https://casinv.dev/car-offers/setup/` → HTTP/2 200 (4.5 verification).
+  - `curl -sI https://casinv.dev/car-offers/preview/setup/` → HTTP/2 200.
+  - Prod `systemctl is-active xvfb car-offers car-offers-preview` → `active active active`.
+  - Dev `systemctl is-active xvfb car-offers car-offers-preview` → `inactive inactive inactive`.
+
+- **Assumptions:**
+  - Both droplets are Ubuntu 22.04 / x86_64 / Node v22.22.2 — node_modules rsync is safe. (Verified Node version match pre-flight.)
+  - The 04:05:46Z prior start of car-offers on prod was benign — some earlier exploratory start, not a conflicting live tenant. Our rsync+.env+restart supersedes it cleanly.
+
+- **Open items for the car-offers chat (awaiting credential paste via /setup, tomorrow):**
+  1. **Lockfile repair.** `package-lock.json` on both /opt/car-offers and /opt/car-offers-preview has `playwright: "*"` (unpinned). `npm ci` is currently non-functional. They should re-run `npm install` then commit the regenerated lockfile so future deploys can use `npm ci` for reproducibility.
+  2. **CapSolver env var.** Not present in .env — flagged for tomorrow's credential plumbing work per orchestrator directive.
+  3. **Decodo proxy diagnostic failures.** `[diag] curl_decodo_geo: FAIL` and `curl_carvana_geo: FAIL` appear in the startup log on prod — same pattern as what the service reports from its in-process curl tests. Not migration-caused (proxy user/pass are the same as dev; the service still responds 200 on /). Worth the chat's attention when credential work happens.
+
+- **Things for Infra-QA:**
+  - Confirm both URLs return 200 under https, live and preview.
+  - Confirm `/car-offers/setup/` is reachable (200) for both live and preview paths.
+  - Confirm dev's three services stay `inactive+disabled` (no auto-restart leak).
+  - Watch `capacity.html` on prod over next 2h — car-offers + Playwright + Xvfb add ~20M RSS for Node + ~200M for Xvfb + chromium-on-demand spikes; should stay well under prod's 8GB.
+  - Confirm `projects-smoketest.sh gate` stays 17/17 for the next hourly cron run (06:17Z) and 07:17Z.
+
+- **Things for the reviewer:**
+  - Deviation from runbook's `npm ci` is documented above with root cause. Rsyncing node_modules preserves exact state; it does NOT hide a real problem (the lockfile-vs-installed-version skew is pre-existing dev state, not an artifact of migration).
+  - The pre-existing prod service at 04:05:46Z is suspicious — might want to grep orchestrator logs for where that start originated. Migration-time explicit restart fixed the immediate symptom; root cause on "who started car-offers on prod at 04:05?" is for the orchestrator to chase if relevant.
+  - No changes to CLAUDE.md or SKILLS/ — this is straight execution of the documented phase.
+
 ## 2026-04-17 — infra: Phase 2 migration — gym-intelligence dev → prod droplet
 
 - **What was built:**
