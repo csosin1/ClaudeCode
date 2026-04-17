@@ -44,6 +44,7 @@ tokens-json|https://casinv.dev/tokens.json|
 
 FAIL=0
 PASS=0
+FIRST_FAIL_LABEL=""
 echo '{"updated_at":"'"$NOW"'","results":[' > "$TMP"
 FIRST=1
 
@@ -73,6 +74,7 @@ while IFS='|' read -r label url grep_check; do
         [ "$QUIET" = "0" ] && echo "PASS  $label  ($url)"
     else
         FAIL=$((FAIL+1))
+        [ -z "$FIRST_FAIL_LABEL" ] && FIRST_FAIL_LABEL="$label"
         echo "FAIL  $label  ($url) — $REASON" >&2
     fi
 
@@ -89,4 +91,55 @@ mv "$TMP" "$OUT"
 echo ""
 echo "Summary: $PASS passed, $FAIL failed"
 [ "$MODE" = "gate" ] && [ "$FAIL" -gt 0 ] && exit 1
+
+# Notify on regression / recovery. Only in report mode (gate mode is a
+# pre-commit guard — it already blocks the ship; paging the user there
+# would be noise). Tracked via /var/run/claude-sessions/smoketest-last-state.
+# Format: "<fail_count> <epoch_last_notify>".  Debounce: 60 min while sustained.
+if [ "$MODE" = "report" ] && [ -x /usr/local/bin/notify.sh ]; then
+    STATE_DIR=/var/run/claude-sessions
+    STATE_FILE="$STATE_DIR/smoketest-last-state"
+    mkdir -p "$STATE_DIR"
+    PRIOR_FAIL=0
+    PRIOR_TS=0
+    if [ -r "$STATE_FILE" ]; then
+        read -r PRIOR_FAIL PRIOR_TS < "$STATE_FILE" || true
+        PRIOR_FAIL="${PRIOR_FAIL:-0}"
+        PRIOR_TS="${PRIOR_TS:-0}"
+    fi
+    NOW_TS=$(date +%s)
+    DEBOUNCE=3600  # 60 min
+    NEW_TS="$PRIOR_TS"
+    CLICK="https://casinv.dev/smoketest.json"
+
+    if [ "$PRIOR_FAIL" -eq 0 ] && [ "$FAIL" -gt 0 ]; then
+        # New regression.
+        /usr/local/bin/notify.sh \
+            "Smoketest regression: $FAIL URL(s) failing. Last failure: $FIRST_FAIL_LABEL. See /smoketest.json" \
+            "Smoketest regression" urgent "$CLICK" || true
+        NEW_TS="$NOW_TS"
+    elif [ "$PRIOR_FAIL" -gt 0 ] && [ "$FAIL" -gt 0 ]; then
+        # Sustained outage. Debounce to once per hour; escalate to urgent if worsened.
+        if [ "$FAIL" -gt "$PRIOR_FAIL" ]; then
+            /usr/local/bin/notify.sh \
+                "Smoketest worsened: $FAIL URL(s) failing (was $PRIOR_FAIL). Last failure: $FIRST_FAIL_LABEL." \
+                "Smoketest regression" urgent "$CLICK" || true
+            NEW_TS="$NOW_TS"
+        elif [ "$((NOW_TS - PRIOR_TS))" -ge "$DEBOUNCE" ]; then
+            /usr/local/bin/notify.sh \
+                "Smoketest still failing: $FAIL URL(s) down. Last failure: $FIRST_FAIL_LABEL." \
+                "Smoketest regression" default "$CLICK" || true
+            NEW_TS="$NOW_TS"
+        fi
+    elif [ "$PRIOR_FAIL" -gt 0 ] && [ "$FAIL" -eq 0 ]; then
+        # Recovery.
+        /usr/local/bin/notify.sh \
+            "Smoketest recovered: all $PASS URL(s) passing." \
+            "Smoketest recovered" default "$CLICK" || true
+        NEW_TS="$NOW_TS"
+    fi
+    # prior == 0 && current == 0 → silent, no-op.
+    echo "$FAIL $NEW_TS" > "$STATE_FILE"
+fi
+
 exit 0

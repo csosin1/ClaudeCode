@@ -396,3 +396,101 @@ Post-cleanup /opt/abs-dashboard/CLAUDE.md trimmed to ~50 lines of genuinely proj
   - **Pre-flight fingerprint test verdict:** `node car-offers/lib/fingerprint.test.js` (with `DISPLAY=:99 TZ=America/New_York`) → 21/21 PASS, 1 SKIP. WebGL skipped because Xvfb has no GPU; on Carvana the SwANGLE software path hits our patches.
   - The reviewer should also confirm the deploy script's `apt-get install ttf-mscorefonts-installer` non-interactive flow doesn't hang on first deploy. The `debconf-set-selections` line precedes the install; tested locally with `DEBIAN_FRONTEND=noninteractive`.
 
+
+---
+## infra: OOM-kill detector (Track B audit alert #1)
+
+**Why:** 2026-04-15 ~02:19 UTC a ~912 MB Python process was OOM-killed on the
+dev droplet; carvana-abs-2 went down silently for 9 hours before the user
+noticed. The kernel OOM-killer reaps processes without surfacing any signal
+our existing capacity / watchdog / check-in loops can see. This alert closes
+that gap by tailing the kernel journal for oom-killer lines every 5 min and
+firing an urgent ntfy push with the process name, pid, rss (MB), and invoking
+cgroup/scope.
+
+**Files added / modified:**
+- new: `/usr/local/bin/oom-detector.sh` — scanner + notifier (bash)
+- new: `/opt/site-deploy/helpers/oom-detector.sh` — versioned mirror for
+  droplet-rebuild survival
+- modified: `/etc/cron.d/claude-ops` — added `*/5 * * * *` entry calling
+  oom-detector.sh (live)
+- modified: `/opt/site-deploy/helpers/claude-ops.cron` — matching versioned
+  cron entry
+
+**Dedup state:** `/var/run/claude-sessions/oom-last-seen-epoch`. First-ever run
+seeds to `now`, so no alerts fire for historical events. Subsequent runs only
+alert on events with epoch > last-seen. State advances to the newest event's
+epoch after successful alerting.
+
+**Notify payload:**
+- title: `"Kernel OOM-kill on dev"`
+- priority: `urgent`
+- body: `"Killed: <comm> (pid=<pid>, rss=<N>MB). Cgroup: <invoker>. Full event:
+  journalctl -k --since '<iso-timestamp>'."`
+- click: https://casinv.dev/capacity.html
+
+**Builder-level testing performed:**
+- `bash -n` syntax check: PASS.
+- First run with empty state: seeds epoch to `now`, exits 0 silently — PASS.
+- Second run immediately after: no alerts, exits 0 — PASS.
+- Regex validation against the historical 2026-04-16 02:19 event
+  (`Out of memory: Killed process 557201 (python) ... anon-rss:912688kB ...`):
+  correctly extracted pid=557201, comm=python, rss=891MB — PASS.
+- Shared-infra smoketest gate after cron edit: 17/17 PASS.
+
+**Assumptions:**
+- `journalctl -k --since='-10min'` reliably returns kernel OOM lines on this
+  droplet (systemd-journald with default persistence). If journald ever loses
+  persistence, the detector would go silent — but so would everything else
+  depending on the journal, so cross-wired with the existing capacity-check
+  cron anyway.
+- The historical event cited in the brief as "2026-04-15 02:19 UTC" maps to
+  journal entry `Apr 16 02:19:51` with the matching 912 MB rss and cgroup
+  `systemd`. Treated that as the referenced event for regex validation.
+- Title hard-codes "dev" since this droplet is the dev droplet. When promoted
+  to prod, the script can take a `HOSTNAME_LABEL` env var or be templated at
+  install time. Out of scope for this ship.
+- 10-min journal scan window with 5-min cron cadence gives 2× overlap for
+  clock-skew / late-flush safety; epoch dedup prevents re-alerts.
+
+**Things for Infra-QA to verify:**
+- With state file removed, the script seeds silently and does NOT re-alert for
+  historical events.
+- Injecting a fake OOM journal line (or finding a way to synthesize one) would
+  produce exactly one urgent notify and exactly one state-file bump. Note the
+  brief explicitly instructed me NOT to simulate an actual OOM; leaving that
+  to Infra-QA's discretion.
+- ntfy notify end-to-end delivery to the phone — Infra-QA + user.
+- The cron entry is picked up (`systemctl status cron` / `grep CRON
+  /var/log/syslog` for the next 5-min tick).
+
+## 2026-04-13 — infra: smoketest regression notifier (Track B alert #2)
+
+- **Why:** Track B audit flagged that `projects-smoketest.sh report --quiet` (hourly cron) was silent on regressions — a non-200 at any of the 17 tracked URLs only surfaced when a human opened `/smoketest.json`. Per reflections/2026-04-15.md the droplet keeps accumulating monitors that write state but don't page. This closes the loop.
+- **What was built (Option A — minimal, inline):**
+  - `/usr/local/bin/projects-smoketest.sh`: after the per-URL loop, added a notify-on-transition clause that only runs in `report` mode (gate mode is a pre-commit guard and already blocks the ship; paging there would be noise).
+  - State: `/var/run/claude-sessions/smoketest-last-state` — one line `<fail_count> <epoch_last_notify>`. Rolled forward by the script.
+  - Transitions:
+    - prior 0 → current >0: **urgent** notify `"Smoketest regression: N URL(s) failing. Last failure: <label>. See /smoketest.json"`, click `https://casinv.dev/smoketest.json`.
+    - prior >0 → current >0 **and count increased**: **urgent** `"Smoketest worsened: N URL(s) failing (was M). Last failure: <label>."`.
+    - prior >0 → current >0, count same or lower, **>=60 min since last notify**: **default** `"Smoketest still failing: N URL(s) down. Last failure: <label>."`. (Debounce — prevents hourly spam on sustained outage.)
+    - prior >0 → current 0: **default** `"Smoketest recovered: all N URL(s) passing."`.
+    - prior 0 and current 0: silent no-op.
+  - `notify.sh` invocations `|| true` so a failed page never breaks the smoketest exit contract.
+- **Files modified:**
+  - `/usr/local/bin/projects-smoketest.sh` (inline notifier added; `FIRST_FAIL_LABEL` captured in the loop).
+  - `helpers/projects-smoketest.sh` (mirrored — required by infra-builder rule so the script survives droplet rebuild).
+- **Builder-level verification:**
+  - `bash -n` clean on both copies.
+  - Dry run with no prior state + all 17 URLs passing → summary `17 passed, 0 failed`, no notify fired, state written `0 0`. Matches spec (prior-0/current-0 silent branch).
+  - Dry run with seeded `3 <ts-2h-ago>` state + all 17 passing (notify.sh temporarily stubbed to log-only) → captured exactly one call: `msg="Smoketest recovered: all 17 URL(s) passing." title="Smoketest recovered" prio=default click=https://casinv.dev/smoketest.json`. State advanced to `0 <now>`. notify.sh + state restored to clean afterward.
+  - **Did NOT** actually break a URL to test the regression path (per brief).
+- **Assumptions:**
+  - `/var/run/claude-sessions/` is tmpfs and clears on reboot; that's fine — a fresh boot starts at `prior=0`, so the first cron after reboot is silent if everything's green. If the droplet reboots mid-outage, the first post-reboot cron will fire the "new regression" notify, which is correct behavior.
+  - `read -r PRIOR_FAIL PRIOR_TS < "$STATE_FILE"` tolerates missing/short lines (defaults fill in). Old state files (e.g., a legacy single-int if someone hand-edited) parse as `<n> <empty→0>` and collapse to "treat as first-seen" on next run.
+  - Notify goes through `/usr/local/bin/notify.sh` which reads `/etc/ntfy-topic`. If that topic is unset, `notify.sh` exits 1 but the `|| true` swallows it.
+  - Hourly cron entry itself unchanged — scope says edit the script, not the crontab.
+- **Things for Infra-QA:**
+  - Verify the notify-on-transition branches with a real notification by temporarily editing the URLS list to include an intentionally-failing URL for one cron cycle, observing the urgent notify, then removing and observing the recovery notify. (I did NOT do this — builder-level only.)
+  - Confirm `/var/run/claude-sessions/smoketest-last-state` has mode 644 / root-owned after the first real cron run.
+  - Confirm gate mode still skips the notifier (shared-infra pre-commit runs would otherwise ntfy-spam on any transient 502).
