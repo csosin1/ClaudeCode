@@ -5,9 +5,38 @@
 # RULE 1: Update THIS SCRIPT first after git reset — breaks deadlock if old version is stuck.
 # RULE 2: Static file sync next (2-3s). Heavy setup (npm, apt-get) runs last and never blocks.
 # RULE 3: Project deploy scripts live in deploy/<project>.sh — owned by project chats.
+# RULE 4: 2026-04-17 — set -eE + ERR trap fires urgent ntfy on deploy failure.
+#         Most existing commands already have `|| true` or `|| echo WARNING` suffixes;
+#         those remain non-fatal under set -e. Intentionally-fatal commands (git
+#         reset, rsync, systemctl daemon-reload) abort + fire the trap.
+
+set -eE -o pipefail
 
 REPO_DIR="/opt/site-deploy"
 LOG="/var/log/general-deploy.log"
+
+# Failure trap — fires once, writes context + urgent notify, then exits.
+# Recursion guard via _DEPLOY_FAIL_FIRED prevents re-entry if notify.sh itself errors.
+_DEPLOY_FAIL_FIRED=0
+on_deploy_fail() {
+    local rc="$1" line="$2"
+    [ "$_DEPLOY_FAIL_FIRED" = "1" ] && exit "$rc"
+    _DEPLOY_FAIL_FIRED=1
+    local sha
+    sha="$(git -C "$REPO_DIR" rev-parse --short HEAD 2>/dev/null || echo '?')"
+    local last_log
+    last_log="$(tail -3 "$LOG" 2>/dev/null | tr '\n' '|' || echo '')"
+    echo "$(date): Deploy FAILED at line $line (rc=$rc). SHA=$sha. Last log: $last_log" >> "$LOG"
+    if [ -x /usr/local/bin/notify.sh ]; then
+        /usr/local/bin/notify.sh \
+            "Deploy FAILED on dev at line $line (rc=$rc). SHA $sha. Last: $last_log" \
+            "Deploy FAILED (SHA $sha)" \
+            urgent \
+            "https://casinv.dev/projects.html" >> "$LOG" 2>&1 || true
+    fi
+    exit "$rc"
+}
+trap 'on_deploy_fail $? $LINENO' ERR
 
 # Find Node.js — may be installed via nvm, nodesource, or snap
 NODE_BIN=""
@@ -35,8 +64,9 @@ export PATH="$(dirname "$NODE_BIN"):$PATH"
 
 cd "$REPO_DIR" || exit 1
 
-# Fetch latest from main
-git fetch origin main 2>/dev/null
+# Fetch latest from main. Transient network failure must NOT fire the failure trap;
+# the next invocation (webhook or 5-min timer) will retry. Silent no-op on fail.
+git fetch origin main 2>/dev/null || true
 
 LOCAL=$(git rev-parse HEAD)
 REMOTE=$(git rev-parse origin/main)

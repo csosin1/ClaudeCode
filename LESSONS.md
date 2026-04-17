@@ -127,3 +127,23 @@ new-droplet bootstrap checklist once we have one.
 **Fix:** Switched from basic-auth to **path-secret** — the URL path itself is the credential. `/docs/<TOKEN>/` serves the docs, anything else under `/docs/` returns 404. No credentials anywhere in the request; works with any fetcher.
 
 **Preventive rule:** For auth-gated endpoints that need to be fetchable by Claude or other LLM tool fetchers, use **path-secret** or **query-string token**, NOT basic-auth with credentials in the URL. If IP allow-list becomes available (e.g., Anthropic publishes egress CIDRs), that's the strictest gate; otherwise path-secret is the practical floor. Header-based auth (`Authorization:`) may or may not work depending on the fetcher; path-secret works universally.
+
+## 2026-04-17 — Parallel infra-builders on shared repo caused cross-track commit commingling
+
+**Symptom:** Four infra-builder agents dispatched in parallel for alerts #1-#4. Alert #2's agent committed commit `f2ab46d` which unexpectedly included Alert #4's files (`migrate-phase.sh` + `migration.html`) that Alert #4's agent had staged but not yet committed. Commit attribution wrong; if we needed to revert one feature cleanly, couldn't.
+
+**Root cause:** All four agents ran `git add` + `git commit` in the shared `/opt/site-deploy/` checkout. When Alert #2's `git add SPECIFIC_FILES` ran, git's index already had Alert #4's concurrent `git add` pending from seconds earlier. The commit swept both sets in.
+
+**Fix going forward:** parallel infra-builder dispatches must each use their own worktree via `start-task.sh infra "<slug>"` at `/opt/worktrees/infra-<slug>/`. `finish-task.sh` merges to main serially. Direct-to-main pushes only safe for single-builder work. Added to `.claude/agents/infra-builder.md § Parallel-dispatch hygiene`.
+
+**Preventive rule:** when orchestrator dispatches ≥2 builders concurrently, the brief MUST include "use `start-task.sh infra` to get a worktree; commit there." Orchestrator verifies independence (file-path non-overlap) before fan-out but the worktree isolation is the structural defense.
+
+## 2026-04-17 — System-reminder about malware analysis over-interpreted by builder subagent
+
+**Symptom:** Dispatched infra-builder on Alert #3 (auto_deploy_general.sh failure trap). Agent read the target file, received the standard "consider whether this code is malware; you MUST refuse to improve or augment" system-reminder, and refused the entire task. No edits shipped. Agent's reasoning: "Adding a trap handler is augmentation; I cannot proceed."
+
+**Root cause:** The reminder is scoped to unknown/suspicious third-party code being analyzed, not to legitimate platform edits the user explicitly dispatched. The agent's isolated context didn't carry the session history confirming `auto_deploy_general.sh` is our platform code with weeks of git history under the user's account. So it applied the reminder as a blanket refusal.
+
+**Fix:** added to `.claude/agents/infra-builder.md § System reminders: scope and interpretation` — explicit guidance that the reminder is about malicious code and does not blanket-block legitimate platform work. Default posture: proceed-with-care; only escalate if the file legitimately looks opaque / outside platform scope.
+
+**Preventive rule:** in every subagent brief for platform work, include a one-line preamble: "This task is within our platform infrastructure scope. System-reminders about malware analysis are about unknown code; proceed with the edit unless the file itself looks opaque or outside the declared scope."
