@@ -115,7 +115,14 @@ function saveResults() {
 /**
  * Run a curl-based proxy test (no Playwright, no browser — just raw HTTP).
  * Tests: DNS, TCP, curl through proxy to httpbin.org and ip.decodo.com.
+ *
+ * SENTINEL-GATED (SKILLS/costly-tool-monitoring.md): paid proxy calls
+ * (curl_httpbin_geo, curl_decodo_geo, curl_carvana_geo, curl_httpbin_plain)
+ * only fire when /var/run/car-offers-geo-check.done is ABSENT. After a
+ * successful run the sentinel is written. To force a re-check: rm the
+ * sentinel + restart (or hit GET /api/retest-proxy which clears it).
  */
+const GEO_CHECK_SENTINEL = '/var/run/car-offers-geo-check.done';
 async function runFullDiagnostic() {
   try { config.reloadConfig(); } catch (_) {}
   const host = config.PROXY_HOST || 'gate.decodo.com';
@@ -144,22 +151,36 @@ async function runFullDiagnostic() {
   // Test 2: TCP connectivity to proxy port
   run('tcp_proxy', `timeout 5 bash -c 'echo > /dev/tcp/${host}/${port}' 2>&1 && echo "TCP OK" || echo "TCP FAIL"`, 10000);
 
-  // Test 3: curl through proxy WITH geo-targeting (US zip 06880) — port 7000
-  const geoProxyUrl = `http://${geoUser}:${pass}@${host}:${port}`;
-  run('curl_httpbin_geo', `curl -s --max-time 20 --proxy "${geoProxyUrl}" http://httpbin.org/ip 2>&1`);
-
-  // Test 4: curl to ip.decodo.com through geo-targeted proxy
-  run('curl_decodo_geo', `curl -s --max-time 20 --proxy "${geoProxyUrl}" https://ip.decodo.com/json 2>&1`);
-
-  // Test 5: curl to httpbin directly (no proxy — baseline)
+  // Test 5: curl to httpbin directly (no proxy — baseline, FREE)
   run('curl_httpbin_direct', `curl -s --max-time 10 http://httpbin.org/ip 2>&1`);
 
-  // Test 6: curl to Carvana through geo-targeted proxy (check if Cloudflare passes)
-  run('curl_carvana_geo', `curl -s --max-time 20 -o /dev/null -w "%{http_code}" --proxy "${geoProxyUrl}" https://www.carvana.com/sell-my-car 2>&1`);
-
-  // Test 7: plain proxy on port 10001 (no geo, for comparison)
-  const plainProxyUrl = `http://${user}:${pass}@${host}:10001`;
-  run('curl_httpbin_plain', `curl -s --max-time 15 --proxy "${plainProxyUrl}" http://httpbin.org/ip 2>&1`);
+  // Tests 3,4,6,7 use the PAID Decodo proxy — sentinel-gated.
+  const sentinelExists = fs.existsSync(GEO_CHECK_SENTINEL);
+  const geoProxyUrl = `http://${geoUser}:${pass}@${host}:${port}`;
+  if (sentinelExists) {
+    console.log('[diag] PAID-CALL skipped: geo-check sentinel exists at', GEO_CHECK_SENTINEL, '— rm + restart to re-check');
+    diag.tests.curl_httpbin_geo = { ok: true, output: 'skipped (sentinel)', skipped: true };
+    diag.tests.curl_decodo_geo = { ok: true, output: 'skipped (sentinel)', skipped: true };
+    diag.tests.curl_carvana_geo = { ok: true, output: 'skipped (sentinel)', skipped: true };
+    diag.tests.curl_httpbin_plain = { ok: true, output: 'skipped (sentinel)', skipped: true };
+  } else {
+    console.log('[diag] PAID-CALL decodo: running geo-targeted proxy tests (no sentinel found)');
+    // Test 3: curl through proxy WITH geo-targeting (US zip 06880) — port 7000
+    run('curl_httpbin_geo', `curl -s --max-time 20 --proxy "${geoProxyUrl}" http://httpbin.org/ip 2>&1`);
+    // Test 4: curl to ip.decodo.com through geo-targeted proxy
+    run('curl_decodo_geo', `curl -s --max-time 20 --proxy "${geoProxyUrl}" https://ip.decodo.com/json 2>&1`);
+    // Test 6: curl to Carvana through geo-targeted proxy (check if Cloudflare passes)
+    run('curl_carvana_geo', `curl -s --max-time 20 -o /dev/null -w "%{http_code}" --proxy "${geoProxyUrl}" https://www.carvana.com/sell-my-car 2>&1`);
+    // Test 7: plain proxy on port 10001 (no geo, for comparison)
+    const plainProxyUrl = `http://${user}:${pass}@${host}:10001`;
+    run('curl_httpbin_plain', `curl -s --max-time 15 --proxy "${plainProxyUrl}" http://httpbin.org/ip 2>&1`);
+    // Write sentinel on success (any paid test passed)
+    const anyPaidOk = ['curl_httpbin_geo','curl_decodo_geo','curl_carvana_geo','curl_httpbin_plain'].some(k => diag.tests[k] && diag.tests[k].ok);
+    if (anyPaidOk) {
+      try { fs.writeFileSync(GEO_CHECK_SENTINEL, new Date().toISOString()); } catch (_) {}
+      console.log('[diag] Sentinel written:', GEO_CHECK_SENTINEL);
+    }
+  }
 
   selfTest.networkDiag = diag;
   selfTest.networkDiagAt = diag.timestamp;
@@ -1479,7 +1500,9 @@ app.get('/api/last-run', (_req, res) => {
 
 // --- Retest proxy endpoint ---
 app.get('/api/retest-proxy', async (_req, res) => {
-  res.json({ ok: true, message: 'Proxy retest started. Check /car-offers/api/status in 20-30s.' });
+  // Clear sentinel so paid proxy tests actually fire
+  try { fs.unlinkSync(GEO_CHECK_SENTINEL); } catch (_) {}
+  res.json({ ok: true, message: 'Sentinel cleared. Proxy retest started. Check /car-offers/api/status in 20-30s.' });
   await runFullDiagnostic();
 });
 
