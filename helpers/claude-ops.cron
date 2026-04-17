@@ -5,6 +5,8 @@
 */5 * * * * root /usr/local/bin/claude-respawn.sh >/dev/null 2>&1
 # Capacity: every 5 min, write capacity.json + notify on threshold breaches
 */5 * * * * root /usr/local/bin/capacity-check.sh >/dev/null 2>&1
+# OOM detector: every 5 min, scan kernel journal for oom-killer events and fire urgent notify
+*/5 * * * * root /usr/local/bin/oom-detector.sh >/dev/null 2>&1
 # Daily reflection reminder at 23:00 UTC
 0 23 * * * root /usr/local/bin/notify.sh "Daily reflection time — reflections/$(date -u +\%Y-\%m-\%d).md" "Platform reflection" default "https://github.com/csosin1/ClaudeCode/tree/main/reflections" >/dev/null 2>&1
 # Chat telemetry: every 30 min, scan JSONLs for per-chat token cost + per-skill usage
