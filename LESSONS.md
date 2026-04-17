@@ -167,6 +167,21 @@ new-droplet bootstrap checklist once we have one.
 
 **Preventive rule:** Infra-QA position coverage must include **request-origin characteristics** (IP, UA, TLS fingerprint where testable) of the *actual consumer*, not just generalized external fetches. Default-curl responses are insufficient evidence that a bot-fingerprinted consumer will succeed. When a consumer can't be fully fingerprint-simulated (e.g., Claude web-fetch uses TLS details we can't replicate), explicitly flag the coverage gap and require user-manual confirmation as an observation-required item — same pattern as phone-receipt for ntfy.
 
+## 2026-04-17 — post-deploy-rsync ran POST_CMD every cron cycle, killing long-sleeping service
+
+**Symptom:** `timeshare-surveillance-watcher.service` on prod was getting SIGTERM'd and restarted every ~5 minutes for at least 4 hours (49+ restarts observed). `active (running)` from systemd's perspective, but its 900-second sleep between EDGAR fetch cycles never completed, so no new filings were pulled. `/opt/timeshare-surveillance-live/dashboard/data/combined.json` mtime frozen at 2026-04-13 01:40 UTC — 4 days stale. Classic silent-write-failure: health checks pass (HTTP 200 serving the stale file) while the underlying data pipeline hasn't fired in days.
+
+**Root cause:** `/usr/local/bin/post-deploy-rsync.sh` is cron'd every 5 min on dev. For each entry in `/etc/deploy-to-prod.conf` whose rsync exited 0 (always, given healthy VPC), it **unconditionally** ran the configured POST_CMD — in timeshare's case `systemctl try-restart timeshare-surveillance-watcher-preview timeshare-surveillance-admin-preview`. The watcher's sleep is longer than the restart cadence → it never made it to the next cycle.
+
+**Discovered:** via the 24h-rollback-window write-path verification, *not* the overnight infra-QA. Phases 1-4 QA checked HTTP reads; the watcher looked fine externally. The bug existed since Phase 1 but was invisible until someone asked "are writes actually happening?"
+
+**Fix:** post-deploy-rsync.sh now uses `rsync --stats`, captures output to a tmpfile, parses `Number of regular files transferred: N`, and only fires POST_CMD when N > 0. If nothing changed, no restart. Verified at 11:20Z cron fire — no restart happened (first skip in 4+ hours).
+
+**Preventive rules:**
+1. **Unconditional post-action in a cron loop + long-sleeping service = silent failure.** Any rsync-and-restart pattern must gate the restart on actual changes. Generalize: any periodic-poll loop that acts on every tick (rather than on detected change) will mask itself when it interacts with a service whose natural period exceeds the loop's.
+2. **Write-path checks belong in QA.** Infra-QA currently verifies routing + headers + body parity (reads). Add a write-path category — for each migrated app, trace a write to its state store and confirm mtime freshness matches the declared cadence. Update `.claude/agents/infra-qa.md` accordingly (separate commit).
+3. **Prefer change-triggered hooks over periodic polling** when syncing + restarting. Webhook-driven deploys (post-receive git hooks) don't have this failure mode because they only fire on push.
+
 ## 2026-04-17 — Fresh prod droplet shipped with ufw inactive; app ports reached public internet during Phase 2
 
 **Symptom:** During Phase 2 (gym-intelligence) migration, infra-QA flagged that prod's Flask services bound `0.0.0.0:8502/:8503`. Confirmed from dev: `curl http://67.205.140.167:8502/ → HTTP 404` (port open, app just doesn't route `/`). `ufw status` on prod: **inactive**. `iptables -L`: default ACCEPT on all chains. Phase 1 timeshare was unaffected only because those services bind `127.0.0.1` and sit behind a prod-local nginx — an accidental protection, not a designed one.
