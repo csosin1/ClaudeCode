@@ -1,0 +1,221 @@
+#!/bin/bash
+# paid-call — gateway wrapper for every paid external API call on this droplet.
+#
+# Logs two JSONL rows to /var/log/paid-calls.jsonl (starting, complete|failed),
+# enforces per-vendor caps from /etc/paid-call-caps.conf (periods: daily|session|monthly),
+# refuses the call (exit 127) if cumulative + est_cost_usd would exceed the cap.
+#
+# Usage:
+#   paid-call <vendor> <project> <purpose_tag> [--event-id=<id>] <est_cost_usd> -- <actual command...>
+#
+# See SKILLS/costly-tool-monitoring.md for the design rationale.
+
+set -u
+
+LOG_FILE="${PAID_CALL_LOG:-/var/log/paid-calls.jsonl}"
+CAPS_FILE="${PAID_CALL_CAPS:-/etc/paid-call-caps.conf}"
+LOCK_FILE="${PAID_CALL_LOCK:-/var/lock/paid-call.lock}"
+
+die() { echo "paid-call: $*" >&2; exit 2; }
+
+[ $# -ge 5 ] || die "usage: paid-call <vendor> <project> <purpose> [--event-id=<id>] <est_cost_usd> -- <cmd...>"
+
+VENDOR="$1"; shift
+PROJECT="$1"; shift
+PURPOSE="$1"; shift
+
+EVENT_ID=""
+case "${1:-}" in
+    --event-id=*) EVENT_ID="${1#--event-id=}"; shift ;;
+esac
+
+EST_COST="$1"; shift
+
+[ "${1:-}" = "--" ] || die "missing -- separator before wrapped command"
+shift
+
+[ $# -ge 1 ] || die "no wrapped command supplied"
+
+# Validate cost is numeric (integer or decimal, optional leading -)
+case "$EST_COST" in
+    ''|*[!0-9.]*) die "est_cost_usd must be numeric, got '$EST_COST'" ;;
+esac
+
+# Ensure log + lock dirs exist (best-effort; never fatal for caller's flow).
+mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null || true
+mkdir -p "$(dirname "$LOCK_FILE")" 2>/dev/null || true
+: >> "$LOG_FILE" 2>/dev/null || true
+
+# Hash the command for forensic dedup without logging secrets (URL path components still appear in ps; that's accepted).
+CMD_STR="$*"
+CMD_HASH=$(printf '%s' "$CMD_STR" | sha256sum | cut -c1-12)
+
+TS_ISO=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+TS_EPOCH=$(date -u +%s)
+
+# JSON-escape a string (handles \ " and control chars minimally).
+jesc() {
+    printf '%s' "$1" | python3 -c 'import json,sys; sys.stdout.write(json.dumps(sys.stdin.read()))'
+}
+
+# Compute cumulative spend for this vendor in the current period from the JSONL log.
+# Periods: daily = since today 00:00 UTC; session = since this host booted; monthly = since day-1 of this UTC month.
+cumulative_for_period() {
+    local period="$1" since_epoch
+    case "$period" in
+        daily)
+            since_epoch=$(date -u -d "$(date -u +%Y-%m-%d) 00:00:00" +%s)
+            ;;
+        monthly)
+            since_epoch=$(date -u -d "$(date -u +%Y-%m-01) 00:00:00" +%s)
+            ;;
+        session)
+            # Host boot time
+            since_epoch=$(date -u -d "$(uptime -s)" +%s 2>/dev/null || echo 0)
+            ;;
+        *)
+            echo 0
+            return
+            ;;
+    esac
+    if [ ! -s "$LOG_FILE" ]; then
+        echo 0
+        return
+    fi
+    python3 - "$LOG_FILE" "$VENDOR" "$since_epoch" <<'PY'
+import json, sys, datetime
+path, vendor, since_epoch = sys.argv[1], sys.argv[2], int(sys.argv[3])
+total = 0.0
+try:
+    with open(path, 'r') as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except Exception:
+                continue
+            if row.get('vendor') != vendor:
+                continue
+            if row.get('status') != 'starting':
+                # Only count the "starting" row so a call counts once even if it completes later.
+                # "refused_by_cap" rows are not counted (they did not execute).
+                continue
+            ts = row.get('ts')
+            if not ts:
+                continue
+            try:
+                dt = datetime.datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.timezone.utc)
+                if dt.timestamp() < since_epoch:
+                    continue
+            except Exception:
+                continue
+            try:
+                total += float(row.get('est_cost_usd') or 0)
+            except Exception:
+                pass
+except FileNotFoundError:
+    pass
+print(f"{total:.6f}")
+PY
+}
+
+# Look up cap for this vendor. Returns "<period> <cap_usd>" or empty string.
+lookup_cap() {
+    [ -r "$CAPS_FILE" ] || { echo ""; return; }
+    awk -v v="$VENDOR" '
+        /^[[:space:]]*#/ { next }
+        /^[[:space:]]*$/ { next }
+        $1 == v { print $2, $3; exit }
+    ' "$CAPS_FILE"
+}
+
+# Critical section: cap check + starting-row append must be atomic across concurrent paid-call invocations.
+CAP_DECISION_FILE=$(mktemp)
+trap 'rm -f "$CAP_DECISION_FILE"' EXIT
+
+(
+    flock -x 9
+
+    CAP_ROW=$(lookup_cap)
+    REFUSED=0
+    CUMULATIVE="0"
+    CAP_USD=""
+    CAP_PERIOD=""
+
+    if [ -n "$CAP_ROW" ]; then
+        CAP_PERIOD=$(echo "$CAP_ROW" | awk '{print $1}')
+        CAP_USD=$(echo "$CAP_ROW" | awk '{print $2}')
+        CUMULATIVE=$(cumulative_for_period "$CAP_PERIOD")
+        WOULD_BE=$(python3 -c "print(f'{float('$CUMULATIVE') + float('$EST_COST'):.6f}')")
+        OVER=$(python3 -c "print(1 if float('$WOULD_BE') > float('$CAP_USD') else 0)")
+        if [ "$OVER" = "1" ]; then
+            REFUSED=1
+            REFUSE_ROW=$(printf '{"ts":%s,"vendor":%s,"project":%s,"purpose":%s,"event_id":%s,"est_cost_usd":%s,"cmd_hash":%s,"cumulative":%s,"cap_period":%s,"cap_usd":%s,"status":"refused_by_cap"}' \
+                "$(jesc "$TS_ISO")" \
+                "$(jesc "$VENDOR")" \
+                "$(jesc "$PROJECT")" \
+                "$(jesc "$PURPOSE")" \
+                "$(jesc "$EVENT_ID")" \
+                "$EST_COST" \
+                "$(jesc "$CMD_HASH")" \
+                "$CUMULATIVE" \
+                "$(jesc "$CAP_PERIOD")" \
+                "$CAP_USD")
+            echo "$REFUSE_ROW" >> "$LOG_FILE"
+            echo "paid-call: REFUSED by cap — vendor=$VENDOR cumulative=\$$CUMULATIVE + est=\$$EST_COST > cap=\$$CAP_USD ($CAP_PERIOD)" >&2
+            echo "REFUSED" > "$CAP_DECISION_FILE"
+        fi
+    fi
+
+    if [ "$REFUSED" = "0" ]; then
+        START_ROW=$(printf '{"ts":%s,"vendor":%s,"project":%s,"purpose":%s,"event_id":%s,"est_cost_usd":%s,"cmd_hash":%s,"status":"starting"}' \
+            "$(jesc "$TS_ISO")" \
+            "$(jesc "$VENDOR")" \
+            "$(jesc "$PROJECT")" \
+            "$(jesc "$PURPOSE")" \
+            "$(jesc "$EVENT_ID")" \
+            "$EST_COST" \
+            "$(jesc "$CMD_HASH")")
+        echo "$START_ROW" >> "$LOG_FILE"
+        echo "OK" > "$CAP_DECISION_FILE"
+    fi
+) 9>"$LOCK_FILE"
+
+DECISION=$(cat "$CAP_DECISION_FILE" 2>/dev/null || echo "UNKNOWN")
+
+if [ "$DECISION" = "REFUSED" ]; then
+    exit 127
+fi
+
+# Execute wrapped command with stdout/stderr streamed through unchanged.
+START_NS=$(date +%s%N)
+"$@"
+RC=$?
+END_NS=$(date +%s%N)
+DURATION_MS=$(( (END_NS - START_NS) / 1000000 ))
+
+END_TS=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+STATUS="complete"
+[ "$RC" -eq 0 ] || STATUS="failed"
+
+END_ROW=$(printf '{"ts":%s,"vendor":%s,"project":%s,"purpose":%s,"event_id":%s,"est_cost_usd":%s,"cmd_hash":%s,"exit_code":%d,"duration_ms":%d,"status":%s}' \
+    "$(jesc "$END_TS")" \
+    "$(jesc "$VENDOR")" \
+    "$(jesc "$PROJECT")" \
+    "$(jesc "$PURPOSE")" \
+    "$(jesc "$EVENT_ID")" \
+    "$EST_COST" \
+    "$(jesc "$CMD_HASH")" \
+    "$RC" \
+    "$DURATION_MS" \
+    "$(jesc "$STATUS")")
+
+# Appending the completion row is also guarded by the lock so concurrent completions don't tear.
+(
+    flock -x 9
+    echo "$END_ROW" >> "$LOG_FILE"
+) 9>"$LOCK_FILE"
+
+exit "$RC"

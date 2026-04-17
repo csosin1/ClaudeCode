@@ -11,6 +11,45 @@ Builder appends a per-task entry here after each build. Format:
 - **Things for the reviewer:**
 ```
 
+## 2026-04-17 — infra: cost-monitoring MVP — paid-call gateway, log-event, spend-audit
+
+- **What was built:**
+  - `/usr/local/bin/paid-call` — gateway wrapper every paid API call routes through. Logs two JSONL rows (`starting`, `complete`|`failed`) to `/var/log/paid-calls.jsonl`, enforces per-vendor hard caps from `/etc/paid-call-caps.conf` (periods: `daily`|`session`|`monthly`), refuses (exit 127) when `cumulative + est_cost_usd > cap`. Critical section is `flock`-guarded so concurrent invocations do not race the cap check. Streams wrapped-command stdout/stderr through unchanged. Implements rule #2 + #3 from `SKILLS/costly-tool-monitoring.md` as platform infra, not per-project code.
+  - `/usr/local/bin/log-event` — fast JSONL event logger writing to `/var/log/events.jsonl`. No cap, no wrapping — pure logger, <10ms target, silent-fail on unwritable log so projects can call it liberally without risk of breaking their hot path.
+  - `/usr/local/bin/spend-audit.sh` — joiner that reads both JSONL logs + project DBs (car-offers.offers, carvana-abs/carmax-abs dashboard.db mtime, timeshare combined.json mtime, gym-intelligence.snapshots), produces a prose summary suitable for daily reflection. Detects anomalies: (a) spend with no events, (b) cost/event > 3× 7-day baseline, (c) unknown purpose tags. Exits 0 always; last line is `Anomalies: N`. Supports `--since=Nh|Nd|Nm`.
+  - `/etc/paid-call-caps.conf` + version-controlled mirror `helpers/paid-call-caps.conf` — starter entries for decodo ($2/day), capsolver ($5/day), anthropic ($20/day).
+  - `/etc/paid-call-known-purposes.conf` + mirror `helpers/paid-call-known-purposes.conf` — starter known tags for car-offers, carvana-abs, carmax-abs, anthropic.
+  - `SKILLS/costly-tool-monitoring.md` — added "Instrumentation" section documenting paid-call/log-event/spend-audit, Agent()-usage capture pattern (paid-call anthropic ... agent_subtask ... -- true), and project retrofit checklist.
+  - `SKILLS/daily-reflection.md` — added "Cost audit" section folding spend-audit.sh output into the daily reflection, with `high`-priority notify when anomalies > 0.
+  - `.claude/agents/infra-reviewer.md` item #12 tightened: any diff modifying a paid-API call must (a) route through `paid-call`, (b) be sentinel-gated if startup, (c) include a matching `log-event` call, (d) register the purpose tag in `paid-call-known-purposes.conf`.
+
+- **Files modified:**
+  - New: `helpers/paid-call`, `helpers/log-event`, `helpers/spend-audit.sh`, `helpers/paid-call-caps.conf`, `helpers/paid-call-known-purposes.conf`.
+  - New system files (no diff, version-controlled as mirrors above): `/usr/local/bin/{paid-call,log-event,spend-audit.sh}`, `/etc/paid-call-caps.conf`, `/etc/paid-call-known-purposes.conf`, `/var/log/{paid-calls,events}.jsonl` (created empty, 0644).
+  - Modified: `SKILLS/costly-tool-monitoring.md`, `SKILLS/daily-reflection.md`, `.claude/agents/infra-reviewer.md`.
+  - Not modified: any project source (per infra-builder scope).
+
+- **Tests added / run before commit:**
+  1. `paid-call test_vendor test_project test_purpose 0.001 -- echo hi` → printed `hi`, JSONL has `starting` then `complete` row, exit 0.
+  2. Added `test_vendor session 1.00` to caps; `paid-call test_vendor test_project test_purpose 99.99 -- echo hi` → refused with `paid-call: REFUSED by cap — vendor=test_vendor cumulative=$0.001000 + est=$99.99 > cap=$1.00 (session)`, exit 127, `refused_by_cap` JSONL row. Cap entry restored after.
+  3. `log-event test_project test_event --metadata='{"a":1}'` → exit 0, JSONL row `{"ts":...,"project":"test_project","event_type":"test_event","event_id":"","metadata":{"a":1}}`.
+  4. `spend-audit.sh --since=1h` and `--since=24h` → emits prose per-project lines, graceful "DB query failed, skipping" / "no timestamp column, skipping" fallbacks on car-offers and gym-intelligence, flags test_project:test_purpose as [ANOMALY] unknown purpose, ends `Anomalies: 1 (see above)`.
+  5. `projects-smoketest.sh gate` → **17 passed, 0 failed**.
+
+- **Assumptions:**
+  - Sonnet-tier token-cost proxy for Agent()-usage capture: `total_tokens * $0.000015`. Approximate; refine when Anthropic usage API lands. Documented in the skill.
+  - car-offers `/opt/car-offers/offers.db` is currently empty (0 bytes). Audit silently skips empty/invalid DBs rather than treating them as query errors.
+  - gym-intelligence `snapshots` table lacks a timestamp column in the live schema; audit notes this and skips that project's DB-derived event count rather than faking zero. Follow-up: gym-intelligence can add a timestamp column or emit `log-event`.
+  - timeshare-surveillance has no DB; uses combined.json mtime as coarse "refreshed" signal.
+
+- **Things for the reviewer:**
+  - All 5 new files in `helpers/` have corresponding installations in `/usr/local/bin/` and `/etc/` — version-control mirror rule satisfied.
+  - No credentials in any file.
+  - Paired-edit: the reviewer checklist item #12 was tightened (replacement, not addition). `SKILLS/costly-tool-monitoring.md` gains a big new section but the old "Detection" section was updated in-place to note the new JSONL path, keeping the file structurally the same. `SKILLS/daily-reflection.md` output-flow was extended by one step, not by a whole new block.
+  - No CLAUDE.md edit — the paired-edit pointer-parsimony rule says new SKILLS additions do NOT get CLAUDE.md pointers unless the rule fires on every task; daily reflection already has the pointer, and the cost-monitoring pattern surfaces through the reflection-skill rather than needing its own pointer.
+  - Shared-infra smoketest: 17/17 PASS (evidence above).
+  - This work did not touch `/opt/<project>/**`. The car-offers retrofit (wrapping the proxy call in paid-call + adding log-event calls around scrape attempts) is queued for the car-offers chat per the tmux directive already sent — not infra's scope.
+
 ## 2026-04-17 — infra: Option C — scope general-deploy to dev; per-project rsync to prod
 
 - **What was built:**

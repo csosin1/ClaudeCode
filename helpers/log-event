@@ -1,0 +1,57 @@
+#!/bin/bash
+# log-event — fast JSONL event logger for "thing we did" events.
+#
+# Usage:
+#   log-event <project> <event_type> [--event-id=<id>] [--metadata='<json>']
+#
+# Writes one line to /var/log/events.jsonl. Never fails the caller — if the log
+# is unwritable, exit 0 silently. Target latency <10ms.
+
+set -u
+
+LOG_FILE="${LOG_EVENT_LOG:-/var/log/events.jsonl}"
+
+if [ $# -lt 2 ]; then
+    echo "usage: log-event <project> <event_type> [--event-id=<id>] [--metadata='<json>']" >&2
+    exit 2
+fi
+
+PROJECT="$1"; shift
+EVENT_TYPE="$1"; shift
+
+EVENT_ID=""
+METADATA="null"
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --event-id=*) EVENT_ID="${1#--event-id=}" ;;
+        --metadata=*) METADATA="${1#--metadata=}" ;;
+        *) ;;  # Ignore unknown; silent-fail contract.
+    esac
+    shift
+done
+
+# If metadata isn't valid JSON, coerce it to a string so the row stays parseable.
+if [ "$METADATA" != "null" ]; then
+    if ! printf '%s' "$METADATA" | python3 -c 'import json,sys; json.loads(sys.stdin.read())' 2>/dev/null; then
+        METADATA=$(printf '%s' "$METADATA" | python3 -c 'import json,sys; sys.stdout.write(json.dumps(sys.stdin.read()))')
+    fi
+fi
+
+TS=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+# Escape scalar fields
+jesc() { printf '%s' "$1" | python3 -c 'import json,sys; sys.stdout.write(json.dumps(sys.stdin.read()))'; }
+
+ROW=$(printf '{"ts":%s,"project":%s,"event_type":%s,"event_id":%s,"metadata":%s}' \
+    "$(jesc "$TS")" \
+    "$(jesc "$PROJECT")" \
+    "$(jesc "$EVENT_TYPE")" \
+    "$(jesc "$EVENT_ID")" \
+    "$METADATA")
+
+# Silent-fail on unwritable log — logging must never break caller.
+if ! echo "$ROW" >> "$LOG_FILE" 2>/dev/null; then
+    exit 0
+fi
+exit 0

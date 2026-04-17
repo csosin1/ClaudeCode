@@ -68,12 +68,19 @@ Don't over-engineer this. A single session of structured thinking:
 
 Be honest about what's working. Boosting the signal on things that compound (other chats shipping skills, user actions discovered that would otherwise be buried) matters as much as calling out failures.
 
+## Cost audit
+
+Every reflection pass runs `spend-audit.sh --since=24h` and folds its output verbatim into the reflection under a "Cost audit" section. The tool joins `/var/log/paid-calls.jsonl` (paid-call wrapper) + `/var/log/events.jsonl` (log-event helper) + project DBs, emits one line per project showing spend and event counts, and flags anomalies (spend with no events, cost/event > 3x baseline, unknown purpose tags).
+
+If the audit reports `Anomalies: N` with N > 0, the reflection notify fires at `high` priority instead of `default`, and the anomaly lines are quoted in the notify body. An anomaly is a signal the user should look before the next workday, not a silent wait for the following day's reflection.
+
 ## Output Flow
 
-1. Write the reflection to `/opt/site-deploy/reflections/YYYY-MM-DD.md`.
-2. Commit with message `reflection: YYYY-MM-DD — <one-line theme>`. Push.
-3. If any proposals graduated to immediate work items, file them as `TaskCreate` entries or ship them in the same commit where appropriate.
-4. Notify the user with `notify.sh` priority `default`, click-URL to the file on GitHub (since no /reflections.html yet — TODO: add one if this practice sticks).
+1. Run `spend-audit.sh --since=24h` and capture its output for the reflection.
+2. Write the reflection to `/opt/site-deploy/reflections/YYYY-MM-DD.md`, including the Cost audit section with the tool's output.
+3. Commit with message `reflection: YYYY-MM-DD — <one-line theme>`. Push.
+4. If any proposals graduated to immediate work items, file them as `TaskCreate` entries or ship them in the same commit where appropriate.
+5. Notify the user with `notify.sh`. Priority is `high` if the audit reported anomalies, else `default`. Click-URL to the file on GitHub (since no /reflections.html yet — TODO: add one if this practice sticks).
 
 ## Anti-Patterns
 
