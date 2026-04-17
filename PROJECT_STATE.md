@@ -15,7 +15,7 @@ _Last updated: 2026-04-14 (pre-resize checkpoint)_
 
 **All prior data issues closed.** Data trusted, live dashboard updated, 7 commits of fixes in this session.
 
-**RESUMED 2026-04-17 11:36 UTC.** Markov relaunched (PID 896768) with disk-offload fix. ETA ~3hr end-to-end. Pipeline autonomous from here: Markov → re-export → regenerate+promote → final QA audit → done.
+**MIGRATED TO PROD + RESUMED 2026-04-17 12:10 UTC.** abs-dashboard now runs on prod droplet (10.116.0.3, `ssh prod-private`), 8GB RAM / 4 CPUs. Chunk size bumped 5→12 for faster training (all Carvana deals fit in 1 chunk, CarMax in 4 chunks). Markov PID 161684 on prod. Dev copy preserved 24h as rollback only (/opt/abs-dashboard on 159.223.127.125 is deprecated — do not write there). ETA ~90-120min end-to-end on prod vs 3-4hr on dev.
 
 **State snapshot when paused:**
 - CarMax loan-level: 37/37 deals, 3.1M loans. Audit clean. F-019 fixed (2019-3 loan_loss_summary recomputed).
