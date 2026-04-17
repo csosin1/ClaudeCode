@@ -75,10 +75,10 @@ Last updated: 2026-04-12
 - **Shared-infra deps:** nginx location blocks `/CarvanaLoanDashBoard/` (live) + `/CarvanaLoanDashBoard/preview/`; `/opt/auto_deploy.sh` + `auto-deploy.timer` (shared across repo); `/opt/abs-venv/` shared Python env; `/var/log/auto-deploy.log`. **This project's auto-deploy is the one variant from the standard flow — worth normalizing eventually.**
 
 ## Advisor-docs endpoint
-- URL: https://casinv.dev/docs/
+- URL: https://casinv.dev/docs/0f296d8365108fac78079a6940a53251b04e55dd3b2ce4a3/
 - Served from: /var/www/docs/ (mirror of allow-listed subset of /opt/site-deploy/)
-- Auth: HTTP basic auth; password in /opt/site-deploy/.env.docs-credential (gitignored)
-- nginx: `location /docs/` in `/etc/nginx/sites-available/abs-dashboard` with `auth_basic` + `/etc/nginx/docs.htpasswd`
+- Auth: path-secret (token IS the URL segment). Token in /opt/site-deploy/.env.docs-credential as DOCS_TOKEN (gitignored)
+- nginx: `location /docs/<DOCS_TOKEN>/` in `/etc/nginx/sites-available/abs-dashboard`. Anything else under `/docs/` returns 404. Switched from basic-auth 2026-04-17 because Claude web-fetch strips embedded URL creds.
 - Refresh: `/usr/local/bin/refresh-docs.sh` every 15 min via cron + triggered post-commit
 - IP allow-list stub: `/usr/local/bin/refresh-docs-ip-allowlist.sh` runs weekly; will replace basic-auth when Anthropic publishes a public IP range list (404 as of 2026-04-17)
 - What's served: CLAUDE.md, RUNBOOK.md, LESSONS.md, ADVISOR_CONTEXT.md, MIGRATION_RUNBOOK.md, SKILLS/*.md, reflections/*.md, helpers/infra-home/*.md, helpers/migration-inventory-*.md, 7 bundle chunks

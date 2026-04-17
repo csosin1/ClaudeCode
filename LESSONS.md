@@ -117,3 +117,13 @@ new-droplet bootstrap checklist once we have one.
 **Future state:** `/usr/local/bin/refresh-docs-ip-allowlist.sh` runs weekly (`0 8 * * 1` in `/etc/cron.d/claude-ops`) to probe candidate endpoints. When Anthropic publishes, implement parsing in that stub + remove auth_basic.
 
 **Preventive rule:** when a requested mechanism depends on an upstream not-yet-shipping capability (published IP ranges, a webhook, a new API), don't block on it. Ship an equivalent-security fallback now + plant a dated probe script + LESSONS entry. Revisit quarterly. Document the fallback explicitly as a fallback, not as the intended design.
+
+## 2026-04-17 — Claude web-fetch tool strips embedded URL credentials
+
+**Symptom:** User reported advisor session couldn't fetch `https://advisor:PASS@casinv.dev/docs/` — fetcher returned `PERMISSIONS_ERROR`. Basic-auth via URL didn't work even though nginx confirmed the credentials were valid from curl.
+
+**Root cause:** Claude's web-fetch tool (and most HTTPS clients since ~2020) silently strip the `userinfo` portion from URLs per RFC 3986 security guidance. The fetcher sees `https://casinv.dev/docs/` after stripping, which then returns 401 from our basic-auth challenge.
+
+**Fix:** Switched from basic-auth to **path-secret** — the URL path itself is the credential. `/docs/<TOKEN>/` serves the docs, anything else under `/docs/` returns 404. No credentials anywhere in the request; works with any fetcher.
+
+**Preventive rule:** For auth-gated endpoints that need to be fetchable by Claude or other LLM tool fetchers, use **path-secret** or **query-string token**, NOT basic-auth with credentials in the URL. If IP allow-list becomes available (e.g., Anthropic publishes egress CIDRs), that's the strictest gate; otherwise path-secret is the practical floor. Header-based auth (`Authorization:`) may or may not work depending on the fetcher; path-secret works universally.

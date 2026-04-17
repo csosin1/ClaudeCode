@@ -19,3 +19,5 @@
 */15 * * * * root /usr/local/bin/refresh-docs.sh >/dev/null 2>&1
 # IP allow-list: weekly check for Anthropic CIDR publication (stub until they publish)
 0 8 * * 1 root /usr/local/bin/refresh-docs-ip-allowlist.sh >/dev/null 2>&1
+# Deploy-mirror safety net: every 5 min, rsync migrated projects to prod (single-flighted)
+*/5 * * * * root /usr/local/bin/post-deploy-rsync.sh >/dev/null 2>&1

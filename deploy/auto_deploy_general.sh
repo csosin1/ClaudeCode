@@ -180,6 +180,13 @@ if [ "$LOCAL" != "$REMOTE" ]; then
 
     echo "$(date): Deploy complete." >> "$LOG"
 
+    # Mirror migrated projects to prod droplet (Option B migration).
+    # Reads /etc/deploy-to-prod.conf; no-op if nothing configured.
+    # Non-blocking: any failure is logged + notified, does not break auto-deploy.
+    if [ -x /usr/local/bin/post-deploy-rsync.sh ]; then
+        /usr/local/bin/post-deploy-rsync.sh >> "$LOG" 2>&1 &
+    fi
+
     # --- Push notifications disabled by user. Re-enable by uncommenting below. ---
     # if [ -x /usr/local/bin/notify.sh ]; then
     #     SHORT_SHA=$(git -C "$REPO_DIR" rev-parse --short HEAD 2>/dev/null || echo "")

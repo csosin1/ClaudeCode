@@ -1,11 +1,11 @@
 #!/bin/bash
-# refresh-docs.sh — mirror the allow-listed subset of /opt/site-deploy/ into /var/www/docs/
+# refresh-docs.sh — mirror the allow-listed subset of /opt/site-deploy/ into /var/www/docs-store/
 # for the advisor-docs endpoint at https://casinv.dev/docs/
 # Idempotent; safe to run on every deploy. Regenerates bundle chunks + index.html.
 set -e
 
 SRC=/opt/site-deploy
-DST=/var/www/docs
+DST=/var/www/docs-store
 
 mkdir -p "$DST"/{skills,reflections,bundle-chunks,helpers/infra-home,migration-inventory}
 
@@ -29,7 +29,7 @@ if [ -f "$SRC/ADVISOR_BUNDLE.md" ]; then
 from pathlib import Path
 import re
 src = Path('/opt/site-deploy/ADVISOR_BUNDLE.md').read_text()
-out = Path('/var/www/docs/bundle-chunks')
+out = Path('/var/www/docs-store/bundle-chunks')
 out.mkdir(exist_ok=True, parents=True)
 # Clear old chunks
 for f in out.glob('chunk-*.md'):
