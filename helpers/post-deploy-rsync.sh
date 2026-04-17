@@ -60,20 +60,34 @@ while IFS= read -r line <&3 || [ -n "$line" ]; do
 
     [ -d "$LOCAL" ] || { echo "$(date): skip missing $LOCAL" >> "$LOG"; continue; }
 
-    # rsync with bounded timeouts
-    rsync -az --delete \
+    # rsync with bounded timeouts. --stats output gates POST_CMD firing —
+    # running `systemctl try-restart` on every cron cycle kills long-sleeping
+    # services. Concrete failure 2026-04-17: timeshare-surveillance-watcher
+    # sleeps 900s between EDGAR cycles, got killed every 5 min by the
+    # unconditional try-restart here, combined.json went 4 days stale.
+    RSYNC_TMP=$(mktemp)
+    rsync -az --delete --stats \
         -e 'ssh -o ConnectTimeout=10 -o ServerAliveInterval=10' \
         "${EXCLUDES[@]}" \
         --timeout=60 \
-        "$LOCAL"/ "$HOST":"$REMOTE"/ >> "$LOG" 2>&1
+        "$LOCAL"/ "$HOST":"$REMOTE"/ > "$RSYNC_TMP" 2>&1
     RC=$?
+    cat "$RSYNC_TMP" >> "$LOG"
 
     if [ "$RC" -eq 0 ]; then
         SYNCED=$((SYNCED+1))
-        if [ -n "$POST_CMD" ]; then
+        # Count files actually transferred. rsync --stats emits exactly one
+        # "Number of regular files transferred: N" line. Missing defaults 0.
+        TRANSFERRED=$(awk -F': ' '/^Number of regular files transferred:/ {gsub(/,/,"",$2); print $2; exit}' "$RSYNC_TMP")
+        TRANSFERRED=${TRANSFERRED:-0}
+        if [ -n "$POST_CMD" ] && [ "$TRANSFERRED" -gt 0 ]; then
+            echo "$(date): $TRANSFERRED file(s) changed on $HOST:$REMOTE — running POST_CMD" >> "$LOG"
             ssh -o ConnectTimeout=10 "$HOST" "$POST_CMD" >> "$LOG" 2>&1 || echo "$(date): post-cmd nonzero on $HOST: $POST_CMD" >> "$LOG"
         fi
-    else
+    fi
+    rm -f "$RSYNC_TMP"
+
+    if [ "$RC" -ne 0 ]; then
         FAILED=$((FAILED+1))
         echo "$(date): rsync failed rc=$RC for $LOCAL → $HOST:$REMOTE" >> "$LOG"
         /usr/local/bin/notify.sh \
