@@ -71,6 +71,20 @@ Exit 0 is NOT evidence. Check:
 2. **Staleness check**: mtime of the underlying file vs current time. If cron-generated and mtime > 2× the cron interval, fail.
 3. **Schema stability**: if the endpoint is consumed by dashboards, verify the consumer still renders (fetch the HTML page + grep for expected dynamic values).
 
+### Write-path verification (for services that produce state, not just serve it)
+
+Added 2026-04-17 after a silent-write-failure: the timeshare-surveillance-watcher service was `active (running)` and the public URL returned HTTP 200 for 4 days while the underlying data pipeline hadn't actually fired once. Positions 1-5 + smoketest all passed; only asking "did this service actually write anything?" would have caught it.
+
+Apply this category whenever the change under test involves a service or cron that is *supposed* to produce state (write a file, insert rows, refresh a cache, dispatch a notification). **Reads looking fine is not evidence that writes are working.**
+
+1. **Identify the state store + expected cadence.** From the service's code or config: what file / DB row / endpoint is this thing supposed to update, and how often? (e.g., "combined.json refreshed every 900s", "dashboard.db regenerated daily at 14:17Z", "offers.db grows on each Playwright scrape".) If you can't find the answer from the service's own source, ask the orchestrator — do not guess.
+2. **Check the state store's current mtime (or equivalent freshness signal).** For files: `stat -c '%Y %n' <path>`. For DBs: query the most-recent-row timestamp. For endpoints: fetch + compare timestamps in the response.
+3. **Compare against expected cadence.** If mtime > 2× the declared cadence, it's a FAIL. Missing-by-a-factor-of-2 means the pipeline is not firing at its declared rate, regardless of what systemd's is-active reports.
+4. **If the cadence is long (e.g., daily/weekly) and the change was recent**, force or trigger one cycle where safe — e.g., bump a no-op commit for an auto-deploy watcher, touch a watched trigger file, curl the internal "run now" endpoint. Watch the log + state-store for the write to complete. If the cycle can't be safely forced, flag as observation-required and schedule a re-check after enough time to see one natural cycle.
+5. **For services with a restart/try-restart pattern around them** (e.g., cron'd rsync with `systemctl try-restart`), verify the restart cadence is SHORTER than the service's longest natural operation (fetch + sleep + next fetch), OR confirm that restarts are gated on actual change. Unconditional restart-every-N-minutes combined with a sleep-longer-than-N service is a classic silent-write-failure pattern.
+
+Attach: state store path, expected cadence, observed mtime/timestamp, ratio, pass/fail verdict. If FAIL, include the service's recent log tail showing why it's not completing cycles.
+
 ### CLAUDE.md / SKILLS / docs changes
 
 Only lightweight checks required (Reviewer handles content):
