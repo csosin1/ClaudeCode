@@ -543,3 +543,56 @@ epoch after successful alerting.
   - Verify the notify-on-transition branches with a real notification by temporarily editing the URLS list to include an intentionally-failing URL for one cron cycle, observing the urgent notify, then removing and observing the recovery notify. (I did NOT do this — builder-level only.)
   - Confirm `/var/run/claude-sessions/smoketest-last-state` has mode 644 / root-owned after the first real cron run.
   - Confirm gate mode still skips the notifier (shared-infra pre-commit runs would otherwise ntfy-spam on any transient 502).
+
+## 2026-04-17 — infra: Phase 3 migration — carvana-abs dev → prod droplet
+
+- **What was built:**
+  - Pass-1 rsync (done earlier this session): 35.7 GB /opt/abs-dashboard dev → prod-private (10.116.0.3) — exit 0, log at `/var/log/migration-rsync-pass1.log`.
+  - Phase 3.2 (this resume): installed weasyprint native deps on prod (`libpango-1.0-0`, `libpangoft2-1.0-0`, `libharfbuzz0b`, `libcairo2`, `libgdk-pixbuf-2.0-0`), recreated `/opt/abs-venv` from scratch (`python3 -m venv /opt/abs-venv`), upgraded pip to 26.0.1, installed `/opt/abs-dashboard/carvana_abs/requirements.txt` — 50 packages including weasyprint 68.1, streamlit 1.56.0, plotly 6.7.0. No errors.
+  - Phase 3.3: verified prod git state — on `claude/carvana-loan-dashboard-4QMPM` (matches dev), branch preserved by rsync of `.git/`.
+  - Phase 3.4: scp'd `/opt/abs-dashboard/deploy/auto_deploy.sh` → `prod-private:/opt/auto_deploy.sh` (matches ExecStart), scp'd `auto-deploy.service` and `auto-deploy.timer` units to prod, `systemctl daemon-reload && enable --now auto-deploy.timer`. Manual one-shot run of `/opt/auto_deploy.sh` returned `No changes.` — expected since prod already at tip.
+  - Phase 3.5: `/opt/abs-dashboard/carvana_abs/static_site/{live,preview}/` both confirmed present on prod. Merged the two `/CarvanaLoanDashBoard/` location blocks into prod's existing `/etc/nginx/sites-available/timeshare-surveillance` server block (both share `listen 80` + `server_name _` + identical VPC-allow rules; two separate server blocks would collide). Backup saved on prod at `timeshare-surveillance.bak.pre-absdash`. `nginx -t` ok, `systemctl reload nginx`, then:
+    - `curl http://127.0.0.1/CarvanaLoanDashBoard/` → HTML (title: Carvana ABS Dashboard)
+    - `curl http://127.0.0.1/CarvanaLoanDashBoard/preview/` → HTML (same title)
+    - `curl -I http://127.0.0.1/timeshare-surveillance/` → 200 (no regression)
+  - Phase 3.6: delta rsync of three paths: `carvana_abs/db/` (14 KB, 2 `__pycache__/*.pyc`), `carmax_abs/db/` (14 KB, 2 `__pycache__/*.pyc`), `carvana_abs/static_site/` (0 bytes transferred). No errors, no warnings.
+  - Phase 3.7: flipped dev `/etc/nginx/sites-available/abs-dashboard` — the two `/CarvanaLoanDashBoard/` location blocks now `proxy_pass http://10.116.0.3/CarvanaLoanDashBoard/...` with standard forwarded headers. Mirrored into `helpers/nginx-abs-dashboard.conf` in this worktree. `nginx -t` ok, reloaded.
+  - Phase 3.8: dev `auto-deploy.timer` stopped + disabled (was already inactive). Dev `/opt/abs-dashboard` (34G) + `/opt/abs-venv` (745M) left in place for rollback window.
+- **Files modified:**
+  - `deploy/nginx-prod/abs-dashboard-prod.conf` — NEW, canonical abs-dashboard prod nginx surface (two location blocks + doc preamble explaining the merge into timeshare-surveillance).
+  - `helpers/nginx-abs-dashboard.conf` — dev-side conf mirror updated; two alias→proxy_pass edits for `/CarvanaLoanDashBoard/{live,preview}`. (Also captured a previously-unmirrored `/docs/<secret-token>/` block that had been added to the live conf out-of-band.)
+  - Dev droplet: `/etc/nginx/sites-available/abs-dashboard` edited (two blocks), reloaded.
+  - Prod droplet: `/etc/nginx/sites-available/timeshare-surveillance` gained two location blocks, reloaded; `/opt/abs-venv` recreated; `/opt/auto_deploy.sh`, `/etc/systemd/system/auto-deploy.{service,timer}` installed; `auto-deploy.timer` enabled+active.
+  - Dev droplet: `auto-deploy.timer` disabled+inactive.
+- **Smoketest gate (verbatim, post-3.7 flip):**
+  ```
+  PASS  landing  (https://casinv.dev/)
+  PASS  projects  (https://casinv.dev/projects.html)
+  PASS  todo  (https://casinv.dev/todo.html)
+  PASS  capacity  (https://casinv.dev/capacity.html)
+  PASS  accounts  (https://casinv.dev/accounts.html)
+  PASS  telemetry  (https://casinv.dev/telemetry.html)
+  PASS  timeshare-surveillance-live  (https://casinv.dev/timeshare-surveillance/)
+  PASS  timeshare-surveillance-preview  (https://casinv.dev/timeshare-surveillance/preview/)
+  PASS  carvana-abs-live  (https://casinv.dev/CarvanaLoanDashBoard/)
+  PASS  carvana-abs-preview  (https://casinv.dev/CarvanaLoanDashBoard/preview/)
+  PASS  car-offers-live  (https://casinv.dev/car-offers/)
+  PASS  car-offers-preview  (https://casinv.dev/car-offers/preview/)
+  PASS  gym-intelligence-live  (https://casinv.dev/gym-intelligence/)
+  PASS  gym-intelligence-preview  (https://casinv.dev/gym-intelligence/preview/)
+  PASS  games  (https://casinv.dev/games/)
+  PASS  liveness-json  (https://casinv.dev/liveness.json)
+  PASS  tokens-json  (https://casinv.dev/tokens.json)
+
+  Summary: 17 passed, 0 failed
+  ```
+- **Assumptions:**
+  - No `.env` exists at `/opt/abs-dashboard` on dev — nothing to copy. Verified.
+  - The nginx merge into `timeshare-surveillance.conf` is the right shape on prod (both server blocks would have shared `:80` + `server_name _` and collided); the canonical `deploy/nginx-prod/abs-dashboard-prod.conf` documents this decision. If we later add SSL / a separate vhost on prod, that's where to split.
+  - Weasyprint 68.1 will launch cleanly with the installed native deps. Not yet exercised at runtime — no daemon is invoked by the static site path, weasyprint is used during build-to-static steps driven by auto_deploy.
+  - Dev-side `/opt/abs-dashboard` preserved (34G). Rollback within 24h is: revert the dev nginx edit (single `git checkout` of helpers/nginx-abs-dashboard.conf mirror + `cp` back + reload).
+- **Things for Infra-QA to verify:**
+  - External `https://casinv.dev/CarvanaLoanDashBoard/` and `/CarvanaLoanDashBoard/preview/` load full dashboard on desktop 1280px + mobile 390px (Plotly charts draw, no console errors, all KPIs render real numbers not `NaN`/blank).
+  - `auto-deploy.timer` on prod: push a trivial commit to `claude/carvana-loan-dashboard-4QMPM`, confirm prod picks it up within 30–60s (systemd timer period).
+  - Dev `auto-deploy.timer` stays `disabled` across nginx reloads and not restarted by anything (should not be — only explicit `start` would bring it back).
+  - Delta rsync caught everything: `curl https://casinv.dev/CarvanaLoanDashBoard/` content identical to `curl http://10.116.0.3/CarvanaLoanDashBoard/` (first byte match over HTTP response body).
