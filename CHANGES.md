@@ -11,6 +11,28 @@ Builder appends a per-task entry here after each build. Format:
 - **Things for the reviewer:**
 ```
 
+## 2026-04-17 — infra: Option C — scope general-deploy to dev; per-project rsync to prod
+
+- **What was built:**
+  - Disabled `general-deploy.timer` on prod (`systemctl stop` + `systemctl disable`). Unit files left in place for auditable rollback. Prod no longer runs `/opt/auto_deploy_general.sh` every 5 min and therefore no longer duplicates the heavy Carvana ML retrain that dev already runs.
+  - Extended `/etc/deploy-to-prod.conf` (and `helpers/deploy-to-prod.conf` mirror) with per-project rsync entries for gym-intelligence + gym-intelligence-preview + car-offers + car-offers-preview — replacing what `general-deploy.timer` was doing on prod.
+  - abs-dashboard intentionally LEFT OUT of the rsync list and documented with a `#`-commented doc stub: its ~34 GB of live SQLite state on prod would be clobbered by a dev-sourced rsync. abs-dashboard's project-specific `auto-deploy.timer` (git-pull on prod) continues to handle its deploys and is verified `active/enabled` on prod.
+  - Manual verification: `touch /opt/gym-intelligence/.rsync-test-mtime` on dev, `post-deploy-rsync.sh` run, file visible on prod within seconds, synced=6 in log (was synced=2). Test markers cleaned from both droplets.
+
+- **Files modified:**
+  - `/etc/deploy-to-prod.conf` (live) + `helpers/deploy-to-prod.conf` (tracked mirror) — added 4 active entries + 1 commented abs-dashboard entry with doc comment.
+  - `/opt/site-deploy/LESSONS.md` — new entry on why general-deploy ran on prod to begin with + preventive rule for future droplet-copy migrations.
+  - Prod droplet: `general-deploy.timer` stop + disable (no file changes; symlink in `timers.target.wants/` removed).
+  - `post-deploy-rsync.sh` itself was NOT modified — the existing parser/logic handles the new conf entries unchanged.
+
+- **Assumptions:**
+  - Prod's `/opt/gym-intelligence*` and `/opt/car-offers*` dirs already exist (Phase 2 + Phase 4 created them). Verified via `ssh prod-private 'ls /opt/...'` before rsync.
+  - prod-private SSH config, keyfile, and rsync-over-SSH path are operational (same ones timeshare-surveillance Phase 1 uses).
+
+- **Things for the reviewer:**
+  - Confirm the commented abs-dashboard line stays commented — do NOT uncomment without rethinking state flow.
+  - Final smoketest PASS 17/17 both before and after change (logged to `/var/log/migration-overnight-2026-04-16.log`).
+
 ## 2026-04-17 — infra: Phase 4 migration — car-offers dev → prod droplet
 
 - **What was built:**
