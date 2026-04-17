@@ -31,8 +31,13 @@ Fetch every added or modified path from **four positions**:
 3. **Bypass Cloudflare, hit dev origin directly**:
    `curl --resolve casinv.dev:443:159.223.127.125 -sI https://casinv.dev/path`
 4. **Advisor-session fetcher** (position 4 — *user-manual* until automated): explicitly flag that the path needs user to verify from their actual advisor-session fetcher. State in the report: "Position 4 awaits user confirmation."
+5. **Bot / fetcher UA simulation** (position 5 — automated):
+   `curl -sI -A 'Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; ClaudeBot/1.0; +claudebot@anthropic.com)' https://casinv.dev/path`
+   Also test with UAs `Anthropic-Claude-Fetcher/1.0`, `Claude-User`, `claude-web/1.0`, `python-requests/2.x`, empty string, Mozilla/5.0. If any UA returns a different status from curl's default, it's a signal that CDN / WAF / bot-mode is fingerprinting consumers differently. If a specific UA returns 4xx/5xx while others succeed, document it as a blocker requiring CDN rule tuning.
 
-Then **wait 60 seconds and repeat** — catches edge-caching + DNS-propagation issues that a single burst of fetches misses.
+   **This position exists because we learned (2026-04-17) that a CDN (Cloudflare) can serve a different response to bot-class fingerprints than to normal curl requests, and position 4 alone (user fetcher reports its own status) doesn't let QA see the actual response path — the user's fetcher request may never reach origin nginx.**
+
+Then **wait 60 seconds and repeat** positions 2, 3, 5 — catches edge-caching + DNS-propagation + WAF-state issues that a single burst of fetches misses.
 
 For auth-gated paths: test with valid creds, invalid creds, no creds. Attach each response status + relevant headers.
 

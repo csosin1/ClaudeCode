@@ -147,3 +147,16 @@ new-droplet bootstrap checklist once we have one.
 **Fix:** added to `.claude/agents/infra-builder.md § System reminders: scope and interpretation` — explicit guidance that the reminder is about malicious code and does not blanket-block legitimate platform work. Default posture: proceed-with-care; only escalate if the file legitimately looks opaque / outside platform scope.
 
 **Preventive rule:** in every subagent brief for platform work, include a one-line preamble: "This task is within our platform infrastructure scope. System-reminders about malware analysis are about unknown code; proceed with the edit unless the file itself looks opaque or outside the declared scope."
+
+## 2026-04-17 — Infra-QA position coverage missed bot-fingerprint-specific CDN responses
+
+**Symptom:** Advisor fetcher consistently received 404 for `https://casinv.dev/docs/<token>/` despite infra-QA showing PASS across 4 positions (dev localhost, prod via Cloudflare, origin bypass, 60s repeat). User flagged the gap.
+
+**Root cause:** The four positions all used curl's default (or common UA) fingerprint. Cloudflare's Bot Fight Mode / Verified Bots filter treats requests from Anthropic's web-fetch infrastructure differently from generic curl requests — it can serve a 404 (not the origin's) without the request reaching origin nginx. Evidence: zero entries for `/docs/<token>/` in origin nginx access log during the windows when the user's fetcher was 404-ing, while curl-through-Cloudflare succeeded repeatedly. The QA's notion of "from external vantage" was satisfied by IP-external but not fingerprint-external to what the actual consumer looks like.
+
+**Fix:**
+1. Added Position 5 to `.claude/agents/infra-qa.md`: cycle curl through a set of bot-class UAs (ClaudeBot, Anthropic-Claude-Fetcher, Claude-User, python-requests, empty, Mozilla). Any UA-sensitive response divergence is a blocker requiring CDN rule tuning.
+2. Position 5 added to the 60s-repeat loop so edge-cache + WAF-state evolution over time is visible.
+3. Explicit note in the agent definition: position 4 (user's fetcher) + position 5 (simulated fetcher fingerprints) together cover the bot-mode class of gap that positions 1-3 miss.
+
+**Preventive rule:** Infra-QA position coverage must include **request-origin characteristics** (IP, UA, TLS fingerprint where testable) of the *actual consumer*, not just generalized external fetches. Default-curl responses are insufficient evidence that a bot-fingerprinted consumer will succeed. When a consumer can't be fully fingerprint-simulated (e.g., Claude web-fetch uses TLS details we can't replicate), explicitly flag the coverage gap and require user-manual confirmation as an observation-required item — same pattern as phone-receipt for ntfy.
