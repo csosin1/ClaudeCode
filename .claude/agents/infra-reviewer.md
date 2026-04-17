@@ -37,7 +37,13 @@ Your Bash access is for inspection only — `git diff`, `git log`, `grep`, `ls`,
 
 11. **Everything flagged in `LESSONS.md`** — silent failure patterns, stale-state-written-as-actual-state, symptom-suppressors, etc.
 
-12. **Costly-tool review** (per `SKILLS/costly-tool-monitoring.md`). Does this diff add or modify a call to any paid external API (residential proxy, captcha solver, LLM, SMS, SES, participant panel, cloud-browser)? If yes: (a) is the call gated by a hard cap + cumulative accumulator? (b) if the call is in startup or restart-triggered code, is it sentinel-gated (one-shot) or demonstrably free? (c) is the call logged with a `PAID-CALL` prefix? Any "no" on a paid-API diff is a FAIL. Reviewer cross-checks the vendor list in `SKILLS/costly-tool-monitoring.md` for known endpoints.
+12. **Costly-tool review** (per `SKILLS/costly-tool-monitoring.md`). Does this diff add or modify a call to any paid external API (residential proxy, captcha solver, LLM, SMS, SES, participant panel, cloud-browser)? If yes, all of the following must be true or FAIL:
+    - (a) the call is routed through `paid-call <vendor> <project> <purpose> [--event-id=<id>] <est_cost_usd> -- <cmd>` — this handles both the per-vendor hard cap and the JSONL log in one step. A bespoke cap+log implementation inside the project is a FAIL; use the gateway.
+    - (b) if the call is in startup or restart-triggered code, it is sentinel-gated (one-shot) or demonstrably free.
+    - (c) the diff adds at least one corresponding `log-event <project> <event_type> [--event-id=<id>]` call at the event boundary (attempt, success, failure) so `spend-audit.sh` can compute cost-per-event. A paid-call with no matching log-event is a FAIL — it produces spend the audit cannot attribute to outcomes.
+    - (d) the `<project>:<purpose>` tag appears in `/etc/paid-call-known-purposes.conf` / `helpers/paid-call-known-purposes.conf` (the mirror). New purpose tags must land in the same diff or be added explicitly in a follow-up noted in CHANGES.md.
+
+    Reviewer cross-checks the vendor list and retrofit checklist in `SKILLS/costly-tool-monitoring.md`.
 
 ## Return
 

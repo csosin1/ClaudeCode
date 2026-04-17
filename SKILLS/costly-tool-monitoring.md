@@ -55,9 +55,68 @@ The first-run sentinel lives in `/var/run/` (tmpfs — resets on reboot, which i
 Added to `.claude/agents/infra-reviewer.md` checklist:
 - **Costly-tool review**: does this diff add or modify a call to any paid external API? If yes: (a) is the call gated by a hard cap + cumulative accumulator? (b) if the call is in startup code, is it sentinel-gated or demonstrably free? (c) is the call logged with a `PAID-CALL` prefix? Any "no" is a FAIL regardless of what else the diff does.
 
+## Instrumentation — paid-call, log-event, spend-audit
+
+As of 2026-04-17 we ship three platform tools that make rule #3 and rule #4 enforceable without per-project boilerplate:
+
+### `paid-call` — the gateway wrapper
+
+Every paid API call on this droplet routes through `/usr/local/bin/paid-call`. It logs two JSONL rows to `/var/log/paid-calls.jsonl` (starting, complete|failed), enforces per-vendor hard caps from `/etc/paid-call-caps.conf`, and refuses (exit 127) when `cumulative + est_cost_usd > cap` — this is the circuit breaker rule #2 asks for, implemented once.
+
+Usage:
+```
+paid-call <vendor> <project> <purpose_tag> [--event-id=<id>] <est_cost_usd> -- <actual command...>
+```
+
+Example retrofit in a project:
+```
+# Before
+curl --proxy gate.decodo.com:7000 https://www.carvana.com/sell-my-car/$VIN
+
+# After
+paid-call decodo car-offers scrape_carvana_vin --event-id=$RUN_ID 0.002 -- \
+    curl --proxy gate.decodo.com:7000 https://www.carvana.com/sell-my-car/$VIN
+```
+
+Caps live in `/etc/paid-call-caps.conf` (periods: `daily` | `session` | `monthly`). Version-controlled mirror at `helpers/paid-call-caps.conf`.
+
+### `log-event` — "thing we did" logger
+
+`/usr/local/bin/log-event` writes one JSONL row to `/var/log/events.jsonl`. No cap, no wrapping — pure logging helper, <10ms, silent-fail on unwritable log. Projects call it liberally on scrape_attempt, scrape_success, filing_ingested, etc. Joined to paid-calls by `--event-id=` when set.
+
+```
+log-event car-offers scrape_success --event-id=$RUN_ID --metadata='{"vin":"1HGCM...","offer_usd":18400}'
+```
+
+### `spend-audit.sh` — the joiner
+
+`/usr/local/bin/spend-audit.sh [--since=<duration>]` reads both JSONL logs + project DBs, joins on `event_id` where possible, and prints a prose summary suitable for the daily reflection. Detects three anomaly classes: (a) spend with no events, (b) cost/event > 3x its 7-day baseline, (c) unknown purpose tags not in `/etc/paid-call-known-purposes.conf`. Exit 0 always; last line is `Anomalies: N`.
+
+Integrated into `SKILLS/daily-reflection.md` — the reflection pass runs it and notifies at `high` priority when anomalies > 0.
+
+### Agent()-usage capture (orchestrator-side pattern)
+
+When the orchestrator dispatches an `Agent()` subagent, the returned `<usage>` block carries `total_tokens`, `tool_uses`, `duration_ms`. Log each dispatch via:
+
+```
+paid-call anthropic <project> agent_subtask <est_cost_usd> -- true
+```
+
+Cost estimation (rough Sonnet-tier proxy, refine when Anthropic usage API lands): `est_cost_usd = total_tokens * 0.000015`. This is approximate — input + output tokens priced differently, cache reads cheaper — but consistent enough to catch order-of-magnitude regressions like an agent loop that doubled its token spend. The `-- true` makes `paid-call` act as a pure logger; the actual LLM call happens inside Claude Code, not via this wrapper. This is a documentation pattern for the orchestrator, not a tool to build.
+
+### Project retrofit checklist
+
+For each paid API a project already calls:
+1. Wrap the call in `paid-call <vendor> <project> <purpose> --event-id=... <est> -- <original cmd>`.
+2. Emit a `log-event <project> <event_type> --event-id=...` at the event boundary (attempt, success, failure).
+3. Add the `<project>:<purpose>` line to `/etc/paid-call-known-purposes.conf` (and to `helpers/paid-call-known-purposes.conf` in the next infra commit).
+4. If no cap exists in `/etc/paid-call-caps.conf` for the vendor, propose one via `CHANGES.md`.
+
 ## Detection — the on-platform telemetry
 
-Per-service: log grep `PAID-CALL` and tally. Platform-wide: `/usr/local/bin/tool-spend-poll.sh` (to be built) runs hourly, hits each registered vendor's spend/balance endpoint, writes the result, and fires ntfy at 50/75/90% thresholds. If a vendor has no API, falls through to "stale data, user must check manually, reminder surfaces at capacity.html."
+Per-service: log grep `PAID-CALL` and tally (legacy; new instrumentation uses `/var/log/paid-calls.jsonl` instead). Platform-wide: `/usr/local/bin/tool-spend-poll.sh` (to be built) runs hourly, hits each registered vendor's spend/balance endpoint, writes the result, and fires ntfy at 50/75/90% thresholds. If a vendor has no API, falls through to "stale data, user must check manually, reminder surfaces at capacity.html."
+
+Daily retrospective: `spend-audit.sh` in the reflection pass, covered above.
 
 ## Mitigation — when something goes wrong
 
