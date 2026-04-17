@@ -167,6 +167,23 @@ new-droplet bootstrap checklist once we have one.
 
 **Preventive rule:** Infra-QA position coverage must include **request-origin characteristics** (IP, UA, TLS fingerprint where testable) of the *actual consumer*, not just generalized external fetches. Default-curl responses are insufficient evidence that a bot-fingerprinted consumer will succeed. When a consumer can't be fully fingerprint-simulated (e.g., Claude web-fetch uses TLS details we can't replicate), explicitly flag the coverage gap and require user-manual confirmation as an observation-required item — same pattern as phone-receipt for ntfy.
 
+## 2026-04-17 — car-offers startup diagnostic burned Decodo proxy credits on every restart
+
+**Symptom:** user noticed Decodo (residential-proxy vendor) credits drained. Investigation traced it to `/opt/car-offers/server.js:67,73` and the identical lines in the preview copy: on every service startup, the code fires two `curl` commands through the paid Decodo proxy — one to `ip.decodo.com/json` for geo confirmation, one to `https://www.carvana.com/sell-my-car` through the same proxy. Each call costs a small fraction of a cent in Decodo usage, but `systemctl restart` is frequent: deploys, OOMs, the pre-migration 5-min `try-restart` loop we also fixed today, the general-deploy.timer before Option C disabled it. Multiple restarts per minute for hours → credits emptied, no alert.
+
+**Root cause:** a startup-diagnostic pattern that looks innocent in isolation but compounds. Nothing in our review process caught it because the code was written before we had a rule against it, and no spend telemetry exists to alert on abnormal call rate.
+
+**Fix (policy + procedure — code change belongs to car-offers chat):**
+1. Created `SKILLS/costly-tool-monitoring.md` — four rules: no paid API call in startup unless sentinel-gated, every paid call site has a hard cap, every paid call logs with `PAID-CALL` prefix, platform-level spend visibility with alerts at 50/75/90% thresholds.
+2. Added checklist item #12 to `.claude/agents/infra-reviewer.md` — any diff touching a paid-API call goes through explicit review for gating, capping, logging.
+3. Filed user-action for vendor-level spend visibility (polling endpoints where available).
+4. Dispatched tmux directive to car-offers chat to either (a) move the two curls behind a one-shot sentinel file (`/var/run/car-offers-geo-check.done`), (b) route the diagnostic through a free IP-check endpoint, or (c) remove the diagnostic entirely and rely on the first real scrape to confirm proxy health.
+
+**Preventive rules:**
+1. **Startup code is high-frequency code.** Runs on every deploy, every crash-restart, every rsync hook. Treat it as "runs thousands of times per week" when sizing its cost. If one execution costs $0.001, startup that runs 10× per hour is $87.60/yr for nothing.
+2. **Paid-API usage needs the same discipline as credentials.** We already have `SKILLS/secrets.md` for credentials. Paid APIs need a parallel skill for how they are metered, capped, and observed — that's `SKILLS/costly-tool-monitoring.md`.
+3. **Spend visibility is a dependency, not a nice-to-have.** If a vendor doesn't expose a balance/usage API and we have no polling, we're blind to burn until the bill arrives or the service stops working. When onboarding a new paid vendor, "can I poll spend?" is a go/no-go question alongside "can I get a token?"
+
 ## 2026-04-17 — rsync excludes didn't protect per-project SQLite DBs at project root
 
 **Symptom:** post-migration audit (in response to "make sure writes land in the right place") revealed `/opt/gym-intelligence/gyms.db`, `/opt/car-offers-preview/offers.db`, and `/opt/abs-dashboard/carvana_abs/db/dashboard.db` were NOT excluded from the dev→prod rsync. Rsync with default behavior (`-a` preserves mtimes, source wins when content differs) would let a stale dev DB overwrite a freshly-written prod DB. Not yet observed in practice — caught at audit.

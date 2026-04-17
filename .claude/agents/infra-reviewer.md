@@ -37,6 +37,8 @@ Your Bash access is for inspection only — `git diff`, `git log`, `grep`, `ls`,
 
 11. **Everything flagged in `LESSONS.md`** — silent failure patterns, stale-state-written-as-actual-state, symptom-suppressors, etc.
 
+12. **Costly-tool review** (per `SKILLS/costly-tool-monitoring.md`). Does this diff add or modify a call to any paid external API (residential proxy, captcha solver, LLM, SMS, SES, participant panel, cloud-browser)? If yes: (a) is the call gated by a hard cap + cumulative accumulator? (b) if the call is in startup or restart-triggered code, is it sentinel-gated (one-shot) or demonstrably free? (c) is the call logged with a `PAID-CALL` prefix? Any "no" on a paid-API diff is a FAIL. Reviewer cross-checks the vendor list in `SKILLS/costly-tool-monitoring.md` for known endpoints.
+
 ## Return
 
 One of:
