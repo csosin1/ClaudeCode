@@ -330,7 +330,7 @@ Daily end-of-day reflection by the orchestrator. Template: What shipped / What b
 /var/www/landing/                       published dashboards + JSON
 /var/run/claude-sessions/               watchdog/respawn state files
 /root/.claude/projects/                 Claude Code JSONL conversation histories (per project)
-/root/.ssh/id_ed25519                   infra-agent SSH key (public part added to DO as "claude-orchestrator@dev-droplet-2026-04-15")
+/root/.ssh/id_ed25519                   infra-agent SSH key (PUBLIC key generated 2026-04-15; as of this writing, NOT YET added to user's DO account — was erroneously described as "added" in an earlier version of this doc; correction 2026-04-17)
 ```
 
 **Live URLs to poke at for current state:**

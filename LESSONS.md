@@ -95,3 +95,13 @@ new-droplet bootstrap checklist once we have one.
 3. OOM fix already committed by the carvana-abs-2 chat (`0e7ab53`: chunked covariate loading, 5 deals/batch).
 
 **Preventive rule:** Long-running jobs (>15 min) MUST use `systemd-run` with `MemoryMax` per `SKILLS/long-running-jobs.md`. Agents that launch `nohup ... &` for >15-min processes are violating the skill. The project-checkin cron is the oversight mechanism. PROJECT_STATE.md must be updated every 30 min during active work — stale state during active work is now an alertable condition.
+
+## 2026-04-17 — "Expected state" written as "actual state" in a snapshot doc
+
+**Symptom:** User's DO Security page showed zero SSH keys, but `ADVISOR_CONTEXT.md` claimed the infra-agent key was "added to my DO account." Direct contradiction noticed only because user cross-checked.
+
+**Root cause:** I generated the SSH key on 2026-04-15, told the user to add it to DO, never verified it had actually been added. Two days later when writing ADVISOR_CONTEXT.md, I described the state in past-tense ("added") as if it were verified reality. It was expected state presented as actual state.
+
+**Fix:** Corrected the line in ADVISOR_CONTEXT.md to explicitly state "NOT YET added as of writing; correction 2026-04-17."
+
+**Preventive rule:** When writing state-of-the-world documents (ADVISOR_CONTEXT, RUNBOOK, any snapshot), only assert as actual state what was directly verified at write time. If a state was *instructed but not confirmed*, write it explicitly: "user was asked to X at <date>; as of this writing, not yet verified." This is a direct application of the data-audit-qa principle ("honest stopping conditions — verification stopped at layer N") to our own documentation, not just external data sources.

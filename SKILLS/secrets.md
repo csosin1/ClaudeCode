@@ -18,6 +18,16 @@ Any time you're handling credentials — API keys, passwords, tokens, connection
 - **Storing secrets in `CLAUDE.md`, `RUNBOOK.md`, `PROJECT_STATE.md`, or any `.md` file.** All `.md` files are publicly readable if nginx config slips; assume they will be.
 - **One credential shared across projects.** If two projects both need Anthropic API, each has its own `.env` with its own key — so revoking one project's access doesn't disturb the other.
 
+## DO API Tokens (Specific Hygiene)
+
+User rule as of 2026-04-17: **one DigitalOcean API token at a time across the platform, not many.** Token sprawl in the DO audit log is a signal something's wrong.
+
+- Before creating a new DO API token: revoke any old one that was serving the same purpose.
+- Label each token with its purpose (e.g., "claude-infra-2026-04", not the default "Generated").
+- Store in `/opt/site-deploy/.env` as `DIGITALOCEAN_TOKEN=...` (gitignored).
+- Register in `account.sh` under service "DigitalOcean API" with the purpose in the `purpose` field. When rotating, `account.sh cancel` the old entry + add the new one.
+- If an audit shows multiple tokens you didn't consciously create: investigate before creating another. Each token is a separate credential that can leak independently.
+
 ## If A Credential Leaks
 
 1. Revoke on the provider's dashboard immediately (don't rotate — revoke).
