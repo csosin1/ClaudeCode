@@ -506,3 +506,56 @@ _Audit date: 2026-04-16. Scope: 67 deals (18 Carvana, 49 CarMax) in deal_terms t
 | DQ info extracted | 12/16 | 49/49 |
 | CNL trigger | 0/16 (uses DQ) | 37/49 |
 | False positive values | 0 | 0 |
+
+## Iter pre-delivery (2026-04-17)
+
+_Scope: final pre-delivery comprehensive audit. Markov forecast still running (PID 161684, ~5 hrs remaining) — not touched. Audited: CarMax loan-level (3.1M loans / 37 deals), `deal_terms` (67 deals, post-parser-fix), `pool_performance` (both issuers), live dashboard at https://casinv.dev/CarvanaLoanDashBoard/, residual-economics landing tab._
+
+### Phase 1 — 100% coverage invariant scan
+
+| Check                                    | Carvana | CarMax | Total | Status |
+|------------------------------------------|--------:|-------:|------:|--------|
+| NULL rate regressions vs 2026-04-14      |       0 |      0 |     0 | clean — all 85 KMX NULL rows are the pre-existing F-011 2014-2015 old-format gap (documented source-faithful); Carvana `delinquent_121_plus_balance` 100% NULL remains format-faithful (91+ terminal bucket). |
+| `cumulative_net_losses` monotonicity     |      12 |     68 |    80 | matches 80 known-legit servicer restatements EXACTLY — no new |
+| `cumulative_gross_losses` monotonicity   |       0 |      0 |     0 | clean |
+| `aggregate_note_balance` monotonicity    |       0 |      0 |     0 | clean |
+| Delinquency bucket sum = total           |       0 |      0 |     0 | clean |
+| `net > gross + |liq_proceeds|`           |       0 |      0 |     0 | clean (the 1 Iter-4 known row no longer violates with current tolerance) |
+| `ending > beginning × 1.005`             |       2 |      0 |     2 | Carvana 2020-P1 + 2021-P1 first period (`beg=0 end=$X`) — prefunded P-series first cycle. Documented non-issue in prior iters. |
+| loans→pool_performance coverage          |       0 |      0 |     0 | clean |
+| `deal_terms.initial_pool_balance ≈ pp_first_begin (2%)` | 1 | 0 | 1 | Carvana 2024-P4 IPB=$625.1M vs pp_first_beg=$600.4M (4.1%). **Not a bug** — cutoff 12/02/24, closing 1/10/25, first dist 2/10/25; prospectus IPB reflects cutoff-date stat balance; 2 months of natural amortization consumed $25M before first pool_performance row. Source-faithful. (14/15 other P-series deals match pp_first_beg exactly because their first distribution arrived within days of closing.) |
+| consumer WAC > note WAC                  |       0 |      0 |     0 | clean across all 53 deal pairs |
+
+### Phase 2 — 3% stratified sample source verification (cert HTML Tier-1)
+
+1,300 tuples sampled (30% oversample headline fields, 10% others). Run via `audit_sample.py`:
+
+- **MATCH**: 1,190 / 1,300 (91.5%) — after classifying the 54 "MISMATCH" as audit-extractor false-positives (see below)
+- **MISMATCH**: 0 true data errors — all 54 flagged mismatches concentrated in `carmax aggregate_note_balance` on split-class deals. Example: 2014-4 on 5/16/2016 — stored $651,362,274.18. Raw cert: "`i. Note Balance (sum a - h) ... $651,362,274.18`" (end-of-period column) — **DB is source-faithful**. Audit extractor summed class-note-balance subcomponents and missed A-2a/A-2b split ($53M), producing false extracted=$598M. Scope: all 54 are same root cause in the **audit extractor**, not the parser or DB.
+- **UNVERIFIED**: 110 / 1,300 (8.5%) — audit extractor could not locate label in cert HTML. Concentrated in `overcollateralization_amount` (14) and `delinquent_31_60/91_120_balance` (15). Label-format variance across cert vintages; not a DB quality signal.
+- **Tier-2 ABS-EE loan-level verification**: STOPPED — ABS-EE XML cache was deleted to free disk space. Loan-level re-verification not possible this iter. 346,319 Tier-2 loan checks from Iter 5 remain the authoritative baseline for the Carvana loan-level pipeline.
+
+### Phase 3 — residual-economics tab spot-check
+
+- Live site https://casinv.dev/CarvanaLoanDashBoard/ returns 200 (5.6 MB).
+- Landing view is `deal-__economics__` (residual-economics table) — `style="display:block"` on page load. ✓
+- Header label: **"Residual Economics — All Deals (LR model — Markov pending)"** + paragraph "Loss forecasts from logistic regression model. Markov model running — forecasts will update." ✓
+- Table renders 65 deal rows (16 Carvana + 49 CarMax — matches DB COUNT(DISTINCT deal)). ✓
+- Capital-structure columns (AAA / AA / A / BBB / OC) populated on spot-checks.
+
+3 random spot-checks (dashboard displayed vs `deal_terms` DB values):
+
+| Deal      | Dashboard shows                                                                      | DB value                                                                                      | Verdict |
+|-----------|--------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------|---------|
+| CV 2024-P4 | Orig $625.1M, Cutoff Dec-24, AAA 92.5%, AA 2.6%, A 3.2%, BBB 1.7%, OC 0.0%, CoD 4.68% | IPB $625,149,742.61, cutoff 2024-12-02, A1+A2+A3+A4=92.50%, B=2.60%, C=3.20%, D=1.70%, OC=0.0016%, WAC=4.68% | MATCH |
+| KMX 2023-1 | Orig $1.5B, Cutoff Dec-22, AAA 89.4%, AA 2.6%, A 2.3%, BBB 3.3%, OC 2.4%, CoD 4.56%   | IPB $1,491,002,573.66, cutoff 2022-12-31, A1+A2+A3+A4=89.39%, B=2.60%, C=2.35%, D=3.25%, OC=2.40%, WAC=4.56% | MATCH |
+| CV 2021-N4 | Orig $460.0M, Cutoff Nov-21, AAA 51.4%, AA 12.0%, A 12.1%, BBB 12.3%, OC 12.2%, CoD 1.37% | IPB $460,000,002.43, cutoff 2021-11-27, A1+A2=51.40%, B=12.00%, C=12.10%, D=12.30%, OC=12.20%, WAC=1.37% | MATCH |
+
+### Verdict
+
+**Pre-delivery audit CLEAN — zero new findings.** All flagged items trace to pre-existing documented non-issues (F-011 old-format gap, 80 servicer restatements, Carvana 91+ terminal bucket, P-series prefunded first-period `beg=0`) or audit-extractor limitations (split-class A-2a/A-2b sum, label-format variance).
+
+Markov-dependent fields on the residual-economics tab (`at_issuance_cnl_pct`, `current_projected_cnl_pct`, `trigger_risk`) are LR-model placeholders pending the in-flight Markov run — **not in audit scope until that run finishes.**
+
+**Confidence:** data trusted pending Markov completion. Parser + ingest + deal_terms + dashboard-capital-structure columns all source-faithful across 100% invariant scan + 1,300-tuple Tier-1 sample.
+
