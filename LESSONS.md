@@ -11,6 +11,30 @@ Append an entry when something breaks in a way that wasn't obvious from the code
 - **What to do differently:**
 ```
 
+## 2026-04-18 — Platform behaviours were conditional on assumed user attention; walk-away is now the default
+
+<!--lesson
+preventive_mechanism: reviewer_rule
+enforcer_path: SKILLS/walkaway-invariants.md
+date: 2026-04-18
+family: attention-assumptions
+-->
+- **Symptom:** Several platform behaviours — "continue?" prompts, mid-work cost pings, paragraph-only milestone summaries, optional HITL on promote — silently assumed the user was actively watching. Action #3 of the 2026-04-18 holistic platform review landed as a proposed per-engagement "Unattended Mode" toggle; user rejected the toggle outright: walk-away is the default, not a mode. The cost-surface language was also wrong (tokens framed as "cost"); under Max plan tokens are effectively free, and the only real cost dial is third-party outside spend, approved with a cap at task launch.
+- **Root cause:** Designing to the best case (user is watching) instead of the worst case (user has walked away mid-engagement and may return in three days). The toggle framing assumed users would reliably signal attention state — exactly the friction the platform is meant to remove. Walk-away-as-mode also means "forget to toggle" silently stalls in-flight work, an asymmetric failure. The tokens-as-cost framing came from conflating "thing we measure" with "thing we surface to the user"; the user pays flat rate, so per-task token estimates are noise, not signal.
+- **Fix:** Shipped as one shared-infra commit on branch claude/infra-walkaway-invariants-hitl-dual-surface.
+  - (a) `SKILLS/walkaway-invariants.md` codifies the seven always-on invariants — never assume watching; never "continue?"; milestone boundaries → structured Accept cards; notification tiers always route; irreversible-action HITL always blocks; outside-spend caps approved at launch not mid-work; heartbeat pulses default-on for >5 min jobs.
+  - (b) `SKILLS/irreversible-actions.md` pins the user-approved HITL list verbatim — outside spend, destructive data ops, prod promotion (including small fixes — user explicitly opted), external reach, security/identity, data leaving our control. Plus an explicit NOT-on-list to prevent over-pausing.
+  - (c) `SKILLS/dual-surface-parity.md` reframes mobile-first as mobile-first AND desktop — both first-class, enforced at design time not just visual-lint time.
+  - (d) `SKILLS/notification-tiers.md` documents critical (5, vibrate) / milestone (3, push) / heartbeat (1, silent) with the `helpers/notify.sh --tier` flag wiring.
+  - (e) `helpers/notify.sh` extended with `--tier` flag; legacy positional priority preserved for back-compat.
+  - (f) `helpers/accept-card.sh` new emitter — writes a persistent HTML card + JSON sidecar under `/var/www/landing/accept-cards/<id>.html` and fires a milestone-tier ntfy pointing at it. Card renders mobile-first (thumb-reachable buttons, ≥44px tap targets) and desktop (keyboard-navigable, Enter=primary, Esc=cancel).
+  - (g) `/root/.claude/CLAUDE.md` — 3 edits, +2 net lines (96→98). User Context adds dual-surface pointer; Autonomy adds walk-away + irreversible-actions pointers; Keep-the-User-Informed corrected to drop the "token cost in done summary" framing and replace with outside-spend-at-launch language.
+- **Preventive rules:**
+  1. **Design to the walk-away case first; watching is the bonus.** A behaviour that only degrades gracefully "when user is watching" is broken. Invert the default.
+  2. **No mode toggles for behaviours that should be always-on.** Mode state is forget-to-set waiting to happen; asymmetric failure → always-on.
+  3. **Tokens are not a cost surface.** Only outside spend is. Every cost ping should map to a real third-party dollar, not a token estimate.
+  4. **HITL list is bounded and explicit.** Over-pausing is friction; under-pausing is irreversible loss. Canonical list in `SKILLS/irreversible-actions.md` — extend only with explicit user approval.
+
 ## 2026-04-18 — Test-completeness bias shipped the Hazard-by-LTV bug; new independent reviewer
 
 <!--lesson
