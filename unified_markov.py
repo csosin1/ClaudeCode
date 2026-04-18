@@ -729,6 +729,199 @@ def forecast_loan(model, loan, start_state=None, start_age=None, end_age=None):
     return expected_loss
 
 
+# ── Per-loan monthly trajectory (for Recent Trends cache) ────────────
+
+def forecast_loan_monthly(model, loan, start_state=None, start_age=None,
+                          end_age=None):
+    """Forward-simulate a single loan and return per-month arrays instead of
+    a scalar total loss.
+
+    Returns a dict with numpy arrays of length = months simulated:
+      - 'age': age in months AFTER each step (i.e. age+1..final_age)
+      - 'expected_loss_delta': dollars of new expected loss this month
+      - 'active_frac': cumulative probability mass in states 0..5 (not yet
+                       defaulted or paid off) AFTER the step — used as the
+                       denominator for DQ-rate normalization.
+      - 'dq30plus_frac': cumulative probability mass in states 2..5 AFTER
+                         the step. State 2 = 30-59 days late (which is
+                         30+ DQ).
+      - 'paid_principal': cumulative probability mass in payoff state.
+      - 'orig_amount': scalar, the loan's original balance (weighting factor
+                       at the deal level).
+
+    Uses the same Markov machinery as `forecast_loan` (numerically identical
+    step math) — just keeps the per-step observations.
+    """
+    state = loan["state"] if start_state is None else start_state
+    age   = loan["age_months"] if start_age is None else start_age
+    term  = loan["term"] or 60
+    final_age = term if end_age is None else end_age
+    months_remaining = max(0, final_age - age)
+    orig   = loan["orig_amount"] or loan.get("balance", 0) or 10000
+
+    if months_remaining <= 0:
+        return {
+            "age": np.zeros(0, dtype=np.int64),
+            "expected_loss_delta": np.zeros(0),
+            "active_frac": np.zeros(0),
+            "dq30plus_frac": np.zeros(0),
+            "paid_principal": np.zeros(0),
+            "orig_amount": float(orig),
+        }
+
+    fico_b = loan["fico_b"]
+    ltv_b  = loan["ltv_b"]
+    mod    = loan.get("modified", 0)
+    tb     = loan["term_bucket"]
+    is_mod = bool(mod)
+
+    dim = N_STATES + 2
+    T = model.build_transition_tensor(fico_b, ltv_b, mod)
+    lgd_vec = model.build_lgd_vector(fico_b, ltv_b)
+
+    ages = np.arange(age + 1, age + 1 + months_remaining, dtype=np.int64)
+    age_bs = np.searchsorted(_AGE_BUCKET_EDGES, ages, side="right")
+    if age_bs[-1] >= _N_AGE_BUCKETS:
+        np.clip(age_bs, 0, _N_AGE_BUCKETS - 1, out=age_bs)
+    paydown_tbl = model.build_paydown_table(tb, is_mod, int(ages[-1]))
+    ratios = paydown_tbl[ages]
+    lgds = lgd_vec[age_bs]
+
+    sv = np.zeros(dim)
+    sv[state] = 1.0
+    prev_def = sv[N_STATES]
+
+    exp_loss_delta = np.zeros(months_remaining)
+    active_frac    = np.zeros(months_remaining)
+    dq30_frac      = np.zeros(months_remaining)
+    paid_frac      = np.zeros(months_remaining)
+
+    for i in range(months_remaining):
+        Q = T[age_bs[i]]
+        sv = sv @ Q
+        new_def = sv[N_STATES]
+        delta = new_def - prev_def
+        if delta > 0:
+            exp_loss_delta[i] = delta * orig * ratios[i] * lgds[i]
+        prev_def = new_def
+        # State 2+ is 30+ days delinquent (see _state: state 2 covers 30-59 days).
+        dq30_frac[i]   = sv[2] + sv[3] + sv[4] + sv[5]
+        active_frac[i] = sv[0] + sv[1] + sv[2] + sv[3] + sv[4] + sv[5]
+        paid_frac[i]   = sv[N_STATES + 1]
+
+    return {
+        "age": ages,
+        "expected_loss_delta": exp_loss_delta,
+        "active_frac": active_frac,
+        "dq30plus_frac": dq30_frac,
+        "paid_principal": paid_frac,
+        "orig_amount": float(orig),
+    }
+
+
+def deal_monthly_trajectory(model, db_path, deal):
+    """Aggregate `forecast_loan_monthly` across a deal's loans into a deal-level
+    monthly expected trajectory. Returns a list of dicts, one per age-month
+    (index 0 = month 1 after cutoff, etc.):
+
+        {
+            "month": int,                       # months since cutoff (1..max_term)
+            "expected_cnl_pct": float,          # cumulative expected CNL %
+            "expected_monthly_loss_bps": float, # monthly expected loss (bps of orig pool)
+            "expected_dq30plus_pct": float,     # expected 30+ DQ balance %
+            "expected_active_balance_pct": float,  # expected remaining balance %
+        }
+
+    "Expected balance %" uses an approximation: balance ≈ orig × paydown_ratio ×
+    (1 − paid_principal_mass) × (1 − cum_default_mass). This is the same recipe
+    forecast_loan uses to compute loss $ at default, applied to the
+    still-performing mass to approximate current pool balance.
+    """
+    conn = sqlite3.connect(db_path)
+    loans_rows = conn.execute(
+        "SELECT obligor_credit_score, original_ltv, "
+        "original_loan_term, original_loan_amount "
+        "FROM loans WHERE deal=?", (deal,)).fetchall()
+    conn.close()
+
+    if not loans_rows:
+        return []
+
+    # Bucket each loan, simulate, accumulate.
+    # Key accumulators (length = max_term):
+    max_term = 84  # cover all term buckets
+    total_orig = 0.0
+    cum_exp_loss = np.zeros(max_term)
+    dq30_bal    = np.zeros(max_term)
+    active_bal  = np.zeros(max_term)
+
+    for fico, ltv, term, amount in loans_rows:
+        if not amount or amount <= 0:
+            continue
+        f_fico = float(fico) if fico and fico != 0 else None
+        f_ltv  = float(ltv) if ltv and ltv != 0 else None
+        f_term = int(term) if term else 60
+        loan = {
+            "state": 0,
+            "age_months": 0,
+            "fico_b": _bucket(f_fico, FICO_BUCKETS) if f_fico else 2,
+            "ltv_b":  _bucket(f_ltv, LTV_BUCKETS) if f_ltv else 2,
+            "modified": 0,
+            "orig_amount": float(amount),
+            "term": f_term,
+            "term_bucket": _term_bucket(f_term),
+            "balance": float(amount),
+        }
+        traj = forecast_loan_monthly(model, loan, start_state=0,
+                                     start_age=0, end_age=f_term)
+        n = len(traj["age"])
+        if n == 0:
+            continue
+
+        total_orig += loan["orig_amount"]
+        # Accumulate dollar-weighted expected loss delta
+        cum_exp_loss[:n] += traj["expected_loss_delta"]
+
+        # Accumulate expected-balance-weighted DQ mass and active mass.
+        # At each month, approximate the loan's expected balance as
+        # orig × paydown_ratio × active_frac.  That lets us express DQ % as a
+        # fraction of balance (what pool_performance reports) rather than of
+        # the original pool.
+        # paydown_ratio at age m: model.build_paydown_table(...)[age]
+        # (same numbers forecast_loan used earlier).
+        paydown_tbl = model.build_paydown_table(loan["term_bucket"], False,
+                                                int(traj["age"][-1]))
+        ratios = paydown_tbl[traj["age"]]
+        exp_bal_per_month = loan["orig_amount"] * ratios * traj["active_frac"]
+        active_bal[:n]  += exp_bal_per_month
+        # Expected DQ balance = orig × ratios × dq_mass.
+        dq30_bal[:n]    += loan["orig_amount"] * ratios * traj["dq30plus_frac"]
+
+    if total_orig <= 0:
+        return []
+
+    # Cumulative expected loss %
+    cum_loss_sum = np.cumsum(cum_exp_loss)
+    out = []
+    for m in range(1, max_term + 1):
+        i = m - 1
+        if active_bal[i] <= 0 and m > 1:
+            # Deal has fully amortized; stop emitting.
+            break
+        exp_cnl_pct = cum_loss_sum[i] / total_orig * 100
+        monthly_loss_bps = cum_exp_loss[i] / total_orig * 10_000
+        dq30_pct = (dq30_bal[i] / active_bal[i] * 100) if active_bal[i] > 0 else 0.0
+        active_pct = active_bal[i] / total_orig * 100
+        out.append({
+            "month": m,
+            "expected_cnl_pct": float(exp_cnl_pct),
+            "expected_monthly_loss_bps": float(monthly_loss_bps),
+            "expected_dq30plus_pct": float(dq30_pct),
+            "expected_active_balance_pct": float(active_pct),
+        })
+    return out
+
+
 # ── Bayesian calibration ─────────────────────────────────────────────
 
 def bayesian_calibration(realized_cnl, lookback_predicted, sigma_prior=0.30):
@@ -863,6 +1056,7 @@ def run():
     logger.info(f"Non-prime deals: {len(nonprime_deals)}")
 
     results = {}  # deal -> forecast dict
+    monthly_cache = {}  # deal -> list of {month, expected_cnl_pct, ...}
 
     for model_type, deal_list in [("prime", prime_deals), ("nonprime", nonprime_deals)]:
         if not deal_list:
@@ -1024,6 +1218,20 @@ def run():
                         f"realized={realized_pct:.2f}%  cal={cal:.2f}x  "
                         f"complete={pct_complete:.0%}")
 
+            # Monthly Markov trajectory for Recent Trends dashboard.
+            # Computed here (model + deal in scope) so we don't have to
+            # re-train the model later to read a monthly expected pace.
+            try:
+                traj = deal_monthly_trajectory(model, db_path, deal)
+                if traj:
+                    monthly_cache[deal] = {
+                        "issuer": issuer,
+                        "model_type": model_type,
+                        "months": traj,
+                    }
+            except Exception as e:
+                logger.warning(f"  {deal}: monthly trajectory failed: {e}")
+
         # all_latest was already deleted after offload (line 937); do not
         # delete again — the second del raises UnboundLocalError.
 
@@ -1036,6 +1244,27 @@ def run():
     # ── Persist all results (safety: also at end) ─────────────────────
     logger.info(f"\nFinal persist... RSS={_rss_mb():.0f} MB")
     _persist_results(results)
+
+    # ── Write Recent Trends monthly-trajectory cache ─────────────────
+    # Used by generate_dashboard.generate_recent_trends_tab() to compute
+    # the month-by-month "surprise" (actual - Markov-expected) without
+    # re-running the model at render time.
+    try:
+        cache_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                  "deploy", "recent_trends_cache.json")
+        os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+        cache_payload = {
+            "generated_at": datetime.now().isoformat(timespec="seconds"),
+            "model": "unified_markov",
+            "n_deals": len(monthly_cache),
+            "deals": monthly_cache,
+        }
+        with open(cache_path, "w") as f:
+            json.dump(cache_payload, f)
+        logger.info(f"  Wrote recent_trends_cache.json ({len(monthly_cache)} deals) "
+                    f"to {cache_path}")
+    except Exception as e:
+        logger.warning(f"  Failed to write recent_trends_cache.json: {e}")
 
     logger.info(f"\nDone. Peak RSS: {_rss_mb():.0f} MB")
     return results

@@ -3268,25 +3268,37 @@ def _rt_load_forecasts(raw_db):
 
 
 def generate_recent_trends_tab():
-    """Build the 'Recent Trends' landing-page analyst note.
+    """Recent Trends — monthly-monitoring view for the residual-equity holder.
 
-    Uses the Markov deal_forecasts table (at-issuance CNL, current-projected
-    CNL, realized CNL, Bayesian cal_factor) as the comparison benchmark, plus
-    pool_performance for month-over-month actual loss pace.
+    Reframed (2026-04-16): instead of a long-term at-issuance-vs-today peer
+    comparison, this tab answers a single monthly-monitoring question for an
+    equity holder who put equal $ into each pool at origination:
 
-    Drift metric: deal_forecasts.cal_factor (the Bayesian calibration
-    multiplier). ~1.0 = on track, >1.10 = underperforming (Markov under-
-    predicted), <0.90 = outperforming.
+        For the pools that still have value outstanding, did losses /
+        delinquencies / recoveries last month come in higher, lower, or
+        about the same as the CURRENT Markov model would have expected
+        for that pool at its current age?
 
-    30-day change compares last-month actual CNL movement to the Markov-
-    expected monthly pace ((current_projected - realized) / months_remaining).
-    Remaining months are estimated from a 60-month typical prime life
-    (72-month for non-prime), floored at 6 — precise per-deal WAL requires a
-    future upgrade once deal_forecasts carries forward-amortization schedules.
+    Data sources:
+      - pool_performance (actuals: CNL, recoveries, DQ buckets, ending_pool_balance)
+      - deal_forecasts (at-issuance lifetime projection + cal factor)
+      - deploy/recent_trends_cache.json (per-deal month-by-month Markov-expected
+        trajectory; generated at end of unified_markov.run() — see
+        deal_monthly_trajectory() in unified_markov.py)
+
+    If the cache is missing (first run of the new code before next Markov
+    rebuild), we fall back to a simplified "pace-relative-to-lifetime"
+    expected-monthly-loss derived from deal_forecasts.at_issuance_cnl_pct
+    spread over typical term months — less faithful, but keeps the tab
+    renderable.
+
+    Focus weighting: by `outstanding $` (latest ending_pool_balance) — the
+    deals with the most capital at risk sort to the top. Carvana-first on
+    ties per meta-goal.
     """
     from collections import defaultdict as _dd
 
-    # ── 1. Load raw data + Markov forecasts for both issuers ─────────────
+    # ── 1. Load raw data + forecasts for both issuers ────────────────────
     crv_db = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                           "db", "carvana_abs.db")
     cmx_db = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -3303,13 +3315,44 @@ def generate_recent_trends_tab():
     if not all_terms:
         return "<div class='tc' style='display:block;padding:16px'><p>No data available yet.</p></div>"
 
-    # ── 2. Per-deal metrics driven by deal_forecasts ─────────────────────
-    per_deal = {}  # deal -> dict
-    latest_dist_seen = None
+    # ── 2. Load per-deal Markov monthly trajectory cache ────────────────
+    cache_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "deploy", "recent_trends_cache.json")
+    monthly_cache = {}
+    cache_generated_at = None
+    if os.path.exists(cache_path):
+        try:
+            with open(cache_path) as f:
+                payload = json.load(f)
+            monthly_cache = payload.get("deals", {})
+            cache_generated_at = payload.get("generated_at")
+        except Exception as e:
+            logger.warning(f"Recent Trends: failed to load cache — {e}")
 
-    def _typical_life_months(seg):
-        # Prime (Carvana + CarMax) amortize ~5y; non-prime stretches to ~6y.
-        return 72 if seg == 'Carvana Non-Prime' else 60
+    def _lookup_expected(deal, month):
+        """Return the cached (expected_cnl_pct, expected_monthly_loss_bps,
+        expected_dq30plus_pct, expected_active_balance_pct) at the given
+        1-indexed month, or None if missing / out of range.
+        """
+        c = monthly_cache.get(deal)
+        if not c or not c.get("months"):
+            return None
+        months = c["months"]
+        if month < 1 or month > len(months):
+            # Use last available if we're beyond the cached curve (rare —
+            # cache covers up to term_bucket[-1] = 84 months).
+            return None
+        row = months[month - 1]
+        return (row.get("expected_cnl_pct"),
+                row.get("expected_monthly_loss_bps"),
+                row.get("expected_dq30plus_pct"),
+                row.get("expected_active_balance_pct"))
+
+    # ── 3. Build per-deal monthly-monitoring record ──────────────────────
+    per_deal = {}
+    latest_dist_seen = None
+    any_cache_hit = False
 
     for deal, t in all_terms.items():
         rows = all_perf.get(deal, [])
@@ -3320,611 +3363,602 @@ def generate_recent_trends_tab():
         ipb = t['ipb']
 
         latest = rows[-1]
-        prior = rows[-2] if len(rows) >= 2 else None
         if latest_dist_seen is None or latest['dist'] > latest_dist_seen:
             latest_dist_seen = latest['dist']
 
         m_latest = _rt_months_since(cutoff, latest['dist'])
+        outstanding = latest.get('ebp') or 0.0
+        pool_factor = (outstanding / ipb) if ipb > 0 else 0.0
 
-        # Markov forecast row (may be None if compute_methodology hasn't run
-        # for this deal yet — we still include the deal in pool-performance
-        # tables, just with no cal_factor / forecast-based metrics).
         mf = all_forecasts.get(deal)
-        cal = mf['cal_factor'] if mf else None
         at_issuance_pct = mf['at_issuance_cnl_pct'] if mf else None
         current_proj_pct = mf['current_projected_cnl_pct'] if mf else None
-        realized_pct_forecast = mf['realized_cnl_pct'] if mf else None
-        pct_complete = mf['pct_complete'] if mf else None
+        realized_pct = mf['realized_cnl_pct'] if mf else None
+        cal = mf['cal_factor'] if mf else None
 
-        # Actual month-over-month losses in bps of initial pool
-        delta_cnl_bps = None
-        if prior:
-            delta_cnl_bps = (latest['cnl'] - prior['cnl']) / ipb * 10_000
+        # Actual DQ 30+ rate (% of ending pool balance).
+        actual_dq30_pct = None
+        dq_bal = 0.0
+        dq_src = latest
+        for k in ('delinquent_31_60_balance', 'delinquent_61_90_balance',
+                  'delinquent_91_120_balance', 'delinquent_121_plus_balance'):
+            v = dq_src.get(k) if isinstance(dq_src, dict) else None
+            if v:
+                dq_bal += v
+        if outstanding > 0:
+            actual_dq30_pct = dq_bal / outstanding * 100
 
-        # Markov-expected monthly pace (bps of initial pool).
-        # = (current_projected_cnl% - realized_cnl%) / months_remaining
-        # Converted from % to bps by multiplying by 100.
-        markov_expected_bps = None
-        if (current_proj_pct is not None and realized_pct_forecast is not None
-                and m_latest is not None):
-            remaining_pct = max(0.0, current_proj_pct - realized_pct_forecast)
-            months_rem = max(6, _typical_life_months(seg) - m_latest)
-            # remaining_pct is a percent (e.g. 1.5 = 1.5% of pool) ->
-            # convert to bps by *100.
-            markov_expected_bps = (remaining_pct / months_rem) * 100.0
+        # Monthly deltas (bps of initial pool balance) for the last 3 obs,
+        # each compared to the Markov-expected monthly pace at that age.
+        def _months_since(dist_dt):
+            return _rt_months_since(cutoff, dist_dt)
 
-        # Surprise: last-month actual pace minus Markov expected monthly pace.
-        mo_surprise_bps = None
-        if delta_cnl_bps is not None and markov_expected_bps is not None:
-            mo_surprise_bps = delta_cnl_bps - markov_expected_bps
+        monthly_rows = []  # [(month_idx, date_str, actual_dq30_pct,
+                           #   actual_chargeoff_bps, actual_recovery_bps,
+                           #   actual_monthly_loss_bps, exp_...)]
+        # Walk last 3 observations where we can compute month-over-month.
+        n = len(rows)
+        for i in range(max(1, n - 3), n):
+            this_r = rows[i]
+            prev_r = rows[i - 1]
+            m_i = _months_since(this_r['dist'])
+            if m_i is None:
+                continue
 
-        # 3-mo rolling avg actual pace, for the segment narrative below.
-        ttm3 = None
-        if len(rows) >= 4:
-            vals = []
-            for i in range(max(1, len(rows) - 3), len(rows)):
-                vals.append(
-                    (rows[i]['cnl'] - rows[i - 1]['cnl']) / ipb * 10_000)
-            if vals:
-                ttm3 = sum(vals) / len(vals)
+            # Actual monthly loss, charge-offs, recoveries (bps of ipb).
+            delta_cnl = (this_r['cnl'] - prev_r['cnl'])
+            this_nco = this_r.get('nco') if isinstance(this_r, dict) else None
+            # nco is monthly NET charged off as stored in pool_performance.
+            actual_chargeoff_bps = (this_nco / ipb * 10_000) if (this_nco is not None and ipb > 0) else None
+            actual_monthly_loss_bps = (delta_cnl / ipb * 10_000) if ipb > 0 else None
+
+            # Recoveries: delta cumulative_liquidation_proceeds is the best
+            # direct proxy, but pool_performance.recoveries at the monthly
+            # level isn't always present.  Use (monthly_chargeoff - monthly_net_loss)
+            # as recoveries (i.e. what was recovered on net-vs-gross).
+            actual_recoveries_bps = None
+            if actual_chargeoff_bps is not None and actual_monthly_loss_bps is not None:
+                # Convention: positive = good for holder.
+                actual_recoveries_bps = actual_chargeoff_bps - actual_monthly_loss_bps
+
+            # Actual DQ 30+ % at this month.
+            this_dq_bal = 0.0
+            for k in ('delinquent_31_60_balance', 'delinquent_61_90_balance',
+                      'delinquent_91_120_balance', 'delinquent_121_plus_balance'):
+                v = this_r.get(k) if isinstance(this_r, dict) else None
+                if v:
+                    this_dq_bal += v
+            this_ebp = this_r.get('ebp') if isinstance(this_r, dict) else None
+            actual_dq_at_i = (this_dq_bal / this_ebp * 100) if (this_ebp and this_ebp > 0) else None
+
+            # Cached expected values for this age.
+            exp = _lookup_expected(deal, m_i)
+            prev_exp = _lookup_expected(deal, m_i - 1) if m_i > 1 else None
+            if exp is not None:
+                any_cache_hit = True
+
+            exp_cnl_pct, exp_monthly_loss_bps, exp_dq30_pct, _ = (
+                exp if exp else (None, None, None, None))
+            prev_exp_cnl_pct, _, _, _ = (
+                prev_exp if prev_exp else (None, None, None, None))
+
+            # Fallback expected monthly loss if cache missing: lifetime/typical
+            # term, ~flat.
+            if exp_monthly_loss_bps is None and at_issuance_pct is not None:
+                typical_term = 72 if seg == 'Carvana Non-Prime' else 60
+                exp_monthly_loss_bps = at_issuance_pct * 100 / typical_term
+
+            # Expected monthly charge-off is a hair higher than expected net
+            # monthly loss (charge-off gross − recoveries). The Markov cache
+            # exposes the expected *net* monthly loss. Carvana/CarMax servicer
+            # reports show recoveries averaging ~20-35% of gross charge-offs,
+            # so as a proxy: expected_chargeoff ≈ expected_loss × 1.30.
+            # (This is a coarse Markov proxy since the cache builds LGD into
+            # the loss number directly — if LGD=0.75 and rec=0.25, gross ≈ loss/0.75.)
+            exp_chargeoff_bps = None
+            exp_recovery_bps = None
+            if exp_monthly_loss_bps is not None:
+                exp_chargeoff_bps = exp_monthly_loss_bps / 0.75  # assume avg LGD ~75%
+                exp_recovery_bps = exp_chargeoff_bps - exp_monthly_loss_bps
+
+            # Surprises (actual − expected).
+            # Sign convention: positive = worse than expected (bad for holder)
+            # for DQ and losses; positive recovery surprise = good.
+            dq_surprise_bps = None
+            if actual_dq_at_i is not None and exp_dq30_pct is not None:
+                # Both in %, convert to bps of pool *balance* (which is the
+                # comparable unit).
+                dq_surprise_bps = (actual_dq_at_i - exp_dq30_pct) * 100
+
+            chargeoff_surprise_bps = None
+            if actual_chargeoff_bps is not None and exp_chargeoff_bps is not None:
+                chargeoff_surprise_bps = actual_chargeoff_bps - exp_chargeoff_bps
+
+            recovery_surprise_bps = None
+            if actual_recoveries_bps is not None and exp_recovery_bps is not None:
+                recovery_surprise_bps = actual_recoveries_bps - exp_recovery_bps
+
+            loss_surprise_bps = None
+            if actual_monthly_loss_bps is not None and exp_monthly_loss_bps is not None:
+                loss_surprise_bps = actual_monthly_loss_bps - exp_monthly_loss_bps
+
+            monthly_rows.append({
+                'month': m_i,
+                'date': this_r['dist'],
+                'actual_dq30_pct': actual_dq_at_i,
+                'actual_chargeoff_bps': actual_chargeoff_bps,
+                'actual_recovery_bps': actual_recoveries_bps,
+                'actual_loss_bps': actual_monthly_loss_bps,
+                'exp_dq30_pct': exp_dq30_pct,
+                'exp_chargeoff_bps': exp_chargeoff_bps,
+                'exp_recovery_bps': exp_recovery_bps,
+                'exp_loss_bps': exp_monthly_loss_bps,
+                'dq_surprise_bps': dq_surprise_bps,
+                'chargeoff_surprise_bps': chargeoff_surprise_bps,
+                'recovery_surprise_bps': recovery_surprise_bps,
+                'loss_surprise_bps': loss_surprise_bps,
+            })
+
+        if not monthly_rows:
+            continue
+
+        latest_row = monthly_rows[-1]
+
+        # Trend tag — sign-pattern over last 3 loss_surprise_bps values
+        # (most recent = last). Positive = worse than expected.
+        def _trend_tag(series):
+            vals = [s.get('loss_surprise_bps') for s in series
+                    if s.get('loss_surprise_bps') is not None]
+            if len(vals) < 2:
+                return ('stable', '↔', 'insufficient history')
+            signs = [(1 if v > 5 else (-1 if v < -5 else 0)) for v in vals]
+            n_pos = sum(1 for s in signs if s > 0)
+            n_neg = sum(1 for s in signs if s < 0)
+            big_swing = any(abs(v) > 30 for v in vals)
+            if n_neg == len(signs):
+                return ('improving', '↗', 'losses below expected 3/3 mo')
+            if n_pos == len(signs):
+                return ('deteriorating', '↘', 'losses above expected 3/3 mo')
+            if n_pos > n_neg and max(vals) > 10:
+                return ('deteriorating', '↘', f'{n_pos}/{len(signs)} mo above expected')
+            if n_neg > n_pos and min(vals) < -10:
+                return ('improving', '↗', f'{n_neg}/{len(signs)} mo below expected')
+            if big_swing:
+                return ('noisy', '~', 'one big swing; mixed')
+            return ('stable', '↔', 'within ±5 bps of expected')
+
+        trend_name, trend_arrow, trend_reason = _trend_tag(monthly_rows)
+
+        # View shift: change in projected lifetime CNL since at-issuance.
+        # (current_projected_pct - at_issuance_pct) in bps.
+        view_shift_bps = None
+        if at_issuance_pct is not None and current_proj_pct is not None:
+            view_shift_bps = (current_proj_pct - at_issuance_pct) * 100
+
+        # Δ projected residual profit — rough proxy:
+        # = −(loss_surprise_bps of pool) + recovery_surprise_bps
+        # i.e. if losses come in +20 bps heavier this month, residual is
+        # ~−20 bps of pool that month.
+        residual_delta_bps = None
+        lsb = latest_row.get('loss_surprise_bps')
+        rsb = latest_row.get('recovery_surprise_bps')
+        if lsb is not None:
+            residual_delta_bps = -lsb
+            if rsb is not None:
+                # avoid double-counting: recovery_surprise already embedded
+                # in chargeoff_surprise vs loss_surprise. Keep just loss.
+                pass
+
+        # Status icon — cumulative cal factor + trend.
+        status_icon = '✓'
+        status_label = 'doing well'
+        if cal is not None and cal > 1.20:
+            status_icon = '✗'
+            status_label = 'problem'
+        elif cal is not None and cal > 1.10:
+            status_icon = '⚠'
+            status_label = 'watch'
+        elif trend_name == 'deteriorating':
+            status_icon = '⚠'
+            status_label = 'watch'
 
         per_deal[deal] = {
             'segment': seg,
             'issuer': t['issuer'],
             'ipb': ipb,
+            'outstanding': outstanding,
+            'pool_factor': pool_factor,
             'latest_dist': latest['dist'],
             'seasoning_months': m_latest,
-            # Forecast-derived fields (None if deal_forecasts missing this deal):
-            'cal': cal,
             'at_issuance_cnl_pct': at_issuance_pct,
             'current_proj_cnl_pct': current_proj_pct,
-            'realized_cnl_pct': realized_pct_forecast,
-            'pct_complete': pct_complete,
-            'markov_expected_bps': markov_expected_bps,
-            'mo_surprise_bps': mo_surprise_bps,
-            # Pool-performance derived (always present):
-            'delta_cnl_bps_30d': delta_cnl_bps,
-            'ttm3_bps': ttm3,
-            # prior_cal requires daily forecast history (deal_forecasts_history).
-            # Placeholder for Table C until that infra lands.
-            'prior_cal': None,
-            'delta_cal_30d': None,
+            'realized_cnl_pct': realized_pct,
+            'cal': cal,
+            'monthly_rows': monthly_rows,
+            'latest_surprise': latest_row,
+            'trend_name': trend_name,
+            'trend_arrow': trend_arrow,
+            'trend_reason': trend_reason,
+            'view_shift_bps': view_shift_bps,
+            'residual_delta_bps': residual_delta_bps,
+            'status_icon': status_icon,
+            'status_label': status_label,
         }
 
     if not per_deal:
         return "<div class='tc' style='display:block;padding:16px'><p>No deals with pool-performance data yet.</p></div>"
 
-    # ── 3. Segment aggregates (ipb-weighted) ─────────────────────────────
-    seg_agg = {}
-    for seg in ('Carvana Prime', 'Carvana Non-Prime', 'CarMax'):
-        rows = [d for d in per_deal.values() if d['segment'] == seg]
-        if not rows:
-            continue
+    # ── 4. Weighted-$ aggregates per issuer-class ────────────────────────
+    def _issuer_class(v):
+        if v['issuer'] == 'CARMX':
+            return 'CarMax'
+        return 'Carvana'
 
-        def _wavg(rows_, key):
-            rr = [r for r in rows_ if r.get(key) is not None]
-            if not rr:
-                return None
-            tot = sum(r['ipb'] for r in rr)
-            if tot <= 0:
-                return None
-            return sum(r[key] * r['ipb'] for r in rr) / tot
+    def _waggregate(rows, key):
+        """Dollar-weighted average by outstanding, skipping None."""
+        rr = [r for r in rows if r.get(key) is not None]
+        tot = sum(r['outstanding'] for r in rr)
+        if tot <= 0:
+            return None
+        return sum(r[key] * r['outstanding'] for r in rr) / tot
 
-        cal_rows = [r for r in rows if r['cal'] is not None]
+    # Split into active (pool_factor ≥ 5%) and closing-out (< 5%).
+    FACTOR_CUTOFF = 0.05
+    active_deals = {d: v for d, v in per_deal.items()
+                    if v['pool_factor'] >= FACTOR_CUTOFF}
+    closing_deals = {d: v for d, v in per_deal.items()
+                     if v['pool_factor'] < FACTOR_CUTOFF}
 
-        seg_agg[seg] = {
-            'n_deals': len(rows),
-            'n_cal_deals': len(cal_rows),
-            'total_ipb': sum(r['ipb'] for r in rows),
-            'weighted_cal': _wavg(rows, 'cal'),
-            'weighted_at_issuance_pct': _wavg(rows, 'at_issuance_cnl_pct'),
-            'weighted_current_proj_pct': _wavg(rows, 'current_proj_cnl_pct'),
-            'weighted_realized_pct': _wavg(rows, 'realized_cnl_pct'),
-            'last_month_loss_bps': _wavg(rows, 'delta_cnl_bps_30d'),
-            'markov_expected_bps': _wavg(rows, 'markov_expected_bps'),
-            'mo_surprise_bps': _wavg(rows, 'mo_surprise_bps'),
-            'ttm3_bps': _wavg(rows, 'ttm3_bps'),
-            'n_under': sum(1 for r in cal_rows if r['cal'] > 1.10),
-            'n_over': sum(1 for r in cal_rows if r['cal'] < 0.90),
-        }
-        if cal_rows:
-            worst = max(((d, v) for d, v in per_deal.items()
-                         if v['segment'] == seg and v['cal'] is not None),
-                        key=lambda kv: kv[1]['cal'])
-            best = min(((d, v) for d, v in per_deal.items()
-                        if v['segment'] == seg and v['cal'] is not None),
-                       key=lambda kv: kv[1]['cal'])
-            seg_agg[seg]['worst_deal'] = worst[0]
-            seg_agg[seg]['worst_cal'] = worst[1]['cal']
-            seg_agg[seg]['best_deal'] = best[0]
-            seg_agg[seg]['best_cal'] = best[1]['cal']
-        else:
-            seg_agg[seg]['worst_deal'] = None
-            seg_agg[seg]['worst_cal'] = None
-            seg_agg[seg]['best_deal'] = None
-            seg_agg[seg]['best_cal'] = None
+    # Sort: by outstanding descending, Carvana-first on ties.
+    def _sort_key(item):
+        d, v = item
+        issuer_pref = 0 if v['issuer'] == 'CRVNA' else 1
+        return (-(v['outstanding'] or 0), issuer_pref, d)
 
-    # ── 4. Vintage breakdown for CarMax commentary ───────────────────────
-    cmx_by_year = _dd(list)
-    for deal, v in per_deal.items():
-        if v['segment'] != 'CarMax' or v['cal'] is None:
-            continue
-        yr = deal.split('-')[0] if '-' in deal else None
-        if yr and yr.isdigit():
-            cmx_by_year[int(yr)].append(v)
-    cmx_worst_vintage = None
-    cmx_best_vintage = None
-    if cmx_by_year:
-        yr_scores = {}
-        for yr, vs in cmx_by_year.items():
-            total_ipb = sum(v['ipb'] for v in vs) or 1
-            w = sum(v['cal'] * v['ipb'] for v in vs) / total_ipb
-            yr_scores[yr] = (w, len(vs))
-        cmx_worst_vintage = max(yr_scores.items(), key=lambda kv: kv[1][0])
-        cmx_best_vintage = min(yr_scores.items(), key=lambda kv: kv[1][0])
+    active_sorted = sorted(active_deals.items(), key=_sort_key)
+    closing_sorted = sorted(closing_deals.items(), key=_sort_key)
 
-    # ── 5. Biggest movers: top 5 by abs month-over-month surprise vs
-    #       Markov-expected monthly pace ────────────────────────────────
-    movers = [(d, v) for d, v in per_deal.items()
-              if v['mo_surprise_bps'] is not None]
-    movers.sort(key=lambda kv: abs(kv[1]['mo_surprise_bps']), reverse=True)
-    movers = movers[:5]
-
-    def _mover_note(v):
-        surp = v.get('mo_surprise_bps')
-        if surp is None:
-            return '-'
-        if v['delta_cnl_bps_30d'] is not None and v['delta_cnl_bps_30d'] < -5:
-            return 'servicer restatement (cnl revised down)'
-        if v['seasoning_months'] and v['seasoning_months'] <= 6:
-            return 'early-cycle noise'
-        if surp > 15:
-            return 'realized pace running ahead of Markov forecast'
-        if surp < -15:
-            return 'realized pace running behind Markov forecast'
-        return 'tracking Markov forecast within noise'
-
-    # ── 6. Headline narrative generation ─────────────────────────────────
+    # ── 5. Headline narrative (dollar-weighted) ──────────────────────────
     latest_date_str = (latest_dist_seen.strftime('%B %Y')
                        if latest_dist_seen else 'the latest filing')
+    crv_rows = [v for v in active_deals.values() if v['issuer'] == 'CRVNA']
+    cmx_rows = [v for v in active_deals.values() if v['issuer'] == 'CARMX']
+    crv_out_sum = sum(v['outstanding'] for v in crv_rows)
+    cmx_out_sum = sum(v['outstanding'] for v in cmx_rows)
 
-    def _direction_phrase(w_cal):
-        if w_cal is None:
-            return 'no forecast available yet'
-        if w_cal > 1.05:
-            return f"tracking <b>{(w_cal - 1) * 100:.0f}% above</b> the Markov forecast"
-        if w_cal < 0.95:
-            return f"tracking <b>{(1 - w_cal) * 100:.0f}% below</b> the Markov forecast"
-        return "tracking <b>in line with</b> the Markov forecast"
+    # Weighted latest-month surprise series (loss bps).
+    def _latest_surprise_wavg(rows, key):
+        rr = [v for v in rows if v.get('latest_surprise') is not None
+              and v['latest_surprise'].get(key) is not None]
+        tot = sum(v['outstanding'] for v in rr)
+        if tot <= 0:
+            return None
+        return sum(v['latest_surprise'][key] * v['outstanding'] for v in rr) / tot
 
-    crv_p = seg_agg.get('Carvana Prime', {})
-    crv_n = seg_agg.get('Carvana Non-Prime', {})
-    cmx = seg_agg.get('CarMax', {})
+    crv_loss_surprise = _latest_surprise_wavg(crv_rows, 'loss_surprise_bps')
+    cmx_loss_surprise = _latest_surprise_wavg(cmx_rows, 'loss_surprise_bps')
+    crv_dq_surprise = _latest_surprise_wavg(crv_rows, 'dq_surprise_bps')
+    cmx_dq_surprise = _latest_surprise_wavg(cmx_rows, 'dq_surprise_bps')
 
-    # Carvana-leading headline: lead with Carvana Prime + Non-Prime, then
-    # close with CarMax as the peer-benchmark frame.
-    def _short_cal_phrase(cal, label):
-        if cal is None:
-            return f"{label} (no forecast yet)"
-        if cal > 1.05:
-            return f"{label} tracking <b>{(cal - 1) * 100:.0f}% above</b> Markov"
-        if cal < 0.95:
-            return f"{label} tracking <b>{(1 - cal) * 100:.0f}% below</b> Markov"
-        return f"{label} tracking <b>in line with</b> Markov"
+    def _surprise_word(bps):
+        if bps is None:
+            return 'n/a'
+        if bps > 15:
+            return 'materially hotter than expected'
+        if bps > 5:
+            return 'running hot'
+        if bps < -15:
+            return 'materially cooler than expected'
+        if bps < -5:
+            return 'running cool'
+        return 'in line'
 
-    headline = ""
-    if (crv_p and crv_p.get('weighted_cal') is not None) or (crv_n and crv_n.get('weighted_cal') is not None):
-        carvana_bits = []
-        for _label, _agg in (('Carvana Prime', crv_p), ('Carvana Non-Prime', crv_n)):
-            if _agg and _agg.get('weighted_cal') is not None:
-                carvana_bits.append(_short_cal_phrase(_agg['weighted_cal'], _label)
-                                    + f" (cal {_agg['weighted_cal']:.2f}x)")
-        if carvana_bits:
-            headline = f"As of {latest_date_str}, " + "; ".join(carvana_bits) + "."
-            # Append CarMax as peer-benchmark context with spread delta.
-            if cmx and cmx.get('weighted_cal') is not None:
-                cm_cal = cmx['weighted_cal']
-                cm_phrase = _short_cal_phrase(cm_cal, 'CarMax (peer benchmark)')
-                # Spread vs Carvana Prime (if available).
-                spread_note = ""
-                if crv_p and crv_p.get('weighted_cal') is not None:
-                    delta = (crv_p['weighted_cal'] - cm_cal) * 100
-                    spread_note = (f" Carvana Prime &minus; CarMax spread: "
-                                   f"<b>{'+' if delta >= 0 else ''}{delta:.0f} cal-pts</b>"
-                                   f" ({'Carvana underperforming peer' if delta > 0 else 'Carvana outperforming peer'}).")
-                headline += f" {cm_phrase} (cal {cm_cal:.2f}x).{spread_note}"
-    elif cmx and cmx.get('weighted_cal') is not None:
-        # Only CarMax has forecasts — still lead with Carvana framing.
-        headline = (f"As of {latest_date_str}, Carvana Markov forecasts are not yet "
-                    f"available for this snapshot. CarMax (peer benchmark) "
-                    f"{_short_cal_phrase(cmx['weighted_cal'], '').strip()} "
-                    f"(cal {cmx['weighted_cal']:.2f}x).")
-    else:
-        headline = (f"As of {latest_date_str}, Markov forecasts have not yet "
-                    "been computed for any deals in the dataset.")
+    # Biggest movers — by abs latest loss_surprise_bps, weighted-ish
+    # (only active deals).
+    movers_ranked = [(d, v) for d, v in active_deals.items()
+                     if v.get('latest_surprise') is not None
+                     and v['latest_surprise'].get('loss_surprise_bps') is not None]
+    movers_ranked.sort(
+        key=lambda kv: abs(kv[1]['latest_surprise']['loss_surprise_bps']),
+        reverse=True)
+    top_movers = movers_ranked[:3]
 
-    def _para_issuer(label, agg):
-        if not agg:
-            return f"<p><b>{label}.</b> No active deals in the dataset.</p>"
-        bits = []
-        bits.append(
-            f"<b>{label}.</b> {agg['n_cal_deals']} of {agg['n_deals']} deals "
-            f"have a Markov forecast."
+    mover_phrases = []
+    for d, v in top_movers:
+        bps = v['latest_surprise']['loss_surprise_bps']
+        sign = '+' if bps >= 0 else ''
+        mover_phrases.append(
+            f"<b>{d}</b> ({sign}{bps:.0f} bps loss, "
+            f"{v['trend_arrow']} {v['trend_name']})")
+
+    # Weighted residual delta (bps, latest month).
+    residual_weighted_bps = _waggregate(list(active_deals.values()),
+                                        'residual_delta_bps')
+
+    def _fmt_bn(v):
+        if v is None or v == 0:
+            return "$0"
+        return f"${v / 1e9:.1f}B" if v >= 1e9 else f"${v / 1e6:.0f}M"
+
+    headline_parts = []
+    headline_parts.append(
+        f"Last month ({latest_date_str}), "
+        f"<b>~{_fmt_bn(crv_out_sum)}</b> of remaining ABS-backed Carvana loans "
+        f"and <b>~{_fmt_bn(cmx_out_sum)}</b> of CarMax saw "
+        f"delinquencies {_surprise_word(crv_dq_surprise) if crv_dq_surprise is not None else 'n/a'} "
+        f"(Carvana) vs. {_surprise_word(cmx_dq_surprise) if cmx_dq_surprise is not None else 'n/a'} "
+        f"(CarMax), and charge-off pace "
+        f"{_surprise_word(crv_loss_surprise) if crv_loss_surprise is not None else 'n/a'} "
+        f"(Carvana) vs. {_surprise_word(cmx_loss_surprise) if cmx_loss_surprise is not None else 'n/a'} (CarMax)."
+    )
+    if residual_weighted_bps is not None:
+        sign = '+' if residual_weighted_bps >= 0 else ''
+        headline_parts.append(
+            f"Net effect on projected residual profit this month: "
+            f"weighted <b>{sign}{residual_weighted_bps:.0f} bps</b> of outstanding pool "
+            f"(positive = residual ahead of plan)."
         )
-        if agg.get('weighted_cal') is not None:
-            bits.append(
-                f"Portfolio-weighted cal factor "
-                f"<b>{agg['weighted_cal']:.2f}x</b> "
-                f"(1.00x = on forecast)."
-            )
-        if (agg.get('weighted_at_issuance_pct') is not None
-                and agg.get('weighted_current_proj_pct') is not None):
-            bits.append(
-                f"Original Markov projection "
-                f"<b>{agg['weighted_at_issuance_pct']:.2f}%</b> CNL vs. "
-                f"current projection "
-                f"<b>{agg['weighted_current_proj_pct']:.2f}%</b>"
-                + (f" (realized {agg['weighted_realized_pct']:.2f}% to date)."
-                   if agg.get('weighted_realized_pct') is not None else ".")
-            )
-        if agg.get('last_month_loss_bps') is not None:
-            line = (f"Last month's realized loss pace was "
-                    f"<b>{agg['last_month_loss_bps']:.0f} bps</b> of pool")
-            if agg.get('markov_expected_bps') is not None:
-                d = agg['last_month_loss_bps'] - agg['markov_expected_bps']
-                line += (f", versus a Markov-expected monthly pace of "
-                         f"{agg['markov_expected_bps']:.0f} bps "
-                         f"({'+' if d>=0 else ''}{d:.0f} bps surprise).")
-            else:
-                line += "."
-            bits.append(line)
-        bits.append(
-            f"{agg.get('n_under', 0)} deal(s) underperforming "
-            f"(cal &gt; 1.10x); {agg.get('n_over', 0)} outperforming "
-            f"(cal &lt; 0.90x)."
+    if mover_phrases:
+        headline_parts.append(
+            "The biggest movers this month: " + "; ".join(mover_phrases) + "."
         )
-        if agg.get('worst_deal') and agg.get('worst_cal') is not None:
-            bits.append(
-                f"Worst deal: <b>{agg['worst_deal']}</b> at "
-                f"{agg['worst_cal']:.2f}x."
-            )
-        return "<p>" + " ".join(bits) + "</p>"
+    # Trend sentence — count deteriorating vs improving across active deals.
+    n_deteriorating = sum(1 for v in active_deals.values()
+                          if v['trend_name'] == 'deteriorating')
+    n_improving = sum(1 for v in active_deals.values()
+                      if v['trend_name'] == 'improving')
+    n_stable = sum(1 for v in active_deals.values()
+                   if v['trend_name'] == 'stable')
+    n_noisy = sum(1 for v in active_deals.values()
+                  if v['trend_name'] == 'noisy')
+    headline_parts.append(
+        f"Across {len(active_deals)} active deals: "
+        f"{n_deteriorating} deteriorating, {n_improving} improving, "
+        f"{n_stable} stable, {n_noisy} noisy."
+    )
 
-    para1 = _para_issuer("Carvana Prime", crv_p)
-    para1_np = _para_issuer("Carvana Non-Prime", crv_n)
+    headline = " ".join(headline_parts)
 
-    # Carvana wrap-up sentence: what the combined picture means for Carvana's
-    # residual economics. Anchor off the Prime cal factor since that's the
-    # bulk of Carvana's outstanding ABS book.
-    carvana_wrap = ""
-    if crv_p and crv_p.get('weighted_cal') is not None:
-        cal = crv_p['weighted_cal']
-        if cal > 1.10:
-            carvana_wrap = (
-                " <strong>For Carvana residual economics:</strong> the portfolio is "
-                "realizing losses materially ahead of the Markov forecast, which "
-                "directly compresses Carvana's residual-holder cashflows on the "
-                "affected deals."
-            )
-        elif cal < 0.90:
-            carvana_wrap = (
-                " <strong>For Carvana residual economics:</strong> the portfolio is "
-                "realizing losses materially below the Markov forecast, a positive "
-                "read-through to Carvana's residual-holder cashflows on the "
-                "affected deals."
-            )
-        else:
-            carvana_wrap = (
-                " <strong>For Carvana residual economics:</strong> the portfolio is "
-                "tracking in-line with the Markov forecast; residual cashflows are "
-                "progressing as modeled."
-            )
-    if carvana_wrap and para1_np:
-        # Attach to the Non-Prime paragraph so the two Carvana paragraphs read as one block.
-        para1_np = para1_np.replace("</p>", carvana_wrap + "</p>")
-    elif carvana_wrap and para1:
-        para1 = para1.replace("</p>", carvana_wrap + "</p>")
-
-    # CarMax paragraph: framed as peer benchmark, kept shorter than Carvana.
-    cmx_vintage_note = ""
-    if cmx_worst_vintage and cmx_best_vintage and cmx_worst_vintage[0] != cmx_best_vintage[0]:
-        cmx_vintage_note = (
-            f" Across vintages, the {cmx_worst_vintage[0]} cohort "
-            f"(weighted {cmx_worst_vintage[1][0]:.2f}x) is the weakest, while "
-            f"the {cmx_best_vintage[0]} cohort "
-            f"({cmx_best_vintage[1][0]:.2f}x) is strongest."
-        )
-
-    # Short CarMax peer-benchmark paragraph (not the full _para_issuer template).
-    if cmx and cmx.get('weighted_cal') is not None:
-        _cal = cmx['weighted_cal']
-        _direction = ('above' if _cal > 1.05 else ('below' if _cal < 0.95 else 'in line with'))
-        _pct_text = (f"{(_cal - 1) * 100:.0f}% {_direction}" if _direction != 'in line with'
-                     else 'in line with')
-        _ctx = ''
-        if crv_p and crv_p.get('weighted_cal') is not None:
-            _spread = (crv_p['weighted_cal'] - _cal) * 100
-            _ctx = (f" Carvana Prime is {'+' if _spread>=0 else ''}{_spread:.0f} cal-points "
-                    f"{'wider than' if _spread>0 else ('tighter than' if _spread<0 else 'equal to')} "
-                    f"this peer benchmark.")
-        para2 = (
-            f"<p><b>CarMax (peer benchmark).</b> {cmx['n_cal_deals']} of {cmx['n_deals']} "
-            f"CarMax deals have a Markov forecast; portfolio-weighted cal factor "
-            f"<b>{_cal:.2f}x</b> ({_pct_text} forecast). The comparison set provides "
-            f"context for Carvana's recent-trend read: CarMax is a long-tenured prime-only "
-            f"auto-ABS issuer and functions as the legacy-operator baseline.{_ctx}"
-            + (cmx_vintage_note or '') + "</p>"
-        )
-    else:
-        para2 = _para_issuer("CarMax (peer benchmark)", cmx)
-        if cmx_vintage_note:
-            para2 = para2.replace("</p>", cmx_vintage_note + "</p>")
-
-    # ── 7. Build tables ──────────────────────────────────────────────────
+    # ── 6. Main table rows ──────────────────────────────────────────────
     def _num(v, dp=2, suffix=''):
         return f"{v:.{dp}f}{suffix}" if v is not None else '-'
 
-    def _delta_cal_s(v):
+    def _signed_bps(v, dp=0):
         if v is None:
             return '-'
-        return f"{v:+.2f}x"
+        sign = '+' if v >= 0 else ''
+        return f"{sign}{v:.{dp}f} bps"
 
-    # Table A — snapshot (cal + projections)
-    tbl_a_rows = ""
-    for seg in ('Carvana Prime', 'Carvana Non-Prime', 'CarMax'):
-        a = seg_agg.get(seg)
-        if not a:
-            continue
-        tbl_a_rows += (
-            f"<tr><td>{seg}</td>"
-            f"<td>{a['n_deals']}</td>"
-            f"<td>{_num(a.get('weighted_cal'), 2, 'x')}</td>"
-            f"<td>{_num(a.get('weighted_at_issuance_pct'), 2, '%')}</td>"
-            f"<td>{_num(a.get('weighted_current_proj_pct'), 2, '%')}</td>"
-            f"<td>{_num(a.get('weighted_realized_pct'), 2, '%')}</td>"
-            f"<td>{a.get('n_under', 0)}</td>"
-            f"<td>{a.get('n_over', 0)}</td>"
-            f"<td>{a.get('worst_deal','-')} ({_num(a.get('worst_cal'),2,'x')})</td>"
-            f"<td>{a.get('best_deal','-')} ({_num(a.get('best_cal'),2,'x')})</td>"
+    def _signed_bps_color(v, dp=0, invert=False):
+        """Signed bps with color: by default, negative=green (good for holder)
+        and positive=red (bad). invert=True flips (e.g. recoveries where
+        positive is good)."""
+        if v is None:
+            return '-'
+        sign = '+' if v >= 0 else ''
+        good = (v < 0) if not invert else (v > 0)
+        color = '#2E7D32' if good else ('#C62828' if v != 0 else '#757575')
+        return f"<span style='color:{color};font-weight:600'>{sign}{v:.{dp}f} bps</span>"
+
+    def _issuer_label(v):
+        seg = v['segment']
+        return seg  # Carvana Prime / Carvana Non-Prime / CarMax
+
+    def _deal_link(deal):
+        # Dashboard deal pages live at deals/<slug>/
+        return f"<a href='deals/{deal.lower()}/'>{deal}</a>"
+
+    def _row_html(deal, v):
+        ls = v.get('latest_surprise') or {}
+        return (
+            f"<tr>"
+            f"<td>{v['status_icon']} {_deal_link(deal)}</td>"
+            f"<td>{_issuer_label(v)}</td>"
+            f"<td>{_fmt_bn(v['outstanding'])}</td>"
+            f"<td>{v['pool_factor']*100:.1f}%</td>"
+            f"<td>{v['latest_dist'].strftime('%Y-%m')}</td>"
+            f"<td>{_signed_bps_color(ls.get('dq_surprise_bps'))}</td>"
+            f"<td>{_signed_bps_color(ls.get('chargeoff_surprise_bps'))}</td>"
+            f"<td>{_signed_bps_color(ls.get('recovery_surprise_bps'), invert=True)}</td>"
+            f"<td>{v['trend_arrow']} {v['trend_name']}</td>"
+            f"<td>{_signed_bps(v.get('view_shift_bps'))}</td>"
+            f"<td>{_signed_bps_color(v.get('residual_delta_bps'), invert=True)}</td>"
             f"</tr>"
         )
-    tbl_a = (
-        "<table class='compare'><thead><tr>"
-        "<th>Segment</th><th># deals</th><th>WAvg cal</th>"
-        "<th>Original projection</th><th>Current projection</th>"
-        "<th>Realized to date</th>"
-        "<th>Underperform (&gt;1.10x)</th>"
-        "<th>Outperform (&lt;0.90x)</th>"
-        "<th>Worst deal</th><th>Best deal</th>"
-        f"</tr></thead><tbody>{tbl_a_rows}</tbody></table>"
+
+    active_rows_html = "".join(_row_html(d, v) for d, v in active_sorted) or (
+        "<tr><td colspan=11>No active deals with usable data yet.</td></tr>"
+    )
+    closing_rows_html = "".join(_row_html(d, v) for d, v in closing_sorted)
+
+    main_table_header = (
+        "<thead><tr>"
+        "<th>Deal</th>"
+        "<th>Issuer</th>"
+        "<th>Outstanding $</th>"
+        "<th>Pool factor</th>"
+        "<th>Last data</th>"
+        "<th>Δ DQ 30+ (bps)</th>"
+        "<th>Δ Charge-offs (bps)</th>"
+        "<th>Δ Recoveries (bps)</th>"
+        "<th>Trend (3-mo)</th>"
+        "<th>View shift (lifetime bps)</th>"
+        "<th>Δ Residual (bps)</th>"
+        "</tr></thead>"
     )
 
-    # Table B — last-month actual pace vs Markov-expected monthly pace
-    tbl_b_rows = ""
-    for seg in ('Carvana Prime', 'Carvana Non-Prime', 'CarMax'):
-        a = seg_agg.get(seg)
-        if not a:
-            continue
-        lm = a.get('last_month_loss_bps')
-        exp = a.get('markov_expected_bps')
-        surprise = (lm - exp) if (lm is not None and exp is not None) else None
-        ttm3 = a.get('ttm3_bps')
-        tbl_b_rows += (
-            f"<tr><td>{seg}</td>"
-            f"<td>{_num(lm, 0, ' bps') if lm is not None else '-'}</td>"
-            f"<td>{_num(exp, 0, ' bps') if exp is not None else '-'}</td>"
-            f"<td>{('+' if surprise is not None and surprise>=0 else '') + _num(surprise, 0, ' bps') if surprise is not None else '-'}</td>"
-            f"<td>{_num(ttm3, 0, ' bps') if ttm3 is not None else '-'}</td>"
-            f"</tr>"
+    main_table = (
+        f"<table class='compare'>{main_table_header}<tbody>{active_rows_html}</tbody></table>"
+    )
+
+    closing_section = ""
+    if closing_rows_html:
+        closing_section = (
+            "<details style='margin-top:14px'>"
+            "<summary style='cursor:pointer;padding:6px 4px;font-size:.8rem;color:#555'>"
+            f"✓ Closing out — {len(closing_sorted)} deal(s) with &lt;5% pool factor "
+            "(click to expand)</summary>"
+            f"<table class='compare'>{main_table_header}<tbody>{closing_rows_html}</tbody></table>"
+            "</details>"
         )
-    tbl_b = (
-        "<table class='compare'><thead><tr>"
-        "<th>Segment</th><th>Last-month actual (bps of pool)</th>"
-        "<th>Markov-expected monthly pace</th>"
-        "<th>Surprise vs forecast</th>"
-        "<th>Trailing 3-mo actual</th>"
-        f"</tr></thead><tbody>{tbl_b_rows}</tbody></table>"
-    )
 
-    # Table C — biggest movers (by surprise vs Markov-expected pace).
-    # prior_cal column is a placeholder until deal_forecasts_history lands
-    # (daily forecast snapshots — separate infra add).
-    tbl_c_rows = ""
-    for deal, v in movers:
-        tbl_c_rows += (
-            f"<tr><td>{deal}</td>"
-            f"<td>{v['segment']}</td>"
-            f"<td>{_num(v.get('cal'),2,'x')}</td>"
-            f"<td>{_num(v.get('prior_cal'),2,'x')}</td>"
-            f"<td>{_num(v.get('delta_cnl_bps_30d'), 0, ' bps')}</td>"
-            f"<td>{_num(v.get('markov_expected_bps'), 0, ' bps')}</td>"
-            f"<td>{('+' if v.get('mo_surprise_bps') is not None and v['mo_surprise_bps']>=0 else '') + _num(v.get('mo_surprise_bps'), 0, ' bps')}</td>"
-            f"<td>{_mover_note(v)}</td>"
-            f"</tr>"
-        )
-    if not tbl_c_rows:
-        tbl_c_rows = "<tr><td colspan=8>No deals with Markov forecast + month-over-month pool performance yet.</td></tr>"
-    tbl_c = (
-        "<table class='compare'><thead><tr>"
-        "<th>Deal</th><th>Segment</th><th>Current cal</th>"
-        "<th>Prior cal (pending history)</th>"
-        "<th>Last-month actual</th><th>Markov expected</th>"
-        "<th>Surprise</th><th>Interpretation</th>"
-        f"</tr></thead><tbody>{tbl_c_rows}</tbody></table>"
-    )
-
-    # ── 8. Charts ────────────────────────────────────────────────────────
-    # Chart 1: weighted cal factor (current snapshot) per segment — a single
-    # horizontal bar. Daily history would require deal_forecasts_history.
-    seg_color = {
-        'Carvana Prime': '#1976D2',
-        'Carvana Non-Prime': '#D32F2F',
-        'CarMax': '#F47920',
-    }
-    chart1_segs, chart1_cals, chart1_colors = [], [], []
-    for seg in ('Carvana Prime', 'Carvana Non-Prime', 'CarMax'):
-        a = seg_agg.get(seg)
-        if not a or a.get('weighted_cal') is None:
-            continue
-        chart1_segs.append(seg)
-        chart1_cals.append(round(a['weighted_cal'], 3))
-        chart1_colors.append(seg_color.get(seg, '#666'))
-
-    if chart1_segs:
-        chart1_traces = [{
-            'x': chart1_segs,
-            'y': chart1_cals,
+    # ── 7. Chart 1 — last-month loss surprise per deal (top 15 by $) ─────
+    c1_rows = [(d, v) for d, v in active_sorted[:15]
+               if v.get('latest_surprise')
+               and v['latest_surprise'].get('loss_surprise_bps') is not None]
+    if c1_rows:
+        c1_labels = [d for d, _ in c1_rows]
+        c1_values = [round(v['latest_surprise']['loss_surprise_bps'], 1)
+                     for _, v in c1_rows]
+        c1_colors = ['#C62828' if x > 0 else '#2E7D32' for x in c1_values]
+        # Horizontal bars: x = bps, y = deal.  Sort biggest-exposure at top
+        # (so chart reads top-to-bottom = most $ at risk).
+        c1_trace = [{
+            'x': c1_values,
+            'y': c1_labels,
             'type': 'bar',
-            'marker': {'color': chart1_colors},
-            'text': [f"{c:.2f}x" for c in chart1_cals],
+            'orientation': 'h',
+            'marker': {'color': c1_colors},
+            'text': [f"{v:+.0f}" for v in c1_values],
             'textposition': 'outside',
-            'name': 'Current cal',
-        }, {
-            'x': chart1_segs,
-            'y': [1.0] * len(chart1_segs),
-            'type': 'scatter',
-            'mode': 'lines',
-            'name': 'On forecast (1.00x)',
-            'line': {'color': '#999', 'width': 1, 'dash': 'dash'},
-            'hoverinfo': 'skip',
         }]
         chart1_html = chart(
-            chart1_traces,
+            c1_trace,
             {
-                'title': 'Carvana performance vs CarMax benchmark &mdash; weighted cal factor',
-                'yaxis': {'title': 'Cal factor (1.0 = on Markov forecast)'},
-                'legend': {'orientation': 'h', 'y': -0.25},
-                'showlegend': True,
+                'title': 'Last-month loss surprise vs Markov-expected (top 15 by outstanding $)',
+                'xaxis': {'title': 'bps surprise (red = worse than expected)',
+                          'zeroline': True, 'zerolinewidth': 2,
+                          'zerolinecolor': '#555'},
+                'yaxis': {'title': '', 'autorange': 'reversed'},
+                'showlegend': False,
+                'margin': {'l': 110, 'r': 40, 't': 45, 'b': 55},
             },
-            height=340,
+            height=max(340, 28 * len(c1_rows) + 80),
         )
     else:
-        chart1_html = "<p style='padding:8px;color:#999'>Chart 1 unavailable — no Markov forecasts in deal_forecasts yet.</p>"
+        chart1_html = ("<p style='padding:8px;color:#999'>Chart 1 unavailable — "
+                       "no deals have a cached Markov-expected monthly pace yet.</p>")
 
-    # Chart 2: monthly actual loss pace vs Markov-expected pace, last 6 months,
-    # per segment. Markov-expected is a flat horizontal line (same for all
-    # months) because we only have a current-snapshot forecast — daily
-    # history not yet available.
-    last6 = []
-    if latest_dist_seen:
-        y, m = latest_dist_seen.year, latest_dist_seen.month
-        for _ in range(6):
-            last6.append((y, m))
-            m -= 1
-            if m == 0:
-                m = 12
-                y -= 1
-        last6 = list(reversed(last6))
+    # ── 8. Chart 2 — 6-month rolling surprise series, top 8 by $ ─────────
+    c2_rows = active_sorted[:8]
+    c2_traces = []
+    import colorsys
+    def _palette(n):
+        out = []
+        for i in range(n):
+            h = (i * 1.0 / max(n, 1))
+            r, g, b = colorsys.hsv_to_rgb(h, 0.7, 0.85)
+            out.append(f"rgb({int(r*255)},{int(g*255)},{int(b*255)})")
+        return out
+    palette = _palette(len(c2_rows))
 
-    chart2_traces = []
-    for seg in ('Carvana Prime', 'Carvana Non-Prime', 'CarMax'):
-        agg = seg_agg.get(seg)
-        if not agg:
+    for (d, v), color in zip(c2_rows, palette):
+        rows = all_perf.get(d, [])
+        if len(rows) < 2:
             continue
-        actual_xs, actual_ys = [], []
-        for (y, m) in last6:
-            num = 0.0
-            den = 0.0
-            for deal, t in all_terms.items():
-                if _rt_segment(deal, t['issuer']) != seg:
-                    continue
-                rows = all_perf.get(deal, [])
-                if not rows or not t.get('ipb'):
-                    continue
-                this_idx = None
-                for i, r in enumerate(rows):
-                    if (r['dist'].year, r['dist'].month) == (y, m):
-                        this_idx = i
-                        break
-                if this_idx is None or this_idx == 0:
-                    continue
-                prev = rows[this_idx - 1]
-                this = rows[this_idx]
-                bps = (this['cnl'] - prev['cnl']) / t['ipb'] * 10_000
-                num += bps * t['ipb']
-                den += t['ipb']
-            if den > 0:
-                actual_xs.append(f"{y}-{m:02d}")
-                actual_ys.append(round(num / den, 2))
-        if actual_xs:
-            chart2_traces.append({
-                'x': actual_xs,
-                'y': actual_ys,
-                'type': 'bar',
-                'name': f"{seg} — actual",
-                'marker': {'color': seg_color.get(seg, '#666')},
-            })
-            # Markov-expected pace — flat line across the 6 months (current
-            # snapshot only; history would require deal_forecasts_history).
-            exp_bps = agg.get('markov_expected_bps')
-            if exp_bps is not None:
-                chart2_traces.append({
-                    'x': actual_xs,
-                    'y': [round(exp_bps, 2)] * len(actual_xs),
-                    'type': 'scatter',
-                    'mode': 'lines',
-                    'name': f"{seg} — Markov expected",
-                    'line': {'color': seg_color.get(seg, '#666'),
-                             'dash': 'dot', 'width': 1.5},
-                    'hoverinfo': 'y+name',
-                })
+        # Use up to 6 most recent months — walk rows[i] vs rows[i-1] to get
+        # delta_cnl per month, compare to cached expected.
+        ipb = v['ipb']
+        cutoff = all_terms[d]['cutoff']
+        months_x, surprises_y = [], []
+        start_i = max(1, len(rows) - 6)
+        for i in range(start_i, len(rows)):
+            this_r, prev_r = rows[i], rows[i - 1]
+            m_i = _rt_months_since(cutoff, this_r['dist'])
+            if m_i is None:
+                continue
+            actual_bps = (this_r['cnl'] - prev_r['cnl']) / ipb * 10_000 if ipb > 0 else None
+            exp = _lookup_expected(d, m_i)
+            if exp is None:
+                continue
+            _, exp_monthly_loss_bps, _, _ = exp
+            if actual_bps is None or exp_monthly_loss_bps is None:
+                continue
+            months_x.append(this_r['dist'].strftime('%Y-%m'))
+            surprises_y.append(round(actual_bps - exp_monthly_loss_bps, 1))
+        if len(months_x) < 2:
+            continue
+        c2_traces.append({
+            'x': months_x,
+            'y': surprises_y,
+            'type': 'scatter',
+            'mode': 'lines+markers',
+            'name': d,
+            'line': {'color': color, 'width': 2},
+            'marker': {'size': 5},
+        })
+    if c2_traces:
+        chart2_html = chart(
+            c2_traces,
+            {
+                'title': '6-month monthly loss surprise — top 8 deals by outstanding $',
+                'xaxis': {'title': 'Month'},
+                'yaxis': {'title': 'bps surprise (vs Markov-expected pace)',
+                          'zeroline': True, 'zerolinewidth': 2,
+                          'zerolinecolor': '#555'},
+                'legend': {'orientation': 'h', 'y': -0.3},
+                'margin': {'l': 60, 'r': 20, 't': 45, 'b': 100},
+            },
+            height=360,
+        )
+    else:
+        chart2_html = ("<p style='padding:8px;color:#999'>Chart 2 unavailable "
+                       "— cached monthly trajectory not populated yet.</p>")
 
-    chart2_html = chart(
-        chart2_traces,
-        {
-            'title': 'Carvana vs CarMax benchmark &mdash; monthly loss pace vs Markov-expected (last 6 months)',
-            'xaxis': {'title': 'Month'},
-            'yaxis': {'title': 'Loss pace (bps of initial pool)'},
-            'legend': {'orientation': 'h', 'y': -0.3},
-            'barmode': 'group',
-        },
-        height=340,
-    ) if chart2_traces else "<p style='padding:8px;color:#999'>Chart 2 unavailable.</p>"
+    # ── 9. Methodology box / freshness footer ────────────────────────────
+    cache_note = ""
+    if cache_generated_at:
+        cache_note = f" · Markov monthly-expected cache generated {cache_generated_at[:10]}."
+    elif not any_cache_hit:
+        cache_note = (" · <b>Markov monthly-expected cache not populated yet</b> — "
+                      "fallback flat-pace expectation used until next unified_markov run.")
 
-    # ── 9. Data-freshness footer ─────────────────────────────────────────
-    latest_deal = max(per_deal.items(),
-                      key=lambda kv: kv[1]['latest_dist'])
+    methodology = (
+        "<p style='padding:10px 4px 4px;font-size:.7rem;color:#555;line-height:1.55'>"
+        "<b>How to read:</b> \"Expected\" = the current unified Markov model's "
+        "projected monthly pace for the deal at its current age "
+        "(see deal_monthly_trajectory() in unified_markov.py). Surprise = "
+        "actual monthly delta − expected monthly delta. Trend = sign-pattern "
+        "of the last 3 monthly surprises. Rows sorted by remaining "
+        "outstanding $ — biggest active exposures first; Carvana ahead of "
+        "CarMax on ties (per residual-equity framing).  Δ Recoveries is "
+        "shown with positive=good-for-holder; Δ DQ / Δ Charge-offs / Δ Residual "
+        "use positive=bad-for-holder (red)."
+        f"{cache_note}"
+        "</p>"
+    )
+
+    latest_deal = max(per_deal.items(), key=lambda kv: kv[1]['latest_dist'])
     n_forecasts = sum(1 for v in per_deal.values() if v['cal'] is not None)
     freshness = (
         f"Latest servicer filing: {latest_deal[0]} ({latest_deal[1]['issuer']}) "
-        f"on {latest_deal[1]['latest_dist'].strftime('%Y-%m-%d')} · "
+        f"on {latest_deal[1]['latest_dist'].strftime('%Y-%m-%d')}. "
         f"Markov forecasts loaded for {n_forecasts} of {len(per_deal)} deals "
-        f"(deal_forecasts table). · "
-        f"Daily forecast history (prior-cal / chart timeseries) is a pending infra add. · "
-        f"Data sourced from SEC EDGAR."
+        f"(deal_forecasts table). Data sourced from SEC EDGAR."
     )
 
     # ── 10. Assemble HTML ────────────────────────────────────────────────
     html = f"""
 <div class="tc" id="recent-trends-content" style="display:block">
-  <h2 style="padding:12px 4px 0;font-size:1.05rem;color:#1976D2">Recent Trends</h2>
-  <p style="padding:4px;font-size:.8rem;line-height:1.45;color:#333">{headline}</p>
+  <h2 style="padding:12px 4px 0;font-size:1.05rem;color:#1976D2">Recent Trends — monthly monitoring</h2>
+  <p style="padding:4px;font-size:.8rem;line-height:1.5;color:#333">{headline}</p>
 
-  <h3>Where we are vs. forecast</h3>
-  {para1}
-  {para1_np}
-  {para2}
+  <h3 style="padding:12px 4px 4px;font-size:.9rem">Per-deal monthly surprise vs Markov-expected</h3>
+  <div class="tbl">{main_table}</div>
+  {closing_section}
 
-  <h3>Table A — Snapshot as of {latest_date_str}</h3>
-  <div class="tbl">{tbl_a}</div>
-
-  <h3>Table B — Last-month loss pace vs Markov-expected pace</h3>
-  <div class="tbl">{tbl_b}</div>
-
-  <h3>Table C — Biggest recent movers (abs surprise vs Markov pace)</h3>
-  <div class="tbl">{tbl_c}</div>
-
-  <h3>Chart 1 — Weighted cal factor vs Markov forecast</h3>
+  <h3 style="padding:16px 4px 4px;font-size:.9rem">Chart 1 — Last-month loss surprise by deal</h3>
   {chart1_html}
 
-  <h3>Chart 2 — Monthly loss pace vs Markov-expected pace (last 6 months)</h3>
+  <h3 style="padding:16px 4px 4px;font-size:.9rem">Chart 2 — 6-month rolling surprise (top 8 by $)</h3>
   {chart2_html}
+
+  {methodology}
 
   <p style="padding:10px 4px 20px;font-size:.65rem;color:#888;border-top:1px solid #eee;margin-top:12px">{freshness}</p>
 </div>
 """
     return html
-
 
 def generate_economics_tab():
     """Build the residual-economics landing-page HTML.
