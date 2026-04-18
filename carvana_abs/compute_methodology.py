@@ -84,6 +84,27 @@ def _days_to_state(days):
     return '5+pmt'
 
 
+def _status_to_state(status):
+    """Map current_delinquency_status (string number of payments behind) to Markov state."""
+    if status is None or status == '':
+        return None
+    try:
+        n = int(status)
+    except (ValueError, TypeError):
+        return None
+    if n <= 0:
+        return 'Current'
+    if n == 1:
+        return '1pmt'
+    if n == 2:
+        return '2pmt'
+    if n == 3:
+        return '3pmt'
+    if n == 4:
+        return '4pmt'
+    return '5+pmt'
+
+
 def _tier_for_deal(deal):
     """'P' suffix = Prime, 'N' suffix = Non-Prime. All CarMax deals treated as Prime."""
     if '-N' in deal:
@@ -163,7 +184,7 @@ def _stream_loanperf(conn, order_by_asset=True):
     by comparing consecutive rows per-loan.
     """
     q = '''
-        SELECT deal, asset_number, reporting_period_end, days_delinquent,
+        SELECT deal, asset_number, reporting_period_end, current_delinquency_status,
                remaining_term, zero_balance_code, modification_indicator,
                charged_off_amount, beginning_balance
         FROM loan_performance
@@ -235,7 +256,6 @@ def streamed_aggregates(sample_loans_per_deal=2000, sample_months_per_loan=None)
         cur = _stream_loanperf(conn)
         last_key = None
         last_state = None
-        last_days = None
         last_rpe = None
         states_seen_curr = []  # for cure: rolling 3-month after a delinquency
         n_rows = 0
@@ -249,21 +269,22 @@ def streamed_aggregates(sample_loans_per_deal=2000, sample_months_per_loan=None)
             if not batch:
                 break
             for row in batch:
-                deal, asset, rpe, days, rem_term, zbcode, modind, chargeoff, beg_bal = row
+                deal, asset, rpe, status, rem_term, zbcode, modind, chargeoff, beg_bal = row
                 n_rows += 1
                 key = (deal, asset)
                 a = attrs.get(key)
                 if a is None:
-                    last_key = key; last_state = None; last_days = days; last_rpe = rpe
+                    last_key = key; last_state = None; last_rpe = rpe
                     continue
                 fb, lb, tb, apr, amt, fico, ltv, term = a
                 tier = _tier_for_deal(deal)
 
-                # Compute current state
-                state = _days_to_state(days)
-                defaulted = (zbcode == '03' or (chargeoff is not None and chargeoff > 0))
-                paid_off = (zbcode in ('01', '02') and not defaulted)
-                modified = (modind == 'Y' or modind == '1' or modind == 'true')
+                # Compute current state from current_delinquency_status (payments behind)
+                state = _status_to_state(status)
+                # zero_balance_code: 1 = prepaid/sold, 2 = matured, 3 = charged off, 4 = repurchased
+                defaulted = (zbcode == '3' or (chargeoff is not None and chargeoff > 0))
+                paid_off = (zbcode in ('1', '2', '4') and not defaulted)
+                modified = (modind == 'true' or modind == 'Y' or modind == '1')
 
                 # age_months: inferred from (original_term - remaining_term) when possible
                 age_months = None
@@ -358,7 +379,6 @@ def streamed_aggregates(sample_loans_per_deal=2000, sample_months_per_loan=None)
                 else:
                     last_state = state
                 last_key = key
-                last_days = days
                 last_rpe = rpe
 
                 if n_rows % 2_000_000 == 0:

@@ -4355,10 +4355,26 @@ def main():
         logger.error(f"Recent Trends tab failed: {e}")
         recent_trends_html = f"<div class='tc' style='display:block;padding:16px'><p>Recent Trends unavailable: {e}</p></div>"
 
+    # Generate methodology & findings tab (reads analytics cache; must run after
+    # compute_methodology.py has produced deploy/methodology_cache/analytics.json).
+    logger.info("Generating Methodology & Findings tab...")
+    try:
+        from carvana_abs.methodology_tab import generate_methodology_tab
+        methodology_html = generate_methodology_tab()
+    except Exception as e:
+        logger.error(f"Methodology tab failed: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        methodology_html = (
+            f"<div class='tc' style='display:block;padding:16px'>"
+            f"<p>Methodology tab unavailable: {e}</p></div>"
+        )
+
     # Build deal selector dropdown with comparison entries at top
     first_deal = list(deal_contents.keys())[0]
     options = '<option value="__recent__" selected>--- Recent Trends ---</option>\n'
     options += '<option value="__economics__">--- Residual Economics ---</option>\n'
+    options += '<option value="__methodology__">--- Methodology &amp; Findings ---</option>\n'
     options += '<option value="__model__">--- Default Model ---</option>\n'
     options += '<option value="__prime__">--- Prime Comparison (Carvana) ---</option>\n'
     options += '<option value="__nonprime__">--- Non-Prime Comparison (Carvana) ---</option>\n'
@@ -4384,6 +4400,8 @@ def main():
     all_deal_html += f'<div id="deal-__recent__" class="deal-block" style="display:block">\n{recent_trends_html}\n</div>\n'
     # Residual Economics tab (tab 2, hidden by default)
     all_deal_html += f'<div id="deal-__economics__" class="deal-block" style="display:none">\n{economics_html}\n</div>\n'
+    # Methodology & Findings tab (tab 3, hidden by default)
+    all_deal_html += f'<div id="deal-__methodology__" class="deal-block" style="display:none">\n{methodology_html}\n</div>\n'
     # Add model and comparison sections (hidden by default)
     all_deal_html += f'<div id="deal-__model__" class="deal-block" style="display:none">\n{model_html}\n</div>\n'
     all_deal_html += f'<div id="deal-__prime__" class="deal-block" style="display:none">\n{prime_html}\n</div>\n'
