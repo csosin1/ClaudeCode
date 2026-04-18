@@ -111,6 +111,30 @@ if [ "$LOCAL" != "$REMOTE" ]; then
     # Update the running copy of this script
     cp /opt/abs-dashboard/deploy/auto_deploy.sh /opt/auto_deploy.sh 2>/dev/null || true
 
+    # TODO(post-deploy-qa): wire in the post-deploy QA hook once infra publishes
+    # the required artefacts. Per the 2026-04-18 infra entry in
+    # /opt/site-deploy/CHANGES.md ("infra: post-deploy QA hook"), this deploy
+    # script should invoke a post-deploy hook against the live URL immediately
+    # after regen completes — with --freeze-on-fail so a bad regen halts
+    # subsequent auto-deploys rather than silently overwriting a good live
+    # build. Blocked: as of 2026-04-18 the following paths do NOT exist on
+    # prod (verified via `test -e`):
+    #   - /usr/local/bin/post-deploy-qa-hook.sh  (MISSING)
+    #   - /etc/post-deploy-qa.conf               (MISSING)
+    # A request to publish them is filed in /opt/site-deploy/CHANGES.md under
+    # "2026-04-18 — request from abs-dashboard chat: publish post-deploy QA
+    # hook artefacts". Once published, replace this TODO block with:
+    #
+    #   if [ -x /usr/local/bin/post-deploy-qa-hook.sh ]; then
+    #       /usr/local/bin/post-deploy-qa-hook.sh abs-dashboard --freeze-on-fail \
+    #           >> /var/log/auto-deploy.log 2>&1 || \
+    #           echo "$(date): post-deploy QA hook reported failure (see /var/log/post-deploy-qa.log)" \
+    #               >> /var/log/auto-deploy.log
+    #   fi
+    #
+    # Do NOT add a stub of the hook locally — running a no-op hook would
+    # masquerade as coverage where none exists.
+
     echo "$(date): Deploy complete. Preview updated."
 else
     echo "$(date): No changes."
