@@ -341,6 +341,8 @@ def _build_transition_heatmap(cache):
     ]
 
     # Aggregate across issuers and terms for each rep cell
+    # NOTE: Plotly text fields render plain strings — HTML entities like
+    # &mdash; / &middot; / &rarr; show up literally. Use Unicode chars.
     out_html = ''
     for fb, lb, age_b, label in REP:
         # aggregate counts: from_state -> {to_state: count}
@@ -357,6 +359,17 @@ def _build_transition_heatmap(cache):
             for to_state, cnt in counts.items():
                 agg[_from][to_state] = agg[_from].get(to_state, 0) + cnt
 
+        # If we have no observations for this rep cell at all, render a
+        # plain-text fallback instead of an empty heatmap of em-dashes.
+        total_obs = sum(sum(v.values()) for v in agg.values())
+        if total_obs == 0:
+            out_html += _p(
+                f'<strong>{label}</strong> · FICO {fb}, LTV {lb}, age {age_b}mo — '
+                '<em>no loan-month observations in this cell yet (cache may be '
+                'pending refresh).</em>'
+            )
+            continue
+
         # Build normalised probabilities
         z = []
         text = []
@@ -364,7 +377,7 @@ def _build_transition_heatmap(cache):
             row_total = sum(agg[fs].values())
             if row_total == 0:
                 z.append([0.0] * len(ALL))
-                text.append(['&mdash;'] * len(ALL))
+                text.append(['—'] * len(ALL))
             else:
                 row = [agg[fs].get(ts, 0) / row_total for ts in ALL]
                 z.append(row)
@@ -383,10 +396,10 @@ def _build_transition_heatmap(cache):
                                [0.5, '#1976D2'], [1.0, '#0D47A1']],
                 'zmin': 0, 'zmax': 1,
                 'showscale': False,
-                'hovertemplate': 'From %{y} &rarr; %{x}: %{text}<extra></extra>',
+                'hovertemplate': 'From %{y} → %{x}: %{text}<extra></extra>',
             }],
             'layout': {
-                'title': {'text': f'<b>{label}</b> &middot; FICO {fb}, LTV {lb}, age {age_b}mo',
+                'title': {'text': f'<b>{label}</b> · FICO {fb}, LTV {lb}, age {age_b}mo',
                           'font': {'size': 12}},
                 'xaxis': {'title': 'Next-month state', 'side': 'bottom'},
                 'yaxis': {'title': 'Current state', 'autorange': 'reversed'},

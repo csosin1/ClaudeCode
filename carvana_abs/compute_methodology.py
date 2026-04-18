@@ -171,9 +171,13 @@ def _load_loan_attrs(conn):
         else:
             apr_pct = None
         fb = _bucket(fico, FICO_EDGES)
-        lb = _bucket(ltv, LTV_EDGES)
+        # original_ltv is stored as a fraction (0-1.5), not a percent. Scale
+        # before bucketing — otherwise every loan lands in '<80%' and the
+        # downstream heatmap / fico×ltv grid collapses to a single LTV column.
+        ltv_pct = ltv * 100.0 if ltv is not None else None
+        lb = _bucket(ltv_pct, LTV_EDGES)
         tb = _bucket(term, TERM_EDGES)
-        out[(deal, asset)] = (fb, lb, tb, apr_pct, amt, fico, ltv, term)
+        out[(deal, asset)] = (fb, lb, tb, apr_pct, amt, fico, ltv_pct, term)
     return out
 
 
@@ -639,7 +643,8 @@ def consumer_wac_comparison():
             if _tier_for_deal(deal) != 'Prime':
                 continue
             fb = _bucket(fico, FICO_EDGES)
-            lb = _bucket(ltv, LTV_EDGES)
+            # original_ltv stored as fraction — see _load_loan_attrs note
+            lb = _bucket(ltv * 100.0 if ltv is not None else None, LTV_EDGES)
             tb = _bucket(term, TERM_EDGES)
             if not (fb and lb and tb):
                 continue
