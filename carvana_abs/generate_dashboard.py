@@ -3276,19 +3276,47 @@ def generate_recent_trends_tab():
     crv_n = seg_agg.get('Carvana Non-Prime', {})
     cmx = seg_agg.get('CarMax', {})
 
-    headline_bits = []
-    for _label, _agg in (('Carvana Prime', crv_p),
-                         ('Carvana Non-Prime', crv_n),
-                         ('CarMax', cmx)):
-        if _agg and _agg.get('weighted_cal') is not None:
-            headline_bits.append(
-                f"{_label} {_direction_phrase(_agg['weighted_cal'])}")
-    if not headline_bits:
+    # Carvana-leading headline: lead with Carvana Prime + Non-Prime, then
+    # close with CarMax as the peer-benchmark frame.
+    def _short_cal_phrase(cal, label):
+        if cal is None:
+            return f"{label} (no forecast yet)"
+        if cal > 1.05:
+            return f"{label} tracking <b>{(cal - 1) * 100:.0f}% above</b> Markov"
+        if cal < 0.95:
+            return f"{label} tracking <b>{(1 - cal) * 100:.0f}% below</b> Markov"
+        return f"{label} tracking <b>in line with</b> Markov"
+
+    headline = ""
+    if (crv_p and crv_p.get('weighted_cal') is not None) or (crv_n and crv_n.get('weighted_cal') is not None):
+        carvana_bits = []
+        for _label, _agg in (('Carvana Prime', crv_p), ('Carvana Non-Prime', crv_n)):
+            if _agg and _agg.get('weighted_cal') is not None:
+                carvana_bits.append(_short_cal_phrase(_agg['weighted_cal'], _label)
+                                    + f" (cal {_agg['weighted_cal']:.2f}x)")
+        if carvana_bits:
+            headline = f"As of {latest_date_str}, " + "; ".join(carvana_bits) + "."
+            # Append CarMax as peer-benchmark context with spread delta.
+            if cmx and cmx.get('weighted_cal') is not None:
+                cm_cal = cmx['weighted_cal']
+                cm_phrase = _short_cal_phrase(cm_cal, 'CarMax (peer benchmark)')
+                # Spread vs Carvana Prime (if available).
+                spread_note = ""
+                if crv_p and crv_p.get('weighted_cal') is not None:
+                    delta = (crv_p['weighted_cal'] - cm_cal) * 100
+                    spread_note = (f" Carvana Prime &minus; CarMax spread: "
+                                   f"<b>{'+' if delta >= 0 else ''}{delta:.0f} cal-pts</b>"
+                                   f" ({'Carvana underperforming peer' if delta > 0 else 'Carvana outperforming peer'}).")
+                headline += f" {cm_phrase} (cal {cm_cal:.2f}x).{spread_note}"
+    elif cmx and cmx.get('weighted_cal') is not None:
+        # Only CarMax has forecasts — still lead with Carvana framing.
+        headline = (f"As of {latest_date_str}, Carvana Markov forecasts are not yet "
+                    f"available for this snapshot. CarMax (peer benchmark) "
+                    f"{_short_cal_phrase(cmx['weighted_cal'], '').strip()} "
+                    f"(cal {cmx['weighted_cal']:.2f}x).")
+    else:
         headline = (f"As of {latest_date_str}, Markov forecasts have not yet "
                     "been computed for any deals in the dataset.")
-    else:
-        headline = (f"As of {latest_date_str}, " + "; ".join(headline_bits)
-                    + ". Full issuer detail below.")
 
     def _para_issuer(label, agg):
         if not agg:
@@ -3340,6 +3368,39 @@ def generate_recent_trends_tab():
     para1 = _para_issuer("Carvana Prime", crv_p)
     para1_np = _para_issuer("Carvana Non-Prime", crv_n)
 
+    # Carvana wrap-up sentence: what the combined picture means for Carvana's
+    # residual economics. Anchor off the Prime cal factor since that's the
+    # bulk of Carvana's outstanding ABS book.
+    carvana_wrap = ""
+    if crv_p and crv_p.get('weighted_cal') is not None:
+        cal = crv_p['weighted_cal']
+        if cal > 1.10:
+            carvana_wrap = (
+                " <strong>For Carvana residual economics:</strong> the portfolio is "
+                "realizing losses materially ahead of the Markov forecast, which "
+                "directly compresses Carvana's residual-holder cashflows on the "
+                "affected deals."
+            )
+        elif cal < 0.90:
+            carvana_wrap = (
+                " <strong>For Carvana residual economics:</strong> the portfolio is "
+                "realizing losses materially below the Markov forecast, a positive "
+                "read-through to Carvana's residual-holder cashflows on the "
+                "affected deals."
+            )
+        else:
+            carvana_wrap = (
+                " <strong>For Carvana residual economics:</strong> the portfolio is "
+                "tracking in-line with the Markov forecast; residual cashflows are "
+                "progressing as modeled."
+            )
+    if carvana_wrap and para1_np:
+        # Attach to the Non-Prime paragraph so the two Carvana paragraphs read as one block.
+        para1_np = para1_np.replace("</p>", carvana_wrap + "</p>")
+    elif carvana_wrap and para1:
+        para1 = para1.replace("</p>", carvana_wrap + "</p>")
+
+    # CarMax paragraph: framed as peer benchmark, kept shorter than Carvana.
     cmx_vintage_note = ""
     if cmx_worst_vintage and cmx_best_vintage and cmx_worst_vintage[0] != cmx_best_vintage[0]:
         cmx_vintage_note = (
@@ -3349,9 +3410,30 @@ def generate_recent_trends_tab():
             f"({cmx_best_vintage[1][0]:.2f}x) is strongest."
         )
 
-    para2 = _para_issuer("CarMax", cmx)
-    if cmx_vintage_note:
-        para2 = para2.replace("</p>", cmx_vintage_note + "</p>")
+    # Short CarMax peer-benchmark paragraph (not the full _para_issuer template).
+    if cmx and cmx.get('weighted_cal') is not None:
+        _cal = cmx['weighted_cal']
+        _direction = ('above' if _cal > 1.05 else ('below' if _cal < 0.95 else 'in line with'))
+        _pct_text = (f"{(_cal - 1) * 100:.0f}% {_direction}" if _direction != 'in line with'
+                     else 'in line with')
+        _ctx = ''
+        if crv_p and crv_p.get('weighted_cal') is not None:
+            _spread = (crv_p['weighted_cal'] - _cal) * 100
+            _ctx = (f" Carvana Prime is {'+' if _spread>=0 else ''}{_spread:.0f} cal-points "
+                    f"{'wider than' if _spread>0 else ('tighter than' if _spread<0 else 'equal to')} "
+                    f"this peer benchmark.")
+        para2 = (
+            f"<p><b>CarMax (peer benchmark).</b> {cmx['n_cal_deals']} of {cmx['n_deals']} "
+            f"CarMax deals have a Markov forecast; portfolio-weighted cal factor "
+            f"<b>{_cal:.2f}x</b> ({_pct_text} forecast). The comparison set provides "
+            f"context for Carvana's recent-trend read: CarMax is a long-tenured prime-only "
+            f"auto-ABS issuer and functions as the legacy-operator baseline.{_ctx}"
+            + (cmx_vintage_note or '') + "</p>"
+        )
+    else:
+        para2 = _para_issuer("CarMax (peer benchmark)", cmx)
+        if cmx_vintage_note:
+            para2 = para2.replace("</p>", cmx_vintage_note + "</p>")
 
     # ── 7. Build tables ──────────────────────────────────────────────────
     def _num(v, dp=2, suffix=''):
@@ -3484,7 +3566,7 @@ def generate_recent_trends_tab():
         chart1_html = chart(
             chart1_traces,
             {
-                'title': 'Weighted cal factor vs Markov forecast (current snapshot)',
+                'title': 'Carvana performance vs CarMax benchmark &mdash; weighted cal factor',
                 'yaxis': {'title': 'Cal factor (1.0 = on Markov forecast)'},
                 'legend': {'orientation': 'h', 'y': -0.25},
                 'showlegend': True,
@@ -3565,7 +3647,7 @@ def generate_recent_trends_tab():
     chart2_html = chart(
         chart2_traces,
         {
-            'title': 'Monthly loss pace vs Markov-expected pace (last 6 months)',
+            'title': 'Carvana vs CarMax benchmark &mdash; monthly loss pace vs Markov-expected (last 6 months)',
             'xaxis': {'title': 'Month'},
             'yaxis': {'title': 'Loss pace (bps of initial pool)'},
             'legend': {'orientation': 'h', 'y': -0.3},
@@ -4286,8 +4368,55 @@ def generate_economics_tab():
         f'<th class="{cls}">{label}</th>' for (cls, label) in COL_DEFS
     )
 
+    # Carvana-centric summary for the top of the tab.
+    _n_cv_prime = len(crvna_prime)
+    _n_cv_np = len(crvna_nonprime)
+    _n_cv = _n_cv_prime + _n_cv_np
+    _n_cm = len(carmx_deals)
+    _n_total = _n_cv + _n_cm
+    # Weighted-avg Carvana Prime expected vs projected CNL, if available
+    def _wavg_cv(deal_list, key):
+        vals = [(d.get(key), d.get("initial_pool_balance")) for d in deal_list
+                if d.get(key) is not None and d.get("initial_pool_balance")]
+        if not vals:
+            return None
+        return sum(v * w for v, w in vals) / sum(w for _, w in vals)
+    _cv_exp = _wavg_cv(crvna_prime, "expected_loss_pct")
+    _cv_proj = _wavg_cv(crvna_prime, "projected_loss_pct")
+    _cv_insight = ""
+    if _cv_exp is not None and _cv_proj is not None:
+        _delta_pp = (_cv_proj - _cv_exp) * 100
+        if _delta_pp > 0.3:
+            _cv_insight = (f" Weighted across Carvana Prime, current-projected CNL "
+                           f"<strong>{_cv_proj*100:.2f}%</strong> is "
+                           f"<strong>{_delta_pp:+.2f} pp above</strong> the at-issuance "
+                           f"projection of {_cv_exp*100:.2f}% &mdash; meaningful compression "
+                           f"of Carvana residual cashflows.")
+        elif _delta_pp < -0.3:
+            _cv_insight = (f" Weighted across Carvana Prime, current-projected CNL "
+                           f"<strong>{_cv_proj*100:.2f}%</strong> is "
+                           f"<strong>{_delta_pp:+.2f} pp below</strong> the at-issuance "
+                           f"projection of {_cv_exp*100:.2f}% &mdash; a positive read-through "
+                           f"for Carvana residual cashflows.")
+        else:
+            _cv_insight = (f" Weighted across Carvana Prime, current-projected CNL "
+                           f"<strong>{_cv_proj*100:.2f}%</strong> is tracking within "
+                           f"{abs(_delta_pp):.2f} pp of the at-issuance projection "
+                           f"({_cv_exp*100:.2f}%) &mdash; Carvana residual cashflows "
+                           f"progressing as modeled.")
+    carvana_summary_html = (
+        f'<div style="padding:8px 12px 4px;margin:4px 0 8px;background:#F5F9FF;'
+        f'border-left:3px solid #1976D2;max-width:900px">'
+        f'<p style="font-size:.78rem;color:#333;line-height:1.55;margin:0">'
+        f'<strong>Carvana focus.</strong> {_n_cv} of {_n_total} deals shown are Carvana '
+        f'({_n_cv_prime} Prime + {_n_cv_np} Non-Prime); {_n_cm} CarMax deals are included '
+        f'as the peer benchmark.{_cv_insight}'
+        f'</p></div>'
+    )
+
     h = f"""<div style="padding:8px 12px">
 <h2 style="font-size:1rem;margin-bottom:4px">Residual Economics — All Deals{forecast_note}</h2>
+{carvana_summary_html}
 <p style="font-size:.7rem;color:#666;margin:4px 0 6px;max-width:50em">
 Averages stay pinned at the bottom.
 Loss forecasts from {forecast_source} model. {'Markov model running — forecasts will update.' if not has_markov else ''}
