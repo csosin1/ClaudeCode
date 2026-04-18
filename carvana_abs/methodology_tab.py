@@ -1173,18 +1173,31 @@ def _sec12_carvana_takeaways(cache):
     # -----------------------------------------------------------------------
     bullets = []
 
-    # Bullet 1 — the headline issuer-specific loss gap
-    if _marginal_bps is not None and _cv_prob and _cm_prob:
+    # Bullet 1 — the headline issuer-specific loss gap.
+    # marginal_prob_* values are evaluated at the sample-mean covariate profile
+    # (an average loan-month), not at a stressed state, so they read very
+    # small. The relevant comparison is the *ratio* / odds-ratio, not the
+    # absolute magnitude.
+    if _marginal_bps is not None and _cv_prob and _cm_prob and _odds:
+        # Odds ratio <1 means CarMax lower default odds per month, i.e.
+        # Carvana higher (the "penalty" direction).
+        _cv_worse_x = (1.0 / _odds) if _odds > 0 else None
+        _ratio_str = (f'{_cv_worse_x:.1f}x' if _cv_worse_x is not None else 'higher')
         bullets.append(
             f'<li><strong>Carvana carries a small, measurable issuer-specific loss '
-            f'penalty vs. CarMax.</strong> Controlling for FICO, LTV, term, age, '
-            f'modification, vintage, and delinquency state, Carvana prime loans default at '
-            f'<strong>{_cv_prob*10000:.2f} bps/month</strong> vs. '
-            f'<strong>{_cm_prob*10000:.2f} bps/month</strong> for CarMax &mdash; a gap of '
-            f'<strong>{abs(_marginal_bps):.2f} bps/month ({_marginal_bps*12:+.1f} bps/year)</strong>. '
-            f'In residual terms this is small (2-3 bps of cumulative CNL over a 60-month life) '
-            f'but real; it likely reflects collections / recoveries differences more than '
-            f'under-writing quality given that FICO/LTV/term are already controlled for.</li>'
+            f'penalty vs. CarMax after controlling for borrower attributes.</strong> '
+            f'Controlling for FICO, LTV, term, age, modification, vintage, and '
+            f'delinquency state, the monthly-default odds-ratio is '
+            f'<strong>{_ratio_str} higher for a Carvana prime loan</strong> than for a '
+            f'matched CarMax prime loan (CarMax-vs-Carvana log-odds '
+            f'{eff.get("coef", 0):+.2f}, 95% CI [{eff.get("ci_lo",0):+.2f}, '
+            f'{eff.get("ci_hi",0):+.2f}]). At the sample-mean covariate profile this '
+            f'is only {abs(_marginal_bps):.3f} bps/month in absolute terms because the '
+            f'average Carvana loan-month has an already-low default rate; in residual '
+            f'terms the gap is small (low single-digit bps of cumulative CNL over a '
+            f'60-month life) but real, and likely reflects collections / recoveries '
+            f'differences more than underwriting quality given that FICO/LTV/term are '
+            f'already in the regression.</li>'
         )
 
     # Bullet 2 — vintage stability (does the gap improve over time?)
@@ -1216,37 +1229,50 @@ def _sec12_carvana_takeaways(cache):
             f'question for Carvana is funding, not assets.</li>'
         )
 
-    # Bullet 4 — cost-of-funds premium (funding side)
+    # Bullet 4 — cost-of-funds premium (funding side).
+    # Direction is data-driven — the gap may widen or tighten over time.
     if first_gap is not None and last_gap is not None and matched_yrs:
+        _dir_word = ('widened' if last_gap > first_gap + 5
+                     else ('tightened' if last_gap < first_gap - 5
+                           else 'held roughly steady'))
+        _headline = (
+            "is widening, not tightening" if _dir_word == 'widened' else
+            ("has compressed from first-issuance levels" if _dir_word == 'tightened' else
+             "is holding roughly steady since first issuance")
+        )
         bullets.append(
-            f'<li><strong>Carvana\'s cost-of-funds premium vs. CarMax is still there, but '
-            f'has compressed from first-issuance levels.</strong> In Carvana\'s first '
-            f'full matched year ({matched_yrs[0]}), Carvana Prime paid '
+            f'<li><strong>Carvana\'s cost-of-funds premium vs. CarMax {_headline}.</strong> '
+            f'In Carvana\'s first full matched year ({matched_yrs[0]}), Carvana Prime paid '
             f'<strong>{first_gap:+.0f} bps wider</strong> over 2Y Treasury than CarMax; '
             f'in the latest matched year ({matched_yrs[-1]}), the gap is '
-            f'<strong>{last_gap:+.0f} bps</strong>. This is the single largest drag on '
+            f'<strong>{last_gap:+.0f} bps</strong> (gap has {_dir_word} by '
+            f'{abs(last_gap - first_gap):.0f} bps). This is the single largest drag on '
             f'Carvana residual economics vs. a CarMax-priced execution: on a 2.5-year '
             f'prime WAL, the current-year gap compounds to ~{abs(last_gap)*2.5/100:.2f} '
             f'pp of pool value that a hypothetical CarMax-rated Carvana deal could '
-            f'retain but Carvana currently cannot.</li>'
+            f'retain but Carvana currently cannot. Closing this gap is the highest-leverage '
+            f'lever for Carvana residual-equity value.</li>'
         )
 
-    # Bullet 5 — Carvana equity interpretation of the three gaps together
+    # Bullet 5 — Carvana equity interpretation of the three gaps together.
+    # The loss penalty is tiny in annualized-pp units because it's evaluated
+    # at the sample mean; display it in bps to keep the scale honest.
     if _cw_diff is not None and last_gap is not None and _marginal_bps is not None:
-        # Residual arithmetic (rough): consumer yield premium + (-loss penalty/yr) - cost of funds premium
-        yr_penalty_pp = (_marginal_bps * 12) / 100.0  # bps/yr -> pp/yr
+        yr_penalty_bps = _marginal_bps * 12  # bps / yr, already signed (negative = Carvana worse)
+        yr_penalty_pp = yr_penalty_bps / 100.0  # convert to pp/yr for net arithmetic
         net_pp = abs(_cw_diff) + yr_penalty_pp - (last_gap/100.0)
         bullets.append(
             f'<li><strong>Net-net, the Carvana ABS program still produces positive '
-            f'residual spread relative to CarMax.</strong> Assets: '
-            f'<strong>+{abs(_cw_diff):.2f}pp</strong> APR premium. Losses: '
-            f'<strong>{yr_penalty_pp:+.2f}pp/yr</strong> issuer penalty. Funding: '
-            f'<strong>{-last_gap/100.0:+.2f}pp</strong> cost-of-funds premium (negative '
-            f'because Carvana pays more). Sum &approx; '
-            f'<strong>{net_pp:+.2f}pp/yr of residual spread vs a CarMax-priced execution</strong>. '
+            f'residual spread relative to a CarMax-priced execution.</strong> Assets: '
+            f'<strong>+{abs(_cw_diff):.2f}pp</strong> consumer-APR premium. Losses: '
+            f'<strong>{yr_penalty_bps:+.1f} bps/yr</strong> issuer penalty (tiny, '
+            f'per §7). Funding: <strong>{-last_gap:+.0f} bps/yr</strong> cost-of-funds '
+            f'premium (negative because Carvana pays more). Rough sum &approx; '
+            f'<strong>{net_pp:+.2f}pp/yr of net residual spread</strong> that Carvana '
+            f'retains vs. a hypothetical CarMax-priced version of the same pool. '
             f'This is the asymmetry: Carvana\'s equity value depends far more on closing '
             f'the funding gap than on improving underwriting or collections, because '
-            f'asset-yield already compensates for the small loss penalty.</li>'
+            f'asset-yield already pays for the small loss penalty several times over.</li>'
         )
 
     # Bullet 6 — scale / coverage context
