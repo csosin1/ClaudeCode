@@ -56,6 +56,12 @@ Your Bash access is for inspection only — `git diff`, `git log`, `grep`, `ls`,
 
     PASS WITH NOTES is appropriate for style-level issues (naming, formatting, clever one-liners, comments that explain "what" instead of "why") — flag for follow-up, don't block the merge.
 
+14. **Visual-lint review** (per `SKILLS/visual-lint.md`). On any diff that adds or modifies UI (HTML templates, CSS, JS that affects rendering):
+    - (a) The project's spec file imports and calls at minimum `assertNoRawHtmlEntities`, `assertNoContentPlaceholders`, `assertNoConsoleErrors`, `assertAllImagesLoaded`, and `runAxe` — OR the diff explicitly documents in `CHANGES.md` why a function was omitted → else FAIL.
+    - (b) If the project has a `REVIEW_CONTEXT.md`, `qa.yml` includes the `visual-review-orchestrator.sh` step → else FAIL.
+    - (c) If the project does NOT yet have a `REVIEW_CONTEXT.md`, the diff may proceed but the Builder must note in `CHANGES.md` that visual-lint adoption is pending.
+    - (d) New visual-lint rules added to `helpers/visual-lint.js` require a corresponding anti-pattern catalog entry in `SKILLS/visual-lint.md` AND a `LESSONS.md` entry if the rule was prompted by a production incident → else FAIL.
+
 ## Return
 
 One of:
