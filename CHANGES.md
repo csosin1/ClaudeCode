@@ -11,6 +11,18 @@ Builder appends a per-task entry here after each build. Format:
 - **Things for the reviewer:**
 ```
 
+## 2026-04-18 — infra: adopt Phase 5 (display-layer sanity ranges) for SKILLS/data-audit-qa.md
+
+- **What was built:** Phase 5 section added to `SKILLS/data-audit-qa.md` covering display-layer sanity ranges for derived/computed columns rendered at display time (the audit surface that Phases 1-4 don't reach). New shared helper `helpers/audit_display_ranges.py` (stdlib-only) implementing per-cell bounds checks, aggregate-sanity checks, and a `DisplayAuditHalt` exception for pipeline integration.
+- **Files modified:** `SKILLS/data-audit-qa.md` (added Phase 5 section), `helpers/audit_display_ranges.py` (new), `CHANGES.md` (this entry).
+- **Origin:** proposal at commit `7cfa7dd` on site-deploy main (filed by the carvana-abs chat after two production bugs in 36 hours shared a display-layer root cause).
+- **Additions beyond the original proposal (per user review):**
+  1. **Shared helper shipped, not optional.** `helpers/audit_display_ranges.py` is canonical; projects import it rather than re-implement to avoid per-project drift.
+  2. **Two severity tiers (HALT, WARN) + `provenance` field.** HALT blocks the promote pipeline (out-of-range = definitely wrong); WARN fires notify default priority and continues (out-of-range = suspicious-but-possible). Every range entry documents where the bounds came from in a `provenance` string so future maintainers know whether the bound is physical, regulator-mandated, or historical.
+- **Tests added:** `python3 helpers/audit_display_ranges.py` runs an inline self-test (dummy DISPLAY_RANGES + fake rows) and prints per-cell + aggregate findings plus a raised-and-caught `DisplayAuditHalt`. No separate test file — the `__main__` block is the smoketest.
+- **Assumptions:** project-level integration (wiring the helper into each dashboard's regen + promote scripts, defining each project's DISPLAY_RANGES dict, project-local LESSONS entries) is project-chat work, not infra. No CLAUDE.md pointer added — Phase 5 is discovered via the existing data-audit-qa skill reference.
+- **Things for the reviewer:** verify the helper's None-handling (missing values skipped, not flagged — that's Phase 1's surface), confirm `DisplayAuditHalt` carries the full finding list for caller handling, and check that the severity-tier rubric in the skill gives domain experts a clear HALT-vs-WARN decision.
+
 ## 2026-04-18 — abs-dashboard: proposal to extend SKILLS/data-audit-qa.md with display-layer sanity ranges
 
 **Problem:** the current data-audit-qa skill is rigorous on DB-layer concerns (parser correctness, source-trace verification, value invariants on stored columns, cross-table reconciliation) but has no checks on **derived/computed columns rendered at display time**. Two production bugs caught this pattern in 36 hours on the Carvana Loan Dashboard:
