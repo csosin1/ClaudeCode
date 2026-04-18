@@ -11,6 +11,29 @@ Builder appends a per-task entry here after each build. Format:
 - **Things for the reviewer:**
 ```
 
+## 2026-04-18 — infra: ship three-layer visual QA system (visual-lint + dual LLM reviewer + feedback loop)
+
+- **What was built:** Complete three-layer visual QA platform, motivated by three rendering bugs in the abs-dashboard Methodology tab on 2026-04-17 (raw `&mdash;` entities in Plotly; LTV bucketing collapsed a heatmap to one cell; overflow-auto + max-height footer scroll-trap) — all three deterministically detectable and all three missed by existing QA layers.
+  - **B-plus (deterministic):** `helpers/visual-lint.js` exports nine named assertions — `assertNoRawHtmlEntities`, `assertNoEmptyCharts`, `assertNoScrollTraps`, `assertNoContentPlaceholders`, `assertAllImagesLoaded`, `assertNoConsoleErrors`, `assertNoNetworkFailures`, `assertCriticalElementsInViewport`, `assertContrast` — plus `helpers/visual-lint-axe.js` wrapping `@axe-core/playwright` for ~90 WCAG/ARIA/semantic rules. Projects import and call in `tests/<project>.spec.ts`.
+  - **A-llm (semantic):** `.claude/agents/visual-reviewer.md` defines a subagent that runs in briefed OR unbriefed mode (same project REVIEW_CONTEXT, brief injected only in briefed mode), emits a strict JSON findings schema (category / severity / deterministic_candidate / suggested_rule). `helpers/visual-review-orchestrator.sh` captures per-page × viewport screenshots serially, dispatches both reviewers in parallel per page, merges findings, appends to `/var/log/<project>-visual-review.jsonl`, fails exit=1 on any HALT.
+  - **Feedback loop:** every A-llm finding flagged `deterministic_candidate: true` carries a `suggested_rule` sketch. `SKILLS/visual-lint.md` documents the weekly promotion cadence (recurrence ≥2 or single-HALT → new B-plus rule). Anti-pattern catalog in the SKILL seeded with the three 2026-04-17 Methodology bugs.
+  - **Per-project adoption surface:** `helpers/review-context.template.md` (five-field template: Purpose / Audience / Correctness / Red-flag patterns / Aesthetic bar / Known exceptions). Projects copy to `/opt/<project>/REVIEW_CONTEXT.md` and fill in. No per-project REVIEW_CONTEXT shipped in this diff — that's project-chat work.
+  - **Enforcement:** rule #14 added to `.claude/agents/infra-reviewer.md` — UI-touching diffs must import the starter visual-lint set or justify in CHANGES.md; qa.yml must wire the orchestrator if REVIEW_CONTEXT exists; new visual-lint rules require anti-pattern catalog + LESSONS entries.
+- **Files modified:** `helpers/visual-lint.js` (new, 550 lines), `helpers/visual-lint-axe.js` (new, 91), `helpers/visual-review-orchestrator.sh` (new, 301, chmod +x), `helpers/review-context.template.md` (new, 29), `.claude/agents/visual-reviewer.md` (new, 100), `SKILLS/visual-lint.md` (new, 245), `.claude/agents/infra-reviewer.md` (append rule #14, +6 lines), `CHANGES.md` (this entry).
+- **Self-tests passed:** `bash -n visual-review-orchestrator.sh` OK; `node --check visual-lint.js` OK; `node --check visual-lint-axe.js` OK.
+- **Shared-infra smoketest:** `bash helpers/projects-smoketest.sh gate` → 17 passed / 0 failed (run before commit).
+- **Assumptions:**
+  1. Projects install `@axe-core/playwright` as their own devDep — infra does NOT install globally (version pinning stays per-project).
+  2. The orchestrator uses `claude -p --agent visual-reviewer --output-format json` for dispatch; if the CLI is unavailable in a CI context (no credentials), it emits a skipped-but-PASS finding so the gate stays non-blocking rather than hard-failing on environment.
+  3. Pages list comes from `.perf.yaml` (parsed minimally with Python) OR a plain `PATH<TAB>VIEWPORT` TSV — same convention perceived-latency already uses.
+  4. No CLAUDE.md pointer added (per pointer-parsimony rule — visual-lint doesn't fire on every task, only UI-touching tasks; discovery via `ls SKILLS/`).
+- **Things for the reviewer:**
+  - Confirm the five required starter functions listed in rule #14(a) match the ones actually exported from visual-lint.js.
+  - Rule #14 was appended via python3 one-liner because the harness blocks Edit on `.claude/agents/*.md` files (same issue the brief flagged up-front); diff should still show a clean append after rule #13.
+  - Paired-edit not applicable: no CLAUDE.md changes in this diff (all net-new SKILL + helpers + agent). Thinness invariant preserved.
+  - A-llm reviewer prompt in visual-reviewer.md runs longer (~100 lines) than minimal because the brief required self-contained dispatch — not assuming internalized SKILL context.
+- **Per-project adoption (separate dispatches):** each project chat writes its own REVIEW_CONTEXT.md, npm-installs axe-core, adds visual-lint calls to its spec, wires the orchestrator into qa.yml. Tracked via rule #14 on their next UI diff.
+
 ## 2026-04-18 — infra: codify range-calibration tautology + edge-case sampling (abs-dashboard Residual Economics RCA)
 
 - **What was built:** Two small platform learnings from the abs-dashboard Residual Economics incident (`actual_residual` mixed realized-to-date with lifetime-projected losses; -10% variance on brand-new deals with fine-performing pools). Per user decision after discussion, this was a comprehension bug that no audit catches at root — but two adjacent codifications are worth shipping: (1) a `LESSONS.md` entry warning that sanity ranges calibrated from current-code output are tautological and will bless the bug they're supposed to catch, plus (2) a one-paragraph addition to Phase 1 of `SKILLS/data-audit-qa.md` mandating that the outlier-scan sample always include the three youngest and three oldest items in the distribution, since the residual bug only manifested at the young end.
