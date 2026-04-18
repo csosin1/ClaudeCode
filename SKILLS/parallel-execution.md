@@ -60,3 +60,58 @@ At every decision point ask: "Is anything I'm about to do next independent of an
 ## Escalation
 
 If work that should have run in parallel ran serially and wasted >5 minutes, note it in `LESSONS.md` with the missed-parallelization pattern, so it becomes a tell-tale for future agents.
+
+## "Phases" Considered Harmful (Anti-Pattern)
+
+If your plan uses "Phase 1, Phase 2, Phase 3…" language, **stop and check each phase**: does it actually depend on the prior, or does the number just reflect the order you happened to think of them in?
+
+If no real dependency, rename:
+
+> Independent task A, Independent task B, Dependent task C (depends on A).
+
+The linguistic framing "phases" silently implies sequence. Planners who commit to phase-numbered shape rarely escape it on self-review — even when 4 of the 6 "phases" are fully independent. The frame traps the planner.
+
+**Worked example — 2026-04-18 carvana adoption miss.** The infra orchestrator dispatched a 6-phase directive to adopt the platform's PROJECT_CONTEXT + REVIEW_CONTEXT + speedup-reviewer standards into the carvana chat. All six "phases" were framed as sequential. In fact:
+- Phase 1 (research PROJECT_CONTEXT) — independent; could run from infra chat or carvana chat.
+- Phase 2 (draft REVIEW_CONTEXT skeleton) — independent of 1.
+- Phase 3 (wire acceptance assertions) — independent of 1 and 2.
+- Phase 4 (update carvana CLAUDE.md pointer) — independent of 1-3.
+- Phase 5 (integrate) — genuinely depended on 1-4.
+- Phase 6 (QA) — genuinely depended on 5.
+
+Four of six were independent. The frame ate hours of user wall-clock before the user pushed back with "so slow, can this be parallelized?" The fix: rename phases by dependency (A, B, C, D all parallel; E needs A-D; F needs E), dispatch A-D in one message.
+
+## Cross-Chat / Cross-Session Parallelism
+
+The less-visible axis, because it straddles chats and is invisible from inside any one of them.
+
+When the orchestrator is writing a directive to another chat/agent, always ask: **"what can I do from here WHILE they do their part?"** Sitting idle waiting for the recipient to finish is the default because it's quiet; quiet isn't the same as right.
+
+**Worked example — same 2026-04-18 miss.** The orchestrator wrote a directive to the carvana chat, then waited. But the PROJECT_CONTEXT researcher could have been dispatched from the infra chat simultaneously — reading carvana history, drafting the initial file — while the carvana chat worked on REVIEW_CONTEXT + assertion wiring. Two chats in parallel > sequential hand-off.
+
+**Explicit question to run on every dispatch:** "For every piece of work I'm handing off, is there work I can be doing concurrently from my end?" If yes, dispatch them both in parallel. The recipient chat doesn't notice; the user sees half the wall-clock.
+
+## When Parallelism Is Wrong
+
+Parallelism is not free. Before recommending it, check:
+
+- **Shared-state writes.** Two agents editing the same file, the same DB row, the same git branch. Merge hell or lost writes. Either serialize, or split the file / row / branch first.
+- **Rate-limited APIs.** Decodo, Anthropic tier limits, any third-party endpoint that 429s. Parallel into a 429 is slower than serial. Respect the token bucket.
+- **Ordered side effects.** Step B genuinely needs to observe step A's effect on the world (not just its data). Example: deploy-then-smoketest. You can't smoketest what isn't deployed.
+- **Coordination overhead > savings.** 3 small tasks × 10s each to coordinate them > 1 task × 25s sequential. Parallelism has a floor cost. Below some per-task size, the dispatch tax dominates.
+
+The rule is **consider parallelism explicitly, don't default to either answer.** Sometimes sequential is right. Say so, with reason.
+
+## Anti-Pattern Catalog
+
+Seeded so future misses of the same shape get caught faster. Append here when you find a new one.
+
+### (a) Phase-N framing used for independent tasks
+- **Observed:** 2026-04-18 carvana adoption directive. 6 "phases"; 4 were independent. Missed until user pushed back.
+- **Tell-tale:** plan uses "Phase 1, 2, 3…" language.
+- **Fix:** rename as Independent task A/B/C with explicit dependencies. If any "phase" has no upstream dependency, it's not a phase — it's a parallel task.
+
+### (b) Orchestrator sequential with recipient chat
+- **Observed:** 2026-04-18 — infra orchestrator sat idle while carvana chat worked. PROJECT_CONTEXT research could have run on the infra side simultaneously.
+- **Tell-tale:** orchestrator dispatches a directive and then its next step is "wait for reply."
+- **Fix:** dispatcher always asks "what can I do concurrently from my end?" before hitting send.
