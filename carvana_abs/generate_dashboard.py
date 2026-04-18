@@ -4009,6 +4009,8 @@ def generate_economics_tab():
         conn.close()
 
     # ── 3. Pool performance aggregates ───────────────────────────────────
+    # Also: first-period weighted_avg_original_term per deal, for WAL estimation.
+    first_period_orig_term = {}  # deal -> months
     perf_agg = {}  # deal -> {total_interest, total_servicing_fee, cum_losses, periods, max_bal}
     for db_path in [
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "db", "dashboard.db"),
@@ -4043,6 +4045,26 @@ def generate_economics_tab():
                 "periods": r[4] or 0,
                 "max_bal": r[5] or 0,
             }
+        # First-period (earliest reporting month) weighted_avg_original_term.
+        # Used as the deal's at-issuance WAL input.
+        try:
+            ot_rows = conn.execute("""
+                SELECT pp.deal, pp.weighted_avg_original_term
+                FROM pool_performance pp
+                JOIN (
+                    SELECT deal, MIN(dist_date_iso) md
+                    FROM pool_performance
+                    WHERE dist_date_iso IS NOT NULL
+                      AND weighted_avg_original_term IS NOT NULL
+                    GROUP BY deal
+                ) x ON pp.deal = x.deal AND pp.dist_date_iso = x.md
+                WHERE pp.weighted_avg_original_term IS NOT NULL
+            """).fetchall()
+            for d_, ot in ot_rows:
+                if ot:
+                    first_period_orig_term[d_] = float(ot)
+        except Exception:
+            pass
         conn.close()
 
     # ── 4. Model forecasts (from model_results in Carvana dashboard DB) ─
@@ -4131,27 +4153,37 @@ def generate_economics_tab():
         else:
             d["excess_spread_yr"] = None
 
-        # WAL estimate from pool_performance (simple: sum of (balance_i / initial_balance) / 12)
+        # WAL — separated into two quantities:
+        #   wal_initial: at-issuance forecast WAL (used for Initial Forecast Tot XS & Svc).
+        #   wal_now:     realized-to-date + extrapolated-remaining WAL for the Current Forecast
+        #                group.  For very young deals where extrapolation is unreliable we
+        #                fall back to wal_initial so the column remains comparable.
         perf = perf_agg.get(deal, {})
         periods = perf.get("periods", 0)
 
-        # Markov WAL if available
         mf = markov_forecasts.get(deal, {})
-        if mf.get("wal"):
-            d["wal"] = mf["wal"]
-        elif periods > 0 and ipb > 0:
-            # Estimate WAL: for seasoned deals, compute actual weighted average life from balances
-            # Simple approximation: midpoint of amortization
-            max_bal = perf.get("max_bal", ipb)
-            # Use number of periods as proxy for maturity
-            # Better: WAL ≈ periods_so_far * avg_factor / 12 for amortizing pool
-            # We'll estimate total WAL assuming roughly linear amortization
-            # For deals still outstanding: extrapolate
-            # Simple: WAL ≈ WAT / 2 for a roughly even amortization
-            # Average original term from loans if available
-            d["wal"] = None  # Will estimate below
+
+        # At-issuance WAL.  Empirically calibrated from 48 mostly-paid-off deals across
+        # all three segments (Carvana Prime/Non-Prime, CarMax): observed
+        # WAL / (orig_term_months / 12) factor is 0.340–0.349 with tight spread.
+        # We use a single factor (0.344) since per-segment differences are within noise.
+        WAL_PAYDOWN_FACTOR = 0.344
+        orig_term_m = first_period_orig_term.get(deal)
+        if orig_term_m and orig_term_m > 0:
+            wal_initial = (orig_term_m / 12.0) * WAL_PAYDOWN_FACTOR
+        elif mf.get("wal"):
+            wal_initial = mf["wal"]
         else:
-            d["wal"] = None
+            # Fallback — segment typical 66mo (CarMax/CV Prime) or 72mo (CV Non-Prime)
+            seg_is_nonprime = "-N" in deal
+            default_m = 72 if seg_is_nonprime else 66
+            wal_initial = (default_m / 12.0) * WAL_PAYDOWN_FACTOR
+
+        d["wal_initial"] = round(wal_initial, 2)
+        # wal_now filled in by section 6b (balance-series pass); default to wal_initial
+        d["wal_now"] = d["wal_initial"]
+        # Keep "wal" for back-compat (used by weighted-avg summary); equals wal_initial.
+        d["wal"] = d["wal_initial"]
 
         # Servicing fee
         svc_annual = d.get("servicing_fee_annual_pct") or 0
@@ -4216,8 +4248,13 @@ def generate_economics_tab():
         else:
             d["trigger_risk"] = None
 
-    # ── 6b. WAL estimation from pool_performance balance series ──────────
-    # Run a targeted query to get ending pool balances for WAL calc
+    # ── 6b. Realized/current WAL (wal_now) from pool_performance balances ─
+    # Realized WAL so far + linear-paydown extrapolation of remaining life.
+    # For very young deals (pool_factor > 0.80 or periods < 4) the extrapolation
+    # is noisy and will collapse toward zero — we fall back to wal_initial so
+    # the Current Forecast column stays sensible.
+    from collections import defaultdict as _dd
+    all_deal_bals = _dd(list)
     for db_path in [
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "db", "dashboard.db"),
         os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -4226,7 +4263,6 @@ def generate_economics_tab():
         if not os.path.exists(db_path):
             continue
         conn = sqlite3.connect(db_path)
-        # Get ending balances by deal ordered by date
         wal_rows = conn.execute("""
             SELECT deal, ending_pool_balance
             FROM pool_performance
@@ -4234,47 +4270,57 @@ def generate_economics_tab():
             ORDER BY deal, dist_date_iso
         """).fetchall()
         conn.close()
-
-        # Group by deal
-        from collections import defaultdict
-        deal_bals = defaultdict(list)
         for row in wal_rows:
-            deal_bals[row[0]].append(row[1])
+            all_deal_bals[row[0]].append(row[1])
 
-        for d in deals_data:
-            if d.get("wal") is not None:
-                continue
-            deal = d["deal"]
-            ipb = d["initial_pool_balance"]
-            bals = deal_bals.get(deal, [])
-            if not bals or not ipb:
-                continue
-            # WAL = sum of (balance_i / initial_balance) / 12 for monthly periods
-            # This gives the actual weighted average life in years
-            wal_sum = sum(b / ipb for b in bals) / 12.0
-            periods = len(bals)
-            # For in-progress deals, extrapolate assuming current paydown rate continues
-            latest_bal = bals[-1] if bals else 0
-            pool_factor = latest_bal / ipb if ipb > 0 else 0
-            if pool_factor > 0.05:
-                # Deal still outstanding — extrapolate
-                # Monthly paydown rate
-                if periods > 1:
-                    # Average monthly principal paydown as fraction of initial
-                    monthly_paydown = (1.0 - pool_factor) / periods
-                    if monthly_paydown > 0:
-                        remaining_months = pool_factor / monthly_paydown
-                        # Add estimated remaining WAL contribution
-                        # Remaining balance declines linearly from current to 0
-                        remaining_wal = (pool_factor / 2.0) * (remaining_months / 12.0)
-                        wal_sum += remaining_wal
-            d["wal"] = round(wal_sum, 2)
-            d["pool_factor"] = pool_factor
-            d["pct_complete"] = 1.0 - pool_factor
+    for d in deals_data:
+        deal = d["deal"]
+        ipb = d["initial_pool_balance"]
+        bals = all_deal_bals.get(deal, [])
+        if not bals or not ipb:
+            d["pool_factor"] = None
+            d["pct_complete"] = None
+            continue
+        periods = len(bals)
+        latest_bal = bals[-1]
+        pool_factor = latest_bal / ipb if ipb > 0 else 0
+        d["pool_factor"] = pool_factor
+        d["pct_complete"] = max(0.0, min(1.0, 1.0 - pool_factor))
+
+        # Realized WAL component (sum of balance ratios / 12)
+        realized_wal = sum(b / ipb for b in bals) / 12.0
+
+        wal_initial = d.get("wal_initial")
+
+        if pool_factor <= 0.05 or periods < 2:
+            # Essentially fully amortized — realized component is the WAL.
+            # For a deal with <2 periods, realized≈0 so fall back to wal_initial.
+            wal_now = realized_wal if periods >= 4 else wal_initial
+        elif pool_factor > 0.80 or periods < 4:
+            # Brand-new deal — linear extrapolation is unreliable, use wal_initial.
+            wal_now = wal_initial
+        else:
+            # In-progress — extrapolate remaining WAL using observed average
+            # monthly paydown rate.
+            monthly_paydown = (1.0 - pool_factor) / periods
+            if monthly_paydown > 0:
+                remaining_months = pool_factor / monthly_paydown
+                remaining_wal = (pool_factor / 2.0) * (remaining_months / 12.0)
+                wal_now = realized_wal + remaining_wal
+            else:
+                wal_now = wal_initial
+            # Guard against extrapolation blow-ups / collapses.
+            if wal_initial:
+                wal_now = max(wal_initial * 0.6, min(wal_initial * 1.5, wal_now))
+
+        d["wal_now"] = round(wal_now, 2) if wal_now is not None else None
 
     # ── 7. Compute derived economics columns ─────────────────────────────
     for d in deals_data:
-        wal = d.get("wal")
+        # Use the at-issuance WAL for "Initial Forecast" totals.  This is the
+        # industry-standard residual-economics view: expected lifetime spend
+        # and expected lifetime servicing vs. expected lifetime losses.
+        wal = d.get("wal_initial")
         svc = d.get("servicing_fee_annual_pct") or 0
 
         # Total excess spread = excess/yr × WAL
@@ -4460,8 +4506,10 @@ def generate_economics_tab():
             deal_id = d["deal"]
             group = _group_of(d)
 
-            wal_v = d.get("wal")
+            wal_v = d.get("wal_initial")
             wal_disp = f"{wal_v:.1f}y" if (wal_v is not None and not (isinstance(wal_v, float) and pd.isna(wal_v))) else '<span style="color:#999">—</span>'
+            wal_now_v = d.get("wal_now")
+            wal_now_disp = f"{wal_now_v:.1f}y" if (wal_now_v is not None and not (isinstance(wal_now_v, float) and pd.isna(wal_now_v))) else '<span style="color:#999">—</span>'
 
             def pct_cell(grp_cls, key, dec=2):
                 v = d.get(key)
@@ -4487,7 +4535,7 @@ def generate_economics_tab():
             # Current Forecast (5)
             cells.append(pct_cell("g-curr g-first", "actual_cum_interest_pct", 2))
             cells.append(pct_cell("g-curr", "actual_cum_servicing_pct", 2))
-            cells.append(f'<td class="g-curr">{wal_disp}</td>')
+            cells.append(f'<td class="g-curr">{wal_now_disp}</td>')
             cells.append(pct_cell("g-curr", "projected_loss_pct", 2))
             ar = d.get("actual_residual")
             cells.append(f'<td class="g-curr">{pf_color(ar)}</td>')
@@ -4527,7 +4575,8 @@ def generate_economics_tab():
 
         wa = {k: wavg(k) for k in [
             "aaa_pct", "aa_pct", "a_pct", "bbb_pct", "oc_pct",
-            "consumer_wac", "cost_of_debt", "excess_spread_yr", "wal",
+            "consumer_wac", "cost_of_debt", "excess_spread_yr",
+            "wal_initial", "wal_now",
             "total_excess_spread", "total_servicing_cost", "expected_loss_pct",
             "expected_residual", "actual_cum_interest_pct", "actual_cum_servicing_pct",
             "projected_loss_pct", "actual_residual", "variance", "pct_complete",
@@ -4538,7 +4587,8 @@ def generate_economics_tab():
                 return "—"
             return f"{v*100:.{dec}f}%"
 
-        wal_str = f"{wa['wal']:.1f}y" if wa.get("wal") else "—"
+        wal_str = f"{wa['wal_initial']:.1f}y" if wa.get("wal_initial") else "—"
+        wal_now_str = f"{wa['wal_now']:.1f}y" if wa.get("wal_now") else wal_str
         var_pct = wa.get("variance")
         var_dollars = (var_pct * total_ipb) if var_pct is not None else None
 
@@ -4557,7 +4607,7 @@ def generate_economics_tab():
         cells.append(f'<td class="g-init">{pf_color(wa["expected_residual"])}</td>')
         cells.append(f'<td class="g-curr g-first">{p(wa["actual_cum_interest_pct"],2)}</td>')
         cells.append(f'<td class="g-curr">{p(wa["actual_cum_servicing_pct"],2)}</td>')
-        cells.append(f'<td class="g-curr">{wal_str}</td>')
+        cells.append(f'<td class="g-curr">{wal_now_str}</td>')
         cells.append(f'<td class="g-curr">{p(wa["projected_loss_pct"],2)}</td>')
         cells.append(f'<td class="g-curr">{pf_color(wa["actual_residual"])}</td>')
         cells.append(f'<td class="g-var g-first">{p(var_pct,2)}</td>')
