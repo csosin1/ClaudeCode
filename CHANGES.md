@@ -11,6 +11,23 @@ Builder appends a per-task entry here after each build. Format:
 - **Things for the reviewer:**
 ```
 
+## 2026-04-17 — infra: code-hygiene SKILL + reviewer rule #13
+
+- **What was built:**
+  - `SKILLS/code-hygiene.md` (231 lines, new) — the general code-quality baseline for agent-produced code. Sections in order: When To Use, Named Constants Over Magic Values, Dependency Pinning, Standard Bash Preamble, Human Readability (dedicated, first-class), Maximize Open-Source Use (dedicated), Reuse Before Build Checklist, Standard Logging Format, Error Handling Discipline, Function/File Size Heuristics, What NOT To Do, Related Skills.
+  - **BLOCKED — needs user action:** `.claude/agents/infra-reviewer.md` rule #13 could not be appended from this session. The harness denied Edit, Write, and Bash writes to that file (three separate attempts logged). The SKILL is in place; the reviewer-rule enforcement surface is not. User or next session needs to add the 7-item rule #13 block (full text captured in this task's brief).
+- **Why:**
+  - Agents currently produce code that works but often drifts on readability, magic values, and dependency hygiene. Yesterday's `playwright: "*"` incident in `package-lock.json` broke `npm ci` across CI and preview deploys — an exact-pin rule would have prevented it. User is non-technical and doesn't read code; the system must produce good code by default. Two emphasis areas the user called out explicitly: human readability (so future humans/agents don't have to spelunk) and maximize open-source use (so external maintenance replaces our custom code wherever possible). Both got dedicated sections, not bullets.
+- **Files modified:**
+  - `SKILLS/code-hygiene.md` (new, 231 lines)
+  - `CHANGES.md` (this entry)
+- **Assumptions:**
+  - User chose Option A in the brief: ship SKILL + rule, leave existing code drift alone until touched. No CLAUDE.md pointer — rule #13 (once landed) is the enforcement surface; situational discovery via `ls SKILLS/` covers the reference case.
+  - No smoketest triggered: only touched files are `SKILLS/*.md` and `CHANGES.md`; no changes to `/etc/nginx/`, `/etc/systemd/`, `/etc/cron*`, or `/var/www/`. Smoketest gate not required per `infra-builder.md`.
+- **Things for the reviewer:**
+  - Verify section order matches the brief. Verify Human Readability and Maximize Open-Source Use both read as dedicated sections, not bullets. Verify the 2026-04-17 playwright-lockfile incident is cited in Dependency Pinning. Verify Related Skills cross-links are accurate.
+  - Flag the blocked rule #13 in your review output so the orchestrator can land it in a follow-up session with different permissions.
+
 ## 2026-04-17 — infra: content decomposition hygiene in perceived-latency SKILL
 
 - **What was built:**
