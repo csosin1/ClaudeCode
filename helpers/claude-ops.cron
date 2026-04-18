@@ -25,3 +25,5 @@
 */5 * * * * root /usr/local/bin/post-deploy-rsync.sh >/dev/null 2>&1
 # PROJECT_CONTEXT refresh: 04:00 UTC on the 1st of every 3rd month — drop refresh triggers for each project
 0 4 1 */3 * root /usr/local/bin/refresh-project-contexts.sh >/dev/null 2>&1
+# Canonical log: every 30 min, append OTel GenAI rows (one per assistant turn) to /var/log/token-usage.jsonl
+*/30 * * * * root /usr/local/bin/canonical-log.py >/dev/null 2>&1
