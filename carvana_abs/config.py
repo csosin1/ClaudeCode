@@ -71,6 +71,18 @@ DEALS = {
         "distribution_day": 8,
         "original_pool_balance": None,
     },
+    "2021-P3": {
+        "cik": "0001843627",
+        "entity_name": "Carvana Auto Receivables Trust 2021-P3",
+        "distribution_day": 8,
+        "original_pool_balance": None,
+    },
+    "2021-P4": {
+        "cik": "0001845213",
+        "entity_name": "Carvana Auto Receivables Trust 2021-P4",
+        "distribution_day": 8,
+        "original_pool_balance": None,
+    },
     # ── 2022 ──
     "2022-P1": {
         "cik": "0001903763",
@@ -123,6 +135,12 @@ DEALS = {
         "original_pool_balance": None,
     },
     # ── 2025 ──
+    "2025-P1": {
+        "cik": "0002037956",
+        "entity_name": "Carvana Auto Receivables Trust 2025-P1",
+        "distribution_day": 8,
+        "original_pool_balance": None,
+    },
     "2025-P2": {
         "cik": "0002037955",
         "entity_name": "Carvana Auto Receivables Trust 2025-P2",
@@ -141,10 +159,17 @@ DEALS = {
         "distribution_day": 8,
         "original_pool_balance": None,
     },
-    # NOTE: Some deals are missing (2022-N1, 2023-P1 through P4, 2023-N series,
-    # 2024-P1, 2025-P1, 2025-N series). Their CIKs weren't found in web search.
-    # They can be discovered by searching SEC EDGAR directly:
-    # https://www.sec.gov/cgi-bin/browse-edgar?company=carvana+auto+receivables&CIK=&type=&dateb=&owner=include&count=100
+    # ── 2026 ──
+    "2026-P1": {
+        "cik": "0001976111",
+        "entity_name": "Carvana Auto Receivables Trust 2026-P1",
+        "distribution_day": 8,
+        "original_pool_balance": None,
+    },
+    # NOTE: Some deals from the N-series (Non-Prime) remain un-ingested:
+    # 2022-N1, 2023-N series, 2025-N series. CIKs not yet located on SEC EDGAR;
+    # weekly discover_new_deals.py cron will pick them up if/when they issue filings.
+    # P-series (Prime) coverage is complete through the date of this config.
 }
 
 # Default deal for backward compatibility

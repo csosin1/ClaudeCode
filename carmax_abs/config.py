@@ -82,6 +82,7 @@ DEALS = {
     "2025-3": {"cik": "0002074530", "entity_name": "CarMax Auto Owner Trust 2025-3"},
     "2025-4": {"cik": "0002089777", "entity_name": "CarMax Auto Owner Trust 2025-4"},
     "2026-1": {"cik": "0002094950", "entity_name": "CarMax Auto Owner Trust 2026-1"},
+    "2026-2": {"cik": "0002117307", "entity_name": "CarMax Auto Owner Trust 2026-2"},
 }
 
 DEFAULT_DEAL = "2020-1"
