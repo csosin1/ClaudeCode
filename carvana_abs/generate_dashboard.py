@@ -226,6 +226,10 @@ table.econ td.g-var,table.econ th.g-var{background:rgba(158,158,158,.06)}
 table.econ td.g-cap,table.econ th.g-cap{background:rgba(120,144,156,.06)}
 table.econ td.g-first,table.econ th.g-first{border-left:2px solid #b0bec5}
 table.econ tr.group-header th{text-align:center;font-weight:700;font-size:.6rem;letter-spacing:.05em;text-transform:uppercase;padding:6px 4px;border-bottom:2px solid #1976D2;background:#ECEFF1}
+.econ-table-wrap{overflow-x:auto;margin:8px 0}
+@media (min-width:900px){.econ-table-wrap{max-height:78vh;overflow:auto}}
+.econ-footer-note{padding:14px 16px;margin:32px 0 24px;background:#F5F9FF;border-left:3px solid #1976D2;border-radius:4px;max-width:900px}
+.econ-footer-note p{font-size:.78rem;color:#333;line-height:1.6;margin:0}
 /* Deal-index grid */
 .deal-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px;padding:12px}
 .deal-card{background:white;border-radius:8px;padding:12px;box-shadow:0 1px 3px rgba(0,0,0,.1);text-decoration:none;color:#212121;display:block;transition:transform .08s ease}
@@ -4335,6 +4339,14 @@ def generate_economics_tab():
         else:
             d["total_servicing_cost"] = None
 
+        # Initial interest = WAC × WAL (the at-issuance counterpart to
+        # projected_lifetime_interest_pct; not displayed as its own Initial
+        # column but needed for the per-column delta in the Variance group).
+        if d.get("consumer_wac") is not None and wal:
+            d["initial_interest_pct"] = d["consumer_wac"] * wal
+        else:
+            d["initial_interest_pct"] = None
+
         # Expected residual = total excess - servicing - expected losses
         if (d.get("total_excess_spread") is not None and
                 d.get("total_servicing_cost") is not None and
@@ -4451,8 +4463,11 @@ def generate_economics_tab():
         ("g-curr", "WAL now"),
         ("g-curr", "Proj Loss"),
         ("g-curr", "Curr Resid"),
-        ("g-var g-first", "Var %"),
-        ("g-var", "Var $"),
+        ("g-var g-first", "Δ Int"),
+        ("g-var", "Δ Svc"),
+        ("g-var", "Δ WAL"),
+        ("g-var", "Δ Loss"),
+        ("g-var", "Δ Resid"),
         ("g-var", "%Done"),
         ("g-var", "Trig Risk"),
         ("g-cap g-first", "AAA"),
@@ -4467,7 +4482,7 @@ def generate_economics_tab():
         ("g-id", "Identity", 4),
         ("g-init", "Initial Forecast (at issuance)", 8),
         ("g-curr", "Current Forecast (lifetime view today: WAL_now × spread − loss)", 5),
-        ("g-var", "Deltas / Variance", 4),
+        ("g-var", "Deltas / Variance (Current − Initial)", 7),
         ("g-cap", "Loan / Cap Structure", 6),
     ]
 
@@ -4556,10 +4571,38 @@ def generate_economics_tab():
             cells.append(pct_cell("g-curr", "projected_loss_pct", 2))
             ar = d.get("actual_residual")
             cells.append(f'<td class="g-curr">{pf_color(ar)}</td>')
-            # Deltas / Variance (4)
-            cells.append(f'<td class="g-var g-first">{_pct_disp(var_pct,2)}</td>')
-            var_d_disp = fm(var_dollars) if var_dollars is not None else '<span style="color:#999">—</span>'
-            cells.append(f'<td class="g-var">{var_d_disp}</td>')
+            # Deltas / Variance (7) — Current − Initial, column-by-column
+            def _delta_pct_cell(grp_cls, curr_key, init_key, dec=2, color=False):
+                cv = d.get(curr_key)
+                iv = d.get(init_key)
+                if cv is None or iv is None:
+                    return f'<td class="{grp_cls}"><span style="color:#999">—</span></td>'
+                delta = cv - iv
+                if color:
+                    # For residual/loss, sign matters for the reader. Residual:
+                    # higher = better (green). Loss: higher = worse (red).
+                    inverted = (curr_key == "projected_loss_pct")
+                    good = (delta < 0) if inverted else (delta >= 0)
+                    col = "#388E3C" if good else "#D32F2F"
+                    inner = f'<span style="color:{col};font-weight:600">{delta*100:+.{dec}f}%</span>'
+                else:
+                    inner = f"{delta*100:+.{dec}f}%"
+                if ipb is not None:
+                    return f'<td class="{grp_cls}" title="{fm(delta*ipb)}">{inner}</td>'
+                return f'<td class="{grp_cls}">{inner}</td>'
+
+            cells.append(_delta_pct_cell("g-var g-first", "projected_lifetime_interest_pct", "initial_interest_pct", 2))
+            cells.append(_delta_pct_cell("g-var", "projected_lifetime_servicing_pct", "total_servicing_cost", 2))
+            # Δ WAL (years)
+            wn = d.get("wal_now")
+            wi = d.get("wal_initial")
+            if wn is not None and wi is not None:
+                d_wal = wn - wi
+                cells.append(f'<td class="g-var">{d_wal:+.2f}y</td>')
+            else:
+                cells.append('<td class="g-var"><span style="color:#999">—</span></td>')
+            cells.append(_delta_pct_cell("g-var", "projected_loss_pct", "expected_loss_pct", 2, color=True))
+            cells.append(_delta_pct_cell("g-var", "actual_residual", "expected_residual", 2, color=True))
             pc = d.get("pct_complete")
             pc_disp = f"{pc*100:.0f}%" if (pc is not None and not (isinstance(pc,float) and pd.isna(pc))) else '<span style="color:#999">—</span>'
             cells.append(f'<td class="g-var">{pc_disp}</td>')
@@ -4595,7 +4638,8 @@ def generate_economics_tab():
             "consumer_wac", "cost_of_debt", "excess_spread_yr",
             "wal_initial", "wal_now",
             "total_excess_spread", "total_servicing_cost", "expected_loss_pct",
-            "expected_residual", "projected_lifetime_interest_pct", "projected_lifetime_servicing_pct",
+            "expected_residual", "initial_interest_pct",
+            "projected_lifetime_interest_pct", "projected_lifetime_servicing_pct",
             "projected_loss_pct", "actual_residual", "variance", "pct_complete",
         ]}
 
@@ -4627,8 +4671,30 @@ def generate_economics_tab():
         cells.append(f'<td class="g-curr">{wal_now_str}</td>')
         cells.append(f'<td class="g-curr">{p(wa["projected_loss_pct"],2)}</td>')
         cells.append(f'<td class="g-curr">{pf_color(wa["actual_residual"])}</td>')
-        cells.append(f'<td class="g-var g-first">{p(var_pct,2)}</td>')
-        cells.append(f'<td class="g-var">{fm(var_dollars) if var_dollars is not None else "—"}</td>')
+        # Per-column deltas (Current − Initial), mirroring the 5 Current cols
+        def _wa_delta_pct(curr_key, init_key, dec=2, color=False, first=False):
+            cv = wa.get(curr_key); iv = wa.get(init_key)
+            klass = "g-var g-first" if first else "g-var"
+            if cv is None or iv is None:
+                return f'<td class="{klass}">—</td>'
+            delta = cv - iv
+            if color:
+                inverted = (curr_key == "projected_loss_pct")
+                good = (delta < 0) if inverted else (delta >= 0)
+                col = "#388E3C" if good else "#D32F2F"
+                inner = f'<span style="color:{col}">{delta*100:+.{dec}f}%</span>'
+            else:
+                inner = f"{delta*100:+.{dec}f}%"
+            return f'<td class="{klass}" title="{fm(delta*total_ipb)}">{inner}</td>'
+
+        cells.append(_wa_delta_pct("projected_lifetime_interest_pct", "initial_interest_pct", 2, first=True))
+        cells.append(_wa_delta_pct("projected_lifetime_servicing_pct", "total_servicing_cost", 2))
+        if wa.get("wal_now") is not None and wa.get("wal_initial") is not None:
+            cells.append(f'<td class="g-var">{wa["wal_now"]-wa["wal_initial"]:+.2f}y</td>')
+        else:
+            cells.append('<td class="g-var">—</td>')
+        cells.append(_wa_delta_pct("projected_loss_pct", "expected_loss_pct", 2, color=True))
+        cells.append(_wa_delta_pct("actual_residual", "expected_residual", 2, color=True))
         cells.append(f'<td class="g-var">{p(wa["pct_complete"],0) if wa.get("pct_complete") else "—"}</td>')
         cells.append('<td class="g-var"></td>')
         cells.append(f'<td class="g-cap g-first">{p(wa["aaa_pct"],1)}</td>')
@@ -4715,7 +4781,7 @@ Loss forecasts from {forecast_source} model. {'Markov model running — forecast
   <label><input type="checkbox" class="econ-filter" value="kmx-prime" checked onclick="econFilter()"> CarMax Prime</label>
 </div>
 </div>
-<div class="tbl" id="econTableWrap" style="max-height:78vh;overflow:auto">
+<div class="tbl econ-table-wrap" id="econTableWrap">
 <table class="econ" id="econTable">
 <thead>
 <tr class="group-header">{group_header_cells}</tr>
@@ -4771,11 +4837,12 @@ Loss forecasts from {forecast_source} model. {'Markov model running — forecast
 </script>
 """
 
-    # ── 9. Pointer to the Methodology & Findings tab (moved out of inline) ──
+    # ── 9. Pointer to the Methodology & Findings tab — sits clearly below
+    # the table as a footer, never crowding it on mobile. The .econ-footer-note
+    # class adds a 32px top margin and removes any sticky/overlay behaviour.
     h += (
-        '<div style="padding:10px 16px;margin-top:16px;background:#F5F9FF;'
-        'border-left:3px solid #1976D2;max-width:900px">'
-        '<p style="font-size:.78rem;color:#333;line-height:1.6;margin:0">'
+        '<div class="econ-footer-note">'
+        '<p>'
         '<strong>Methodology.</strong> For a full writeup of the Markov model, '
         'Bayesian calibration, issuer comparison (regression), cost-of-funds '
         'analysis, limitations, and reproducibility details, switch to the '
