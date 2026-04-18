@@ -172,6 +172,38 @@ new-droplet bootstrap checklist once we have one.
 
 **Preventive rule:** Infra-QA position coverage must include **request-origin characteristics** (IP, UA, TLS fingerprint where testable) of the *actual consumer*, not just generalized external fetches. Default-curl responses are insufficient evidence that a bot-fingerprinted consumer will succeed. When a consumer can't be fully fingerprint-simulated (e.g., Claude web-fetch uses TLS details we can't replicate), explicitly flag the coverage gap and require user-manual confirmation as an observation-required item — same pattern as phone-receipt for ntfy.
 
+## 2026-04-18 — Three soft nudges insufficient to keep heavy compute off the wrong host; shipped hard enforcement
+
+**Symptom:** Post-migration (Phases 2-4 completed 2026-04-17), the dev droplet was supposed to be Claude-only — 4GB box, all apps moved to prod's 8GB. But within 18 hours we had THREE separate incidents of the carvana-abs chat launching heavy Python compute on dev:
+1. ~11:00Z — Markov training (caught via capacity alarm, user flagged, chat moved it to prod).
+2. ~02:40Z — `compute_methodology.py` (caught during user-initiated memory check).
+3. ~03:05Z — same script relaunched on dev in parallel with prod run (caught in follow-up verification).
+
+Each incident pushed dev swap near-full (88% at peak). The actual symptom reported by the user: *"why is my droplet memory critical?"*
+
+**Root cause:** The project chat's local context kept drifting back to dev-local invocations (`/opt/abs-venv/bin/python ...`) despite three layers of soft correction:
+- Shared `/opt/site-deploy/CLAUDE.md` gained a host-topology section (commit 4ce8df1)
+- Direct tmux directives at each incident
+- Explicit retrofit checklist in `SKILLS/costly-tool-monitoring.md`
+
+None of it was binding. An agent with a Bash tool and a familiar path will use it. The corrective "compute runs on prod" rule lived in docs the chat wouldn't re-read mid-session.
+
+**Fix — shipped 2026-04-18 ~03:15Z:**
+
+1. **`/opt/abs-venv/bin/python3` replaced with a guard wrapper** (original symlink target saved at `/opt/abs-venv/bin/python3.orig-symlink-target`). On dev, the wrapper prints a loud refusal with the correct ssh-prod-private invocation + exits 1. Override escape hatch: `ALLOW_DEV_COMPUTE=1 python ...` for rare legitimate cases (debug, rollback testing). Source: `helpers/dev-python-guard.sh`.
+
+2. **`heavy-dev-compute-watchdog.sh`** (cron every 2 min on dev). Detects any Python/Node process descended from a Claude chat that: RSS > 200MB, age > 60s, matches heavy-compute patterns (any `/opt/*/bin/python`, `node server.js`, `npx playwright`, `npm run`). Three-stage action: (a) first sight → tmux directive to owning chat + default ntfy + state=warn; (b) T+60s still alive → high ntfy, escalate; (c) T+120s still alive → SIGTERM the process tree + urgent ntfy. Logs all to `/var/log/heavy-dev-compute.log`.
+
+3. **`/etc/heavy-dev-compute.conf`** holds the thresholds (MIN_RSS_MB, MIN_AGE_SEC, GRACE_SEC, DEV_HOSTNAME) so they're tunable without code edits.
+
+4. **Whitelist**: the infra chat itself is exempt (orchestrator legitimately shells + runs some Python). System Python utilities (`/usr/bin/python3 -m pip install`, etc.) are exempt. Short-lived processes (< 60s) are exempt.
+
+**Preventive rules:**
+1. **After a migration, presume old paths are habit-attractors.** A chat that spent weeks developing against `/opt/abs-venv/bin/python` will default to that muscle memory for months. Soft docs updates don't break habits; binding tooling does.
+2. **Enforcement beats documentation for rules that must not be violated.** Documentation is for rules with legitimate exceptions where the cost of a violation is low. For rules where the cost is real (capacity-urgent on the 4GB dev droplet), the rule belongs in tooling that refuses.
+3. **Always provide an override.** `ALLOW_DEV_COMPUTE=1` preserves the escape hatch for edge cases (rollback-copy testing, emergency debug) without weakening the default. An enforcement with no override becomes its own trap — next incident will be "the wrapper stopped us from doing X when we needed to."
+4. **Three strikes = automated enforcement.** If you see the same failure class three times with increasing soft-correction, the next step is code, not another nudge. This incident had three strikes in 18 hours; the wrapper should have shipped after strike two.
+
 ## 2026-04-17 — car-offers startup diagnostic burned Decodo proxy credits on every restart
 
 **Symptom:** user noticed Decodo (residential-proxy vendor) credits drained. Investigation traced it to `/opt/car-offers/server.js:67,73` and the identical lines in the preview copy: on every service startup, the code fires two `curl` commands through the paid Decodo proxy — one to `ip.decodo.com/json` for geo confirmation, one to `https://www.carvana.com/sell-my-car` through the same proxy. Each call costs a small fraction of a cent in Decodo usage, but `systemctl restart` is frequent: deploys, OOMs, the pre-migration 5-min `try-restart` loop we also fixed today, the general-deploy.timer before Option C disabled it. Multiple restarts per minute for hours → credits emptied, no alert.
