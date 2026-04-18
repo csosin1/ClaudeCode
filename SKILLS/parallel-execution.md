@@ -81,9 +81,9 @@ If no real dependency, rename:
 
 The linguistic framing "phases" silently implies sequence. Planners who commit to phase-numbered shape rarely escape it on self-review — even when 4 of the 6 "phases" are fully independent. The frame traps the planner.
 
-**Worked example — 2026-04-18 carvana adoption miss.** The infra orchestrator dispatched a 6-phase directive to adopt the platform's PROJECT_CONTEXT + REVIEW_CONTEXT + speedup-reviewer standards into the carvana chat. All six "phases" were framed as sequential. In fact:
+**Worked example — 2026-04-18 carvana adoption miss.** The infra orchestrator dispatched a 6-phase directive to adopt the platform's PROJECT_CONTEXT + journey / QA-calibration sections (then still named `REVIEW_CONTEXT.md`; merged into `PROJECT_CONTEXT.md` later on 2026-04-18) + speedup-reviewer standards into the carvana chat. All six "phases" were framed as sequential. In fact:
 - Phase 1 (research PROJECT_CONTEXT) — independent; could run from infra chat or carvana chat.
-- Phase 2 (draft REVIEW_CONTEXT skeleton) — independent of 1.
+- Phase 2 (draft journey / QA-calibration skeleton) — independent of 1.
 - Phase 3 (wire acceptance assertions) — independent of 1 and 2.
 - Phase 4 (update carvana CLAUDE.md pointer) — independent of 1-3.
 - Phase 5 (integrate) — genuinely depended on 1-4.
@@ -97,7 +97,7 @@ The less-visible axis, because it straddles chats and is invisible from inside a
 
 When the orchestrator is writing a directive to another chat/agent, always ask: **"what can I do from here WHILE they do their part?"** Sitting idle waiting for the recipient to finish is the default because it's quiet; quiet isn't the same as right.
 
-**Worked example — same 2026-04-18 miss.** The orchestrator wrote a directive to the carvana chat, then waited. But the PROJECT_CONTEXT researcher could have been dispatched from the infra chat simultaneously — reading carvana history, drafting the initial file — while the carvana chat worked on REVIEW_CONTEXT + assertion wiring. Two chats in parallel > sequential hand-off.
+**Worked example — same 2026-04-18 miss.** The orchestrator wrote a directive to the carvana chat, then waited. But the PROJECT_CONTEXT researcher could have been dispatched from the infra chat simultaneously — reading carvana history, drafting the initial file — while the carvana chat worked on the journey / QA-calibration sections + assertion wiring. Two chats in parallel > sequential hand-off.
 
 **Explicit question to run on every dispatch:** "For every piece of work I'm handing off, is there work I can be doing concurrently from my end?" If yes, dispatch them both in parallel. The recipient chat doesn't notice; the user sees half the wall-clock.
 

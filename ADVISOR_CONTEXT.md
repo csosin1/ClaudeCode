@@ -148,9 +148,8 @@ Behavioral constitution loaded automatically into every Claude Code session. Int
 
 **Key sections:**
 - User Context, URLs-plain
-- Clarify Before Building, Challenge the Approach
-- Every Task Passes Three Gates (Build / Review / QA → user "ship it" → promote)
-- Spec Before Any Code
+- Clarify Before Building (includes the spec template pointer), Challenge the Approach
+- Every Task Passes The Gates (Build / Review / QA / Rehearse / Accept → user "ship it" → promote)
 - Parallel Execution, Non-Blocking Prompt Intake
 - Project Isolation (shared paths never modified from a project chat)
 - Continuous Platform Improvement, Skills Registry (search-use-contribute)

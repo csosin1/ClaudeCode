@@ -25,7 +25,7 @@ Does **not** apply to: pure data-layer changes (ETL, schema, cron that produces 
                               ▼
   ┌──────────────────────────────────────────────────────────┐
   │  A-llm  — dual visual-reviewer agents (briefed +          │
-  │           unbriefed), both with identical REVIEW_CONTEXT  │
+  │           unbriefed), both with identical PROJECT_CONTEXT │
   │           catches novel bugs + aesthetic issues           │
   │           .claude/agents/visual-reviewer.md               │
   │           helpers/visual-review-orchestrator.sh           │
@@ -121,7 +121,7 @@ Adopt incrementally: start by declaring the two or three most investor-visible c
 
 Two subagents per page × viewport, dispatched in parallel by `helpers/visual-review-orchestrator.sh`:
 
-- **unbriefed** — gets `REVIEW_CONTEXT.md` + screenshot. Looks for anything that seems wrong with fresh eyes.
+- **unbriefed** — gets `PROJECT_CONTEXT.md` + screenshot. Looks for anything that seems wrong with fresh eyes.
 - **briefed** — gets the above PLUS a writing agent's change-specific brief. Verifies the claimed change took effect and scans for collateral damage.
 
 Both emit the same findings schema (see `.claude/agents/visual-reviewer.md` for the strict spec):
@@ -152,18 +152,17 @@ Both emit the same findings schema (see `.claude/agents/visual-reviewer.md` for 
 
 The orchestrator appends every finding to `/var/log/<project>-visual-review.jsonl` (append-only history) and exits 1 if any HALT is present.
 
-## Project context (REVIEW_CONTEXT.md)
+## Project context (PROJECT_CONTEXT.md `## QA calibration` section)
 
-Per-project file owned by the project chat. Five fields calibrate the reviewer:
+Per-project file owned by the project chat. The `## QA calibration` section inside `PROJECT_CONTEXT.md` calibrates the reviewer on five axes:
 
-1. **Purpose** — what the project is, who uses it.
-2. **Audience** — external / investor / internal / public showcase.
-3. **What correctness means here** — project-specific: numbers traceable to source, disclaimer requirements, freshness windows.
-4. **Red-flag patterns** — hard-HALT list. "No loan-level PII." "No forward-looking claims without disclaimer."
-5. **Aesthetic bar** — investor-grade polish vs utility-grade vs playful. Without this, the reviewer applies the wrong standard and you get either useless nitpicks or missed polish issues.
-6. **Known exceptions** — things that look like bugs but are intentional. E.g. "NULL cells in CarMax 2014-2015 data are source-faithful." Prevents false-positive HALTs.
+1. **Audience** — external / investor / internal / public showcase.
+2. **What correctness means here** — project-specific: numbers traceable to source, disclaimer requirements, freshness windows.
+3. **Red-flag patterns** — hard-HALT list. "No loan-level PII." "No forward-looking claims without disclaimer."
+4. **Aesthetic bar** — investor-grade polish vs utility-grade vs playful. Without this, the reviewer applies the wrong standard and you get either useless nitpicks or missed polish issues.
+5. **Known exceptions** — things that look like bugs but are intentional. E.g. "NULL cells in CarMax 2014-2015 data are source-faithful." Prevents false-positive HALTs.
 
-The template lives at `helpers/review-context.template.md`. New project chat copies it to `/opt/<project>/REVIEW_CONTEXT.md` and fills in.
+These live in `/opt/<project>/PROJECT_CONTEXT.md` alongside the top situational sections and the `## User Journeys` section. The template scaffold lives at `helpers/project-context.template.md`.
 
 **Calibration is load-bearing.** A utility research tool doesn't need investor polish; an investor page can't ship with a research-notebook aesthetic. Getting this wrong wastes tokens on noise or misses real issues.
 
@@ -192,12 +191,7 @@ Concrete steps for a new project chat adopting visual-lint:
    ```
    (Infra does NOT install this globally. Projects pin their own version.)
 
-2. **Write `REVIEW_CONTEXT.md`**:
-   ```
-   cp /opt/site-deploy/helpers/review-context.template.md /opt/<project>/REVIEW_CONTEXT.md
-   $EDITOR /opt/<project>/REVIEW_CONTEXT.md
-   ```
-   Fill in all five sections. One-line entries are fine; leaving a section blank defeats calibration.
+2. **Ensure `PROJECT_CONTEXT.md` has a `## QA calibration` section** (and a `## User Journeys` section). If missing, dispatch `context-researcher` to backfill. Fill in all five QA-calibration axes (audience, correctness, red-flag patterns, aesthetic bar, known exceptions). One-line entries are fine; leaving an axis blank defeats calibration.
 
 3. **Add visual-lint calls to the spec**. Minimum starter set:
    ```ts
@@ -246,12 +240,12 @@ Concrete steps for a new project chat adopting visual-lint:
    - name: Visual review (A-llm layer)
      run: |
        bash /opt/site-deploy/helpers/visual-review-orchestrator.sh \
-         <project> /opt/<project>/REVIEW_CONTEXT.md \
+         <project> /opt/<project>/PROJECT_CONTEXT.md \
          /opt/<project>/.perf.yaml
    ```
 
 6. **Worked example — carvana-abs-2**:
-   - `REVIEW_CONTEXT.md` declares "investor-grade polish; no loan-level PII ever; numbers must trace to SEC 10-K filings."
+   - `PROJECT_CONTEXT.md#qa-calibration` declares "investor-grade polish; no loan-level PII ever; numbers must trace to SEC 10-K filings."
    - Spec calls all six starter functions + `assertNoEmptyCharts` + `assertNoScrollTraps` (both motivated by the Methodology incident).
    - qa.yml runs the orchestrator against `.perf.yaml` (already declares the relevant pages × viewports).
    - First run finds three HALTs: raw entities, collapsed heatmap, scroll trap — exactly the Methodology bugs.
@@ -292,7 +286,7 @@ Growing section. Each entry: symptom → detection → fix pattern → LESSONS l
 
 Per review pass (one project, ~5 pages, 2 viewports, briefed + unbriefed):
 
-- ~10 Claude-Sonnet calls, each ~6k tokens input (screenshot + REVIEW_CONTEXT + brief) + ~400 tokens output.
+- ~10 Claude-Sonnet calls, each ~6k tokens input (screenshot + PROJECT_CONTEXT + brief) + ~400 tokens output.
 - Per-pass cost: roughly $0.20–$0.40.
 - Ships per month per project with UI changes: typically 10–20.
 - **Monthly per project: ~$4–$8 in tokens.**

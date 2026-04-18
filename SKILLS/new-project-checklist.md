@@ -15,7 +15,7 @@ When the user asks to create a new project on the droplet. Not on every project 
 Every new project ships with **both** a live URL and a preview URL. Claude's work always lands on preview; live only changes when the user says "ship it."
 
 1. **Dispatch the `context-researcher` agent** (see `.claude/agents/context-researcher.md`) to produce the initial `/opt/<name>/PROJECT_CONTEXT.md`. Kickoff is not complete until the file exists and the user has skimmed it once. Per `SKILLS/project-context.md`.
-2. **Author user journeys in `REVIEW_CONTEXT.md`** per `SKILLS/acceptance-rehearsal.md`. Minimum 1 journey; typical 3-7. Done **before any UI is built** — journeys are the shared-language frame for specs, builds, and the acceptance-rehearsal gate. Reviewer fails project-kickoff PRs missing this.
+2. **Author user journeys in `PROJECT_CONTEXT.md#user-journeys`** per `SKILLS/acceptance-rehearsal.md`. Minimum 1 journey; typical 3-7. Schema: Entry URL, Declared success, Steps, Key failure modes. Done **before any UI is built** — journeys are the shared-language frame for specs, builds, and the acceptance-rehearsal gate. Reviewer fails project-kickoff PRs missing this (infra-only projects use the `_None — infrastructure project with no end-user surface._` placeholder).
 3. Create `/opt/<name>/{live,preview}/` (or `games/<name>/{live,preview}/` for static games).
 4. Add **two** nginx location blocks in `deploy/update_nginx.sh` — `/<name>/` (live) and `/<name>/preview/` — and bump `NGINX_VERSION`.
 5. Add a link card on `deploy/landing.html` pointing at the **live** URL (not preview).

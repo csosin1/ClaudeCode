@@ -29,14 +29,14 @@ If any required input is missing or the chat-history path does not exist, do not
 ## Sources (priority order)
 
 1. **Head-agent chat history** — `/root/.claude/projects/<slug>/*.jsonl`. Canonical, richest source. Extract stated intent, rejected approaches, preferences voiced, constraints, shorthand vocabulary built up between user and head agent. Skip pure tool-call exchanges; read substantive user messages and the head agent\'s substantive responses.
-2. **Repo artifacts** — `/opt/<project>/PROJECT_STATE.md`, `REVIEW_CONTEXT.md`, `CLAUDE.md`, `LESSONS.md`, `CHANGES.md`, `RUNBOOK.md`. Read whichever exist.
+2. **Repo artifacts** — `/opt/<project>/PROJECT_STATE.md`, `CLAUDE.md`, `LESSONS.md`, `CHANGES.md`, `RUNBOOK.md`, prior `PROJECT_CONTEXT.md` (if any). Read whichever exist.
 3. **User kickoff text**, if dispatcher supplied it.
 4. **External web research** — only where external context materially applies. For industry/regulatory projects, 3-10 targeted searches is typical. For personal/relational projects, "n/a, no external context needed" is often the correct answer. Do not pad.
 
 ## Your loop
 
 1. **Confirm inputs.** `ls` the chat-history dir and the repo dir. Abort-and-report-gaps if either is missing.
-2. **Read repo artifacts.** Fast scan of PROJECT_STATE, REVIEW_CONTEXT, CLAUDE.md, LESSONS, CHANGES, RUNBOOK.
+2. **Read repo artifacts.** Fast scan of PROJECT_STATE, prior PROJECT_CONTEXT (if any), CLAUDE.md, LESSONS, CHANGES, RUNBOOK.
 3. **Scan chat history.** List JSONL files (sorted by mtime). For a project with <20 files, read all. For larger histories, read the three most recent plus any file with a substantial user preamble. Extract:
    - User\'s stated intent and why the project exists.
    - Approaches the user explicitly rejected.
@@ -100,7 +100,7 @@ Extracted verbatim from chat history where possible.
 - **Over-indexing on a single recent conversation.** Weight for durability. A one-time preference voiced in a single chat is weaker signal than a pattern across many chats.
 - **Treating absence of external industry context as failure.** For personal projects, for most family software, often for internal infra — external research is genuinely n/a. That is the correct answer when it is correct.
 - **Rigid template application.** The same seven section headers appear in every file. Their depth and content vary 10x across project types. A family-software `## The world this project lives in` reads like a household brief; an ABS-dashboard version reads like an industry primer. Both are correct.
-- **Stealth scope growth.** This file is a reservoir, not a second spec. Do not invent success criteria, acceptance tests, or delivery deadlines — those live in PROJECT_STATE.md and REVIEW_CONTEXT.md. If you find yourself writing "the app should…", stop and relocate.
+- **Stealth scope growth.** This file is a reservoir, not a second spec. Do not invent success criteria, acceptance tests, or delivery deadlines — those live in PROJECT_STATE.md. If you find yourself writing "the app should…", stop and relocate.
 
 ## File placement
 
@@ -112,7 +112,7 @@ Consumed by: head agent (at compaction recovery), `infra-builder`, `infra-review
 
 Refresh triggers (per `SKILLS/project-context.md`):
 - Quarterly baseline refresh via `/usr/local/bin/refresh-project-contexts.sh` cron.
-- Material change in `REVIEW_CONTEXT.md` (product direction shift).
+- Material change in product direction, audience, aesthetic bar, or user journeys (update the `## User Journeys` and QA-calibration sections in place).
 - User-initiated via `/usr/local/bin/refresh-project-context.sh <project>`.
 - Head-agent-initiated when they notice substantial new context has surfaced.
 

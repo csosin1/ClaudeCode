@@ -60,11 +60,11 @@ A journey has four parts:
 
 ## Where journeys live
 
-`REVIEW_CONTEXT.md#user-journeys` per project. Maintained by the project chat. Updated when product direction shifts. The `helpers/review-context.template.md` includes the section scaffold.
+`PROJECT_CONTEXT.md#user-journeys` per project (living section — kept current post-ship). Maintained by the project chat. Updated when product direction shifts. The `helpers/project-context.template.md` includes the section scaffold. Companion to the immutable intent-at-kickoff snapshot in `KICKOFF_REPORT.md`.
 
 ## Authoring journeys at project start
 
-**Before any UI is built**, 1-7 journeys must be declared in `REVIEW_CONTEXT.md`. Target 3 for most projects. More than 7 is scope sprawl; 0 is a missing shared language. The reviewer fails project-kickoff PRs without journeys (per `SKILLS/new-project-checklist.md`).
+**Before any UI is built**, 1-7 journeys must be declared in `PROJECT_CONTEXT.md#user-journeys`. Target 3 for most projects. More than 7 is scope sprawl; 0 is a missing shared language. The reviewer fails project-kickoff PRs without journeys (per `SKILLS/new-project-checklist.md`).
 
 This is deliberately front-loaded. Journeys written after the fact tend to describe what got built — not what the user wanted. Authored up front, they constrain the build.
 
@@ -72,12 +72,12 @@ This is deliberately front-loaded. Journeys written after the fact tend to descr
 
 **Inputs (dispatcher supplies):**
 - Spec of the change (1-2 sentences).
-- `REVIEW_CONTEXT.md` path.
+- `PROJECT_CONTEXT.md` path (contains `## User Journeys` + QA-calibration sections).
 - Live preview URL.
 - **Target journey** — which journey this ship affects. Dispatcher or project head chat picks. `all` triggers a broad rehearsal across every declared journey.
 
 **Agent process:**
-1. Reads `REVIEW_CONTEXT.md`, absorbs persona + target journey steps + aesthetic bar + red-flag patterns + known exceptions.
+1. Reads `PROJECT_CONTEXT.md`, absorbs persona + target journey steps + aesthetic bar + red-flag patterns + known exceptions.
 2. Navigates the preview URL via Playwright MCP (Bash-dispatched), taking a screenshot at each journey step.
 3. Reads content as encountered — labels, numbers, error states.
 4. Attempts the journey's stated outcome, recording observations step-by-step.
@@ -141,7 +141,7 @@ Fix: rehearsal must cite evidence — a quoted label, a screenshot reference, a 
 
 **2. Journey exists but agent rehearsed a different one than the ship affects.**
 Symptom: shipped a change to the Methodology tab; rehearsal targeted the "comparing deals" journey which doesn't touch Methodology.
-Fix: dispatcher must specify the target journey. The project's head chat is responsible for tagging each dispatch with its affected journey. If the spec doesn't name a journey, the ship doesn't leave Spec gate (per CLAUDE.md "Spec Before Any Code").
+Fix: dispatcher must specify the target journey. The project's head chat is responsible for tagging each dispatch with its affected journey. If the spec doesn't name a journey, the ship doesn't leave Clarify gate (per CLAUDE.md "Clarify Before Building" + the spec template in `SKILLS/user-info-conventions.md`).
 
 ## Related
 
@@ -150,4 +150,4 @@ Fix: dispatcher must specify the target journey. The project's head chat is resp
 - `SKILLS/data-audit-qa.md` — the numbers gate for number-heavy projects.
 - `SKILLS/platform-stewardship.md` — where learnings from rehearsal failures go.
 - `SKILLS/new-project-checklist.md` — where journey-authoring is enforced at project start.
-- `CLAUDE.md` "Spec Before Any Code" — spec must name which journey each UI ship extends.
+- `SKILLS/user-info-conventions.md` — spec template (names which journey each UI ship extends).

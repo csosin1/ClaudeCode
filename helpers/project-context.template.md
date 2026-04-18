@@ -11,7 +11,7 @@
 -->
 
 _Authored: <ISO timestamp, e.g. 2026-04-17T12:00:00Z> · Version: 1 · Mode: initial_
-_Sources: chat history <files / date ranges>, repo artifacts <PROJECT_STATE / REVIEW_CONTEXT / ...>, external <urls or "n/a">_
+_Sources: chat history <files / date ranges>, repo artifacts <PROJECT_STATE / prior PROJECT_CONTEXT / ...>, external <urls or "n/a">_
 _Next refresh due: <ISO date, +90 days from authorship>_
 
 ## The user
@@ -63,6 +63,36 @@ Bullet list; 3-15 entries typical.>
 - "<phrase>" — <meaning>
 - "<phrase>" — <meaning>
 
+## QA calibration
+
+<Read by visual-reviewer and acceptance-rehearsal at QA time. Five axes:
+
+- **Audience** — external/investor, internal/research, public showcase, utility-grade, etc.
+- **What correctness means here** — numbers traceable to what source, disclaimer requirements, freshness windows.
+- **Red-flag patterns** — hard-HALT list. "No loan-level PII." "No forward-looking claims without disclaimer." etc.
+- **Aesthetic bar** — investor-grade polish vs utility-grade vs playful. One line is enough.
+- **Known exceptions** — legitimate things that might look like bugs but are intentional.
+
+Infra-only projects with no user surface may write `_None — infrastructure project with no end-user surface._` and skip.>
+
+## User Journeys
+
+<The canonical definition of "what this project does for a user." Referenced by:
+- User ↔ head-agent communication ("add X to the [journey-name] journey")
+- Spec conversations for new features ("this feature extends [journey-name]")
+- Acceptance-rehearsal QA gate (agent rehearses declared journeys)
+- Builder onboarding ("read the journeys to understand user context")
+
+Target: 1-7 journeys per project. More = scope sprawl; 0 on a user-facing project = missing critical paths.
+
+Infra-only projects: write `_None — infrastructure project with no end-user surface._`>
+
+### <journey-name>
+- **Entry URL:** <url or none>
+- **Declared success:** <1-sentence outcome that means this journey worked>
+- **Steps (high level):** <ordered list, 3-7 items>
+- **Key failure modes:** <what breaks this journey>
+
 ## Authorship + refresh
 
 _Authored: <ISO timestamp>_
@@ -73,4 +103,4 @@ _Sources consulted:_
 - Repo artifacts: <list>
 - External URLs: <list, or "n/a">
 _Next refresh due: <ISO date>_
-_Refresh triggers: quarterly cron, REVIEW_CONTEXT material change, user-initiated via `/usr/local/bin/refresh-project-context.sh <project>`, or head-agent-initiated._
+_Refresh triggers: quarterly cron, QA-calibration or journey shift (update `## QA calibration` / `## User Journeys` in place), user-initiated via `/usr/local/bin/refresh-project-context.sh <project>`, or head-agent-initiated._

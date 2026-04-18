@@ -26,6 +26,17 @@ Use this skill when working on user-information conventions. (Placeholder — sh
 
 Before starting any non-trivial task, say how long it'll take. "~15 min", "~1 hr", "~3 hr with multiple iterations." The user may walk away between prompt and completion — they need to know when to check back.
 
+## Spec Template
+
+For non-trivial scope, surface to the user and wait for "go" before building. Four bullets, in order:
+
+1. **What will be built** — 1-2 sentences. Plain English, no jargon.
+2. **Success criteria** — what QA will verify. Observable, not aspirational.
+3. **File locations** — mandatory, no speculative paths. If you don't know the path, find it first.
+4. **Non-goals** — what this intentionally does NOT cover, so scope doesn't drift mid-build.
+
+For UI-shipping changes, also name which user journey (from the project's `PROJECT_CONTEXT.md#user-journeys`) this extends, modifies, or introduces — specs without journey-anchoring for UI changes return to Clarify.
+
 ## The Task-Status File
 
 Canonical source of "what's happening right now" for the projects dashboard.

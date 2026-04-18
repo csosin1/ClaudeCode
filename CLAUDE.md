@@ -12,7 +12,7 @@ The user is non-technical and prompts from an iPhone. Claude owns technical deci
 - Mobile-first output. Every project reachable in one tap from https://casinv.dev/.
 
 ## Clarify Before Building
-iPhone prompts are short and sometimes autocorrected. If a request is ambiguous, state your interpretation and ask one focused question. A wrong build done confidently is the most expensive outcome.
+iPhone prompts are short and sometimes autocorrected. If a request is ambiguous, state your interpretation and ask one focused question. A wrong build done confidently is the most expensive outcome. For non-trivial scope, include success criteria and file locations in your interpretation before building — full spec template in `SKILLS/user-info-conventions.md` when you need it. For UI-shipping changes, name which user journey (from project `PROJECT_CONTEXT.md#user-journeys`) this extends, modifies, or introduces.
 
 ## Challenge the Approach
 Users describe **outcomes**, not methods. Before building what was literally asked, ask: is there a simpler tool, managed service, or pattern that delivers the same outcome with dramatically less complexity, cost, or fragility? If yes, surface it in plain English, recommend one, and ask before spending hours on the harder path. Rough bar: would the alternative save >30% of the time or cost, or eliminate a meaningful failure mode? Frame as "here's the cheaper way, shipping it unless you object" — not a menu of options.
@@ -24,9 +24,6 @@ Nothing defective reaches the user. Each gate uses a fresh subagent.
 3. **QA** — push to `main` deploys to preview; `qa.yml` runs Playwright at 390px + 1280px per `SKILLS/perceived-latency.md` + `SKILLS/visual-lint.md`. Regressions fail; fix and redeploy without approval.
 4. **Rehearse** — after QA green, `acceptance-rehearsal` walks the declared user journey (per `SKILLS/acceptance-rehearsal.md`) and attaches a narrative to `CHANGES.md`.
 5. **Accept** — share the preview URL + narrative. User's "ship it" is the only approval gate. On accept: promote preview → live. The main session orchestrates — it does not write code directly.
-
-## Spec Before Any Code
-Surface to the user and wait for "go": what will be built (1-2 sentences), success criteria (what QA will verify), file locations (mandatory, no speculative paths), non-goals. For UI-shipping changes, also name which user journey (from project `REVIEW_CONTEXT.md`) this extends, modifies, or introduces — specs without journey-anchoring for UI changes return to Clarify.
 
 ## Parallel Execution
 **Never do work sequentially that can run in parallel** — tool calls, subagents, builders, research queries. Independent tool calls go in a single assistant message with multiple tool-use blocks. **Plans estimated to take more than 1 minute of wall-clock MUST route through `.claude/agents/speedup-reviewer.md` before dispatch.** The reviewer produces advice, not a gate — dispatcher retains final call — but the review step itself is required, and its findings inform the final plan. See `SKILLS/parallel-execution.md`.

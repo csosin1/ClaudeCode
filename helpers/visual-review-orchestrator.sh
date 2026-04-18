@@ -9,7 +9,10 @@
 #
 # Inputs:
 #   $1  project slug (e.g. "abs-dashboard")
-#   $2  path to REVIEW_CONTEXT.md in the project
+#   $2  path to PROJECT_CONTEXT.md in the project (provides audience, aesthetic
+#        bar, red-flag patterns, known exceptions, and user journeys to the
+#        visual-reviewer subagents — historically this argument was a separate
+#        REVIEW_CONTEXT.md; folded into PROJECT_CONTEXT.md on 2026-04-18)
 #   $3  path to the pages list (YAML or newline-delimited URL\tviewport pairs)
 #        - if the file is named *.perf.yaml we parse `pages:` from it
 #        - otherwise treat as newline-delimited "URL<TAB>VIEWPORT"
@@ -39,11 +42,11 @@ PAGES_PATH="${3:-}"
 BRIEF_PATH="${4:-}"
 
 if [[ -z "$PROJECT" || -z "$CONTEXT_PATH" || -z "$PAGES_PATH" ]]; then
-  echo "usage: $0 <project> <REVIEW_CONTEXT.md> <pages-file> [brief-file]" >&2
+  echo "usage: $0 <project> <PROJECT_CONTEXT.md> <pages-file> [brief-file]" >&2
   exit 2
 fi
 if [[ ! -f "$CONTEXT_PATH" ]]; then
-  echo "[visual-review-orchestrator] REVIEW_CONTEXT.md not found: $CONTEXT_PATH" >&2
+  echo "[visual-review-orchestrator] PROJECT_CONTEXT.md not found: $CONTEXT_PATH" >&2
   exit 2
 fi
 if [[ ! -f "$PAGES_PATH" ]]; then
@@ -195,7 +198,7 @@ dispatch_one() {
     echo "Viewport: $viewport"
     echo "Screenshot path on disk: $shot"
     echo ""
-    echo "=== REVIEW_CONTEXT.md (project: $PROJECT) ==="
+    echo "=== PROJECT_CONTEXT.md (project: $PROJECT) ==="
     echo "$REVIEW_CONTEXT_CONTENT"
     if [[ "$mode" == "briefed" && -n "$BRIEF_CONTENT" ]]; then
       echo ""

@@ -96,7 +96,7 @@ Three wildly different worlds. Same seven headers. That is the skill.
 The context-researcher agent draws from these, in priority order:
 
 1. **Head-agent chat history** — `/root/.claude/projects/<slug>/*.jsonl`. Canonical. Richest. The user\'s and head agent\'s back-and-forth is where stated intent, rejected approaches, and shorthand vocabulary actually live.
-2. **Repo artifacts** — `PROJECT_STATE.md`, `REVIEW_CONTEXT.md`, `CLAUDE.md`, `LESSONS.md`, `CHANGES.md`, `RUNBOOK.md`. Whatever exists.
+2. **Repo artifacts** — `PROJECT_STATE.md`, prior `PROJECT_CONTEXT.md` (if any), `CLAUDE.md`, `LESSONS.md`, `CHANGES.md`, `RUNBOOK.md`. Whatever exists.
 3. **User kickoff text** — when the dispatcher supplies one.
 4. **External web research** — only where external context materially applies. Often "n/a" for personal projects and internal infra. That is the correct answer when it is correct. Do not pad.
 
@@ -119,7 +119,7 @@ The context-researcher agent draws from these, in priority order:
 ## Refresh triggers
 
 - **Quarterly baseline.** `/etc/cron.d/claude-ops` runs `/usr/local/bin/refresh-project-contexts.sh` at 04:00 on the 1st of every 3rd month. Iterates projects sequentially (not parallel — avoid LLM cost spikes), dispatches `context-researcher` in `refresh` mode for each.
-- **REVIEW_CONTEXT.md material change.** When product direction, audience, or aesthetic bar shifts, the head agent dispatches a refresh.
+- **QA-calibration or journey shift.** When product direction, audience, aesthetic bar, or user journeys shift, the head agent dispatches a refresh to update the `## QA calibration` and `## User Journeys` sections of `PROJECT_CONTEXT.md`.
 - **User-initiated.** `/usr/local/bin/refresh-project-context.sh <project>` for any one project on demand.
 - **Head-agent-initiated.** When the head agent notices substantial new context has surfaced in conversation that is not yet reflected in PROJECT_CONTEXT.md.
 
@@ -137,7 +137,7 @@ The context-researcher agent draws from these, in priority order:
 | `infra-reviewer` | Yes, when PR touches `/opt/<project>/` | Cite a relevant section in review rationale |
 | `reviewer` (per-project) | Yes | Calibrate against the user\'s actual standards |
 | `infra-qa` | Yes, at start of project-scoped QA | Understand what "correctness" means for this user |
-| `visual-reviewer` | Yes, before reviewing screenshots | Calibration comes from here, not just REVIEW_CONTEXT |
+| `visual-reviewer` | Yes, before reviewing screenshots | Calibration comes entirely from here (top sections + `## QA calibration`) |
 | `acceptance-rehearsal` | Yes, before rehearsing | Rehearse as an informed user of THIS project\'s world |
 | `context-researcher` | Writes it | N/A |
 
@@ -147,9 +147,9 @@ Why we have this many doc files and how they differ. Use this decision tree befo
 
 | File | Scope | Cadence | Who writes | Core question it answers |
 |---|---|---|---|---|
-| `PROJECT_CONTEXT.md` | Broad, durable, situational | Quarterly refresh + on-shift | `context-researcher` | "What world does this project live in?" |
+| `PROJECT_CONTEXT.md` | Broad durable situational context + QA calibration + user journeys (unified 2026-04-18) | Quarterly refresh + on-shift; journeys and QA calibration updated when product shifts | `context-researcher` (top); project chat (`## QA calibration` + `## User Journeys`) | "What world does this project live in, and what does 'good' look like at ship time?" |
 | `PROJECT_STATE.md` | Narrow, current state | Updated every 30 min of active work | Project chat / head agent | "Where are we right now, what is in flight?" |
-| `REVIEW_CONTEXT.md` | Per-project QA calibration + user journeys | Updated when product shifts | Project chat | "What does \'good\' look like for this project at ship time?" |
+| `KICKOFF_REPORT.md` | Immutable intent-at-kickoff snapshot | Written once at kickoff, never edited | Kickoff protocol | "What did we think the user wanted when we started?" |
 | `CLAUDE.md` (root) | Platform-wide rules for every agent | Paired-edit on each change | Infra chat | "What rule must every agent follow?" |
 | `LESSONS.md` | Incident + RCA log | Per incident | Agent closest to the incident | "What broke, why, how do we prevent it?" |
 | `CHANGES.md` | Per-ship change log | Per ship | Builder of the change | "What did this ship do, what should QA verify?" |
@@ -160,7 +160,7 @@ Rules of thumb for picking the right file when you have new info:
 - **Dynamic per-task vs durable per-project** → PROJECT_STATE vs PROJECT_CONTEXT.
 - **Per-project vs platform-wide** → PROJECT_* vs CLAUDE.md / LESSONS / SKILLS.
 - **Incident vs planned** → LESSONS vs CHANGES / RUNBOOK.
-- **How it ships vs what it is for** → REVIEW_CONTEXT vs PROJECT_CONTEXT.
+- **Living current state vs immutable-at-kickoff intent** → PROJECT_CONTEXT `## User Journeys` vs KICKOFF_REPORT.
 
 If a piece of content plausibly fits two of these, it probably belongs in just one — pick the one matching the **cadence** at which the content will change. Split if needed; cross-link; do not duplicate.
 

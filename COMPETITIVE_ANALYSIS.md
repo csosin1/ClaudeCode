@@ -105,7 +105,7 @@ Legend: ✅ = first-class / documented; ⚠️ = partial, opt-in, or requires ad
 | Multi-file editing | ✅ (inherited) |
 | Multi-project isolation | ✅ **project-owned paths + shared-infra gates** |
 | Session resume | PROJECT_STATE.md + commit discipline |
-| Plan/act separation | Spec-Before-Any-Code + builder→reviewer chain |
+| Plan/act separation | Clarify-Before-Building + spec template (`SKILLS/user-info-conventions.md`) + builder→reviewer chain |
 | Multi-agent orchestration | ✅ **~10 specialized agents** |
 | Narrow-scope reviewers | ✅ **4 specialists: infra, visual, speedup, test-completeness** |
 | Pre-merge QA | ✅ functional + visual-lint + chart-hygiene @ 390/1280 |
@@ -199,7 +199,7 @@ Ordered by how much each affects near-term work:
 5. **Multi-model orchestration**. LangGraph/LangChain route by task to different LLMs. We're Claude-only. Fine given our commitment.
 6. **Docker sandbox execution**. OpenHands/SWE-agent (and CrewAI, with caveats) run agents in containers. We use systemd + isolated paths. Different approach; neither strictly better at our scale.
 7. **Plugin/extension ecosystem**. SKILLS/ is our extension mechanism but designed for internal use, not third-party contribution. If productized, a real plugin story becomes needed.
-8. **Formal plan/act toggle**. Cline toggles explicitly; we have softer Spec-Before-Any-Code discipline. Probably fine.
+8. **Formal plan/act toggle**. Cline toggles explicitly; we have softer Clarify-Before-Building + spec-template discipline (template in `SKILLS/user-info-conventions.md`). Probably fine.
 
 ### Tool-specific features we'd cherry-pick if adopting
 
