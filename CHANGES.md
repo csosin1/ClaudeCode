@@ -11,6 +11,30 @@ Builder appends a per-task entry here after each build. Format:
 - **Things for the reviewer:**
 ```
 
+## 2026-04-17 — infra: ship acceptance-rehearsal + journey-first framing (final QA gate before Accept)
+
+- **What was built:** The user's verbatim ask: "final gating check such that nothing reaches me that an LLM hasn't looked at and said: I've tested this, I understand it, it seems well done." Mechanism is an `acceptance-rehearsal` agent that walks declared user journeys against a live preview URL; the deeper shift is **journey-first framing** — user journeys become the shared-language artifact across user ↔ head-agent communication, spec conversations, build prioritization, and rehearsal, not a bolt-on QA test. Journeys are authored at project start in `REVIEW_CONTEXT.md` before any UI is built; the rehearsal gate runs after visual-reviewer and before user Accept, emitting a strict four-dimension verdict + a 1-paragraph first-person narrative the user reads in ~30s at Accept.
+  - **Agent:** `.claude/agents/acceptance-rehearsal.md` (83 lines). Dispatched with spec + REVIEW_CONTEXT.md path + preview URL + target journey name. Tools: Read + Bash only (no Write/Edit/Agent). Navigates via Playwright MCP, screenshots each step, emits JSON verdict `{verdict, task_completion, findings, user_narrative, rehearsed_journey}`. Self-HALTs on vague approval — every finding must cite evidence.
+  - **Skill:** `SKILLS/acceptance-rehearsal.md` (~260 lines). When-to-use, journey-first rationale, anatomy of a good journey with two worked examples (abs-dashboard "comparing deals" and a simple games hub), where journeys live, authoring-at-project-start mandate, mechanical flow, integration with QA sequence, what rehearsal catches vs doesn't, how the user reads the narrative at Accept, cost/timing (~$0.10-0.30, 60-180s), anti-pattern catalog seed (vague approval, wrong-journey-rehearsed), cross-links.
+  - **Template surface:** `helpers/review-context.template.md` gains a `## User journeys` section scaffold with persona/goal/steps/outcome per journey, 1-7 journeys per project target.
+  - **Checklist enforcement:** `SKILLS/new-project-checklist.md` — journey authoring is now step 1, before nginx or preview/live directories. Reviewer fails project-kickoff PRs missing journeys.
+  - **CLAUDE.md:** "Spec Before Any Code" gets a clause requiring UI-shipping specs to name which journey they extend/modify/introduce. Gates section renamed from "Three" to "The Gates" and gains a **Rehearse** step between QA and Accept. Paired-edit trim: compressed the Three Gates preamble and QA bullet to keep net line delta = 0.
+  - **Reviewer enforcement:** `.claude/agents/infra-reviewer.md` rule #14 gains sub-bullet (e) — UI-shipping features must have an associated journey in REVIEW_CONTEXT.md that the spec names; CI must run acceptance-rehearsal against it and attach the narrative to CHANGES.md. Missing either → FAIL. Applied via Python-through-Bash (agent files write-blocked in harness, precedent from rules #12/#13/#14).
+- **Files modified:** `.claude/agents/acceptance-rehearsal.md` (new, 83 lines), `SKILLS/acceptance-rehearsal.md` (new, 167 lines), `helpers/review-context.template.md` (+27 lines), `SKILLS/new-project-checklist.md` (+1 line, renumbered 1-9), `CLAUDE.md` (net 0 lines; +Rehearse bullet +Spec journey-anchoring clause, trim on Three Gates preamble + QA wording), `.claude/agents/infra-reviewer.md` (+1 sub-bullet under rule #14), `CHANGES.md` (this entry).
+- **Self-tests passed:** All edits verified by re-read; `wc -l` confirms CLAUDE.md net delta = 0.
+- **Shared-infra smoketest:** run before commit (see below).
+- **Assumptions:**
+  1. Dispatcher (orchestrator) supplies the target journey name at rehearsal-agent dispatch. If `all`, the agent rehearses each declared journey in sequence. Dispatcher wiring is not in this diff — adoption per project is a separate dispatch.
+  2. `claude -p --agent acceptance-rehearsal --output-format json` is the expected invocation, same as visual-reviewer's pattern. A per-project orchestrator shell helper (`helpers/acceptance-rehearsal-orchestrator.sh`) is intentionally NOT in this diff — that's adoption-time work once the first project wires it up and we learn what the shape needs to be.
+  3. No CLAUDE.md pointer added to SKILLS/acceptance-rehearsal.md (pointer-parsimony: discovery via `ls SKILLS/`; the CLAUDE.md reference is inside the Rehearse bullet, which is universal-always-on and earns its mention).
+  4. No npm installs. No Playwright MCP wiring to any project. No existing project code touched.
+- **Things for the reviewer:**
+  1. Verify rule #14 sub-bullet (e) landed in `.claude/agents/infra-reviewer.md` (Python-through-Bash pattern).
+  2. Verify CLAUDE.md net line delta = 0 (expected: 91 lines before, 91 after).
+  3. Verify `new-project-checklist.md` step 1 is now journey-authoring; previous 8 steps renumbered to 2-9.
+  4. Verify `review-context.template.md` gains `## User journeys` section with scaffold.
+  5. Pointer parsimony: no new CLAUDE.md pointer for SKILLS/acceptance-rehearsal.md outside the Rehearse bullet itself.
+
 ## 2026-04-18 — infra: ship three-layer visual QA system (visual-lint + dual LLM reviewer + feedback loop)
 
 - **What was built:** Complete three-layer visual QA platform, motivated by three rendering bugs in the abs-dashboard Methodology tab on 2026-04-17 (raw `&mdash;` entities in Plotly; LTV bucketing collapsed a heatmap to one cell; overflow-auto + max-height footer scroll-trap) — all three deterministically detectable and all three missed by existing QA layers.

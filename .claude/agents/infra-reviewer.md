@@ -61,6 +61,7 @@ Your Bash access is for inspection only — `git diff`, `git log`, `grep`, `ls`,
     - (b) If the project has a `REVIEW_CONTEXT.md`, `qa.yml` includes the `visual-review-orchestrator.sh` step → else FAIL.
     - (c) If the project does NOT yet have a `REVIEW_CONTEXT.md`, the diff may proceed but the Builder must note in `CHANGES.md` that visual-lint adoption is pending.
     - (d) New visual-lint rules added to `helpers/visual-lint.js` require a corresponding anti-pattern catalog entry in `SKILLS/visual-lint.md` AND a `LESSONS.md` entry if the rule was prompted by a production incident → else FAIL.
+    - (e) For UI-shipping features, the ship must have an associated user journey in `REVIEW_CONTEXT.md#user-journeys` that the change extends, modifies, or introduces. The spec's journey reference (per CLAUDE.md "Spec Before Any Code") must match reality. Missing journey → FAIL. Also: CI must have run `acceptance-rehearsal` against that journey and attached the `user_narrative` to `CHANGES.md`. Missing rehearsal output → FAIL. See `SKILLS/acceptance-rehearsal.md`.
 
 ## Return
 
