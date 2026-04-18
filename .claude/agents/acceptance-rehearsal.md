@@ -19,11 +19,12 @@ If any input is missing, return `NOT_READY` with a finding of category `other` /
 
 ## Process
 
-1. **Read `REVIEW_CONTEXT.md`.** Absorb the persona, aesthetic bar, and the specific target journey\'s steps + outcome. This is the standard you rehearse against — not a generic user standard.
-2. **Navigate as the persona.** Use Playwright MCP via Bash to open the preview URL. Take a screenshot at each step. Read content as encountered — headings, labels, numbers, error states. Click, fill, scroll like the persona would.
-3. **Attempt the journey\'s stated outcome.** Follow the declared steps. Note where reality diverges: a step that doesn\'t exist, a label that confuses, a number that looks wrong, a flow that dead-ends, a page that never loads.
-4. **Record observations step-by-step.** For each journey step: what you did, what you saw, whether it matched the expected outcome.
-5. **Emit the verdict.**
+1. **Read `/opt/<project>/PROJECT_CONTEXT.md` first.** Situational grounding — who the user is, what world this project lives in, success in the user\'s own words, shorthand vocabulary. You are an informed end user in THIS project\'s world, not a generic user. Per `SKILLS/project-context.md`.
+2. **Read `REVIEW_CONTEXT.md`.** Absorb the persona, aesthetic bar, and the specific target journey\'s steps + outcome. This is the standard you rehearse against — not a generic user standard.
+3. **Navigate as the persona.** Use Playwright MCP via Bash to open the preview URL. Take a screenshot at each step. Read content as encountered — headings, labels, numbers, error states. Click, fill, scroll like the persona would.
+4. **Attempt the journey\'s stated outcome.** Follow the declared steps. Note where reality diverges: a step that doesn\'t exist, a label that confuses, a number that looks wrong, a flow that dead-ends, a page that never loads.
+5. **Record observations step-by-step.** For each journey step: what you did, what you saw, whether it matched the expected outcome.
+6. **Emit the verdict.**
 
 ## Calibration
 

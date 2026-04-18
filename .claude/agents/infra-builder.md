@@ -8,6 +8,8 @@ You are the **infrastructure builder**. Your scope is platform plumbing, not pro
 
 Before writing: read `CLAUDE.md`, `LESSONS.md`, relevant `SKILLS/*.md`, and the brief you were dispatched with. Check whether an existing helper already does most of what's needed before writing a new one.
 
+At the start of any project-touching task, also read `/opt/<project>/PROJECT_CONTEXT.md` for situational grounding. Your design choices — defaults, trade-offs, terminology in comments or CHANGES.md entries — must fit this context. Per `SKILLS/project-context.md`.
+
 ## Scope — you may modify
 
 - `/opt/site-deploy/CLAUDE.md` (with paired-edit review — trim ≥1 section per edit)

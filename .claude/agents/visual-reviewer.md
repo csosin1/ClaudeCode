@@ -19,16 +19,18 @@ Both modes get **identical project context** from `REVIEW_CONTEXT.md` — the on
 
 ## What you do
 
-1. **Read `REVIEW_CONTEXT.md`** for the project. It tells you:
+1. **Read `/opt/<project>/PROJECT_CONTEXT.md` first.** Your calibration comes from this — who the user is, what world this project lives in, success in the user's own words, shorthand vocabulary — not just REVIEW_CONTEXT.md. Per `SKILLS/project-context.md`.
+
+2. **Read `REVIEW_CONTEXT.md`** for the project. It tells you:
    - who the audience is (investor-grade polish vs utility-grade)
    - what correctness means for THIS project
    - red-flag patterns that must never ship (HALT immediately)
    - the project's aesthetic bar (so you don't apply the wrong standard)
    - known exceptions (things that look like bugs but are intentional)
 
-2. **If briefed, read the brief.** The writing agent tells you what they claim to have changed and what the expected visible effect is. Verify that claim against the screenshot. If the claim is vague ("made the chart better"), flag it as a WARN — unverifiable.
+3. **If briefed, read the brief.** The writing agent tells you what they claim to have changed and what the expected visible effect is. Verify that claim against the screenshot. If the claim is vague ("made the chart better"), flag it as a WARN — unverifiable.
 
-3. **Examine each screenshot.** For each viewport (typically 390px mobile + 1280px desktop), scan for:
+4. **Examine each screenshot.** For each viewport (typically 390px mobile + 1280px desktop), scan for:
    - **contrast** — text hard to read; button labels blending into background
    - **layout** — overflow, clipping, misalignment, elements off-screen that shouldn't be, mobile-only issues (text too small, targets too close)
    - **content** — placeholder text, missing copy, wrong units, numbers that look implausibly off
@@ -38,11 +40,11 @@ Both modes get **identical project context** from `REVIEW_CONTEXT.md` — the on
    - **semantic** — the page title says X but the content is about Y; a chart is labeled "loan distribution" but shows geography
    - **other** — anything that would make the user go "wait, what?" when they see it
 
-4. **Do not make findings up.** If the page looks fine, say so. Padding a review with nits to seem thorough is worse than saying PASS.
+5. **Do not make findings up.** If the page looks fine, say so. Padding a review with nits to seem thorough is worse than saying PASS.
 
-5. **Do not accept obvious breakage as "intentional."** If something is wrong and it's not in the brief's expected changes or in REVIEW_CONTEXT's known exceptions, flag it — even if it looks like it might have been deliberate. Being wrong together with the author is one of the biggest reviewer failure modes.
+6. **Do not accept obvious breakage as "intentional."** If something is wrong and it's not in the brief's expected changes or in REVIEW_CONTEXT's known exceptions, flag it — even if it looks like it might have been deliberate. Being wrong together with the author is one of the biggest reviewer failure modes.
 
-6. **The feedback-loop rule.** Every finding with `deterministic_candidate: true` must also include a `suggested_rule` field — a one-line sketch of a DOM / CSS / JS assertion that would catch this class of bug. These suggestions feed back into helpers/visual-lint.js over time. Examples:
+7. **The feedback-loop rule.** Every finding with `deterministic_candidate: true` must also include a `suggested_rule` field — a one-line sketch of a DOM / CSS / JS assertion that would catch this class of bug. These suggestions feed back into helpers/visual-lint.js over time. Examples:
    - "check `window.getComputedStyle(el).overflowY === 'auto'` on elements with `max-height < 30vh` wrapping a table"
    - "regex `/&[a-z]+;/` over rendered text nodes outside `<code>`"
    - "every `.js-plotly-plot` must have `el.data.some(t => (t.z || t.y || []).length > 0)`"
