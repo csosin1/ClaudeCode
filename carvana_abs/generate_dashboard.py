@@ -4345,14 +4345,31 @@ def generate_economics_tab():
         else:
             d["expected_residual"] = None
 
-        # Actual/projected residual = actual interest - actual servicing - projected losses
-        if (d.get("actual_cum_interest_pct") is not None and
-                d.get("actual_cum_servicing_pct") is not None and
-                d.get("projected_loss_pct") is not None):
-            d["actual_residual"] = (d["actual_cum_interest_pct"]
-                                    - d["actual_cum_servicing_pct"]
-                                    - d["projected_loss_pct"])
+        # Current Forecast = LIFETIME view as the model sees it TODAY.
+        # Same structure as Initial Forecast, but uses wal_now (realized +
+        # extrapolated remaining) and the latest Markov projected loss.
+        # Old formula mixed realized-to-date interest/servicing with a lifetime
+        # projected loss, producing apples-to-oranges variance for new deals.
+        # If wal_now is missing (brand-new deal where extrapolation hasn't
+        # settled), fall back to wal_initial so Current ≈ Initial → variance ≈ 0.
+        wal_curr = d.get("wal_now") or d.get("wal_initial")
+        xs_yr = d.get("excess_spread_yr")
+        if (xs_yr is not None and wal_curr is not None
+                and d.get("projected_loss_pct") is not None):
+            d["projected_lifetime_interest_pct"] = (
+                d["consumer_wac"] * wal_curr if d.get("consumer_wac") else None
+            )
+            d["projected_lifetime_servicing_pct"] = svc * wal_curr
+            d["projected_lifetime_excess_spread"] = xs_yr * wal_curr
+            d["actual_residual"] = (
+                d["projected_lifetime_excess_spread"]
+                - d["projected_lifetime_servicing_pct"]
+                - d["projected_loss_pct"]
+            )
         else:
+            d["projected_lifetime_interest_pct"] = None
+            d["projected_lifetime_servicing_pct"] = None
+            d["projected_lifetime_excess_spread"] = None
             d["actual_residual"] = None
 
         # Variance
@@ -4429,11 +4446,11 @@ def generate_economics_tab():
         ("g-init", "Svc"),
         ("g-init", "Exp Loss"),
         ("g-init", "Exp Resid"),
-        ("g-curr g-first", "Act Int"),
-        ("g-curr", "Act Svc"),
+        ("g-curr g-first", "Proj Int"),
+        ("g-curr", "Proj Svc"),
         ("g-curr", "WAL now"),
         ("g-curr", "Proj Loss"),
-        ("g-curr", "Act Resid"),
+        ("g-curr", "Curr Resid"),
         ("g-var g-first", "Var %"),
         ("g-var", "Var $"),
         ("g-var", "%Done"),
@@ -4449,7 +4466,7 @@ def generate_economics_tab():
     GROUP_HEADERS = [
         ("g-id", "Identity", 4),
         ("g-init", "Initial Forecast (at issuance)", 8),
-        ("g-curr", "Current Forecast (realized + Markov)", 5),
+        ("g-curr", "Current Forecast (lifetime view today: WAL_now × spread − loss)", 5),
         ("g-var", "Deltas / Variance", 4),
         ("g-cap", "Loan / Cap Structure", 6),
     ]
@@ -4532,9 +4549,9 @@ def generate_economics_tab():
             cells.append(pct_cell("g-init", "expected_loss_pct", 2))
             er = d.get("expected_residual")
             cells.append(f'<td class="g-init">{pf_color(er)}</td>')
-            # Current Forecast (5)
-            cells.append(pct_cell("g-curr g-first", "actual_cum_interest_pct", 2))
-            cells.append(pct_cell("g-curr", "actual_cum_servicing_pct", 2))
+            # Current Forecast (5) — LIFETIME view as the model sees it today
+            cells.append(pct_cell("g-curr g-first", "projected_lifetime_interest_pct", 2))
+            cells.append(pct_cell("g-curr", "projected_lifetime_servicing_pct", 2))
             cells.append(f'<td class="g-curr">{wal_now_disp}</td>')
             cells.append(pct_cell("g-curr", "projected_loss_pct", 2))
             ar = d.get("actual_residual")
@@ -4578,7 +4595,7 @@ def generate_economics_tab():
             "consumer_wac", "cost_of_debt", "excess_spread_yr",
             "wal_initial", "wal_now",
             "total_excess_spread", "total_servicing_cost", "expected_loss_pct",
-            "expected_residual", "actual_cum_interest_pct", "actual_cum_servicing_pct",
+            "expected_residual", "projected_lifetime_interest_pct", "projected_lifetime_servicing_pct",
             "projected_loss_pct", "actual_residual", "variance", "pct_complete",
         ]}
 
@@ -4605,8 +4622,8 @@ def generate_economics_tab():
         cells.append(f'<td class="g-init">{p(wa["total_servicing_cost"],2)}</td>')
         cells.append(f'<td class="g-init">{p(wa["expected_loss_pct"],2)}</td>')
         cells.append(f'<td class="g-init">{pf_color(wa["expected_residual"])}</td>')
-        cells.append(f'<td class="g-curr g-first">{p(wa["actual_cum_interest_pct"],2)}</td>')
-        cells.append(f'<td class="g-curr">{p(wa["actual_cum_servicing_pct"],2)}</td>')
+        cells.append(f'<td class="g-curr g-first">{p(wa["projected_lifetime_interest_pct"],2)}</td>')
+        cells.append(f'<td class="g-curr">{p(wa["projected_lifetime_servicing_pct"],2)}</td>')
         cells.append(f'<td class="g-curr">{wal_now_str}</td>')
         cells.append(f'<td class="g-curr">{p(wa["projected_loss_pct"],2)}</td>')
         cells.append(f'<td class="g-curr">{pf_color(wa["actual_residual"])}</td>')
