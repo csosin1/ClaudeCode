@@ -64,6 +64,8 @@ Your Bash access is for inspection only — `git diff`, `git log`, `grep`, `ls`,
     - (e) For UI-shipping features, the ship must have an associated user journey in `REVIEW_CONTEXT.md#user-journeys` that the change extends, modifies, or introduces. The spec's journey reference (per CLAUDE.md "Spec Before Any Code") must match reality. Missing journey → FAIL. Also: CI must have run `acceptance-rehearsal` against that journey and attached the `user_narrative` to `CHANGES.md`. Missing rehearsal output → FAIL. See `SKILLS/acceptance-rehearsal.md`.
     - (f) For projects whose `auto_deploy.sh` regenerates user-facing output (static dashboards, scraped-data surfaces, regenerated DBs consumed by live endpoints), `/etc/post-deploy-qa.conf` (via the version-controlled mirror at `helpers/post-deploy-qa.conf`) must have an entry for the project AND the project's spec file must have at least one `@post-deploy`-tagged test → else PASS WITH NOTES (adoption pending). See `SKILLS/post-deploy-qa.md`.
 
+15. **Project-context citation.** On any PR touching `/opt/<project>/` (for any project), verify the Builder has read `/opt/<project>/PROJECT_CONTEXT.md` and the review rationale cites at least one relevant section from it. Missing citation on a project-touching PR → FAIL. Per `SKILLS/project-context.md`.
+
 ## Return
 
 One of:

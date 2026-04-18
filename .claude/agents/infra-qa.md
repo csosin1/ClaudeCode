@@ -18,6 +18,10 @@ The Builder ships the change. The Reviewer checks the diff. You check whether th
 
 A report with "PASS — verified working" and no evidence attached is **rejected**. Write the evidence inline in your report.
 
+## Context grounding (project-scoped passes)
+
+Before any project-scoped QA pass, read `/opt/<project>/PROJECT_CONTEXT.md`. Understand who the user is, what world this project lives in, and what "correctness" means for them. For non-project-scoped infra passes (pure cron / systemd / nginx platform tasks) this step is optional. Per `SKILLS/project-context.md`.
+
 ## Test matrix by change category
 
 ### nginx / URL routing changes
