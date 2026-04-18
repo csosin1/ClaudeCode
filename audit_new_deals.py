@@ -138,7 +138,7 @@ def audit_loans(conn, deal):
 def audit_deal_terms(conn, deal):
     print(f"\n--- deal_terms audit: {deal} ---")
     r = conn.execute(
-        "SELECT initial_pool_balance, servicing_fee_pct, oc_target_pct, reserve_pct, note_wac "
+        "SELECT initial_pool_balance, servicing_fee_annual_pct, oc_target_pct, initial_reserve_pct, weighted_avg_coupon "
         "FROM deal_terms WHERE deal=?",
         (deal,),
     ).fetchone()
@@ -146,17 +146,20 @@ def audit_deal_terms(conn, deal):
         add("WARN", deal, "no deal_terms row (prospectus parser may not have run yet)")
         return
     ipb, sf, oct_, rsv, wac = r
-    print(f"  initial_pool_balance={ipb}, servicing_fee_pct={sf}, oc_target_pct={oct_}, reserve_pct={rsv}, note_wac={wac}")
+    print(f"  initial_pool_balance={ipb}, servicing_fee_annual_pct={sf}, oc_target_pct={oct_}, initial_reserve_pct={rsv}, weighted_avg_coupon={wac}")
     if ipb is not None:
         # typical deals: $300M - $2B
         if ipb < 50_000_000 or ipb > 5_000_000_000:
             add("HALT", deal, f"initial_pool_balance OUT OF RANGE: ${ipb:,.0f}")
+    elif ipb is None:
+        # Brand-new deal (CarMax 2026-2) may not have IPB in 424B yet
+        add("INFO", deal, "initial_pool_balance not yet in 424B — expected for newly-issued deals")
     if sf is not None:
         if sf < 0.3 or sf > 2.0:
-            add("WARN", deal, f"servicing_fee_pct {sf} outside typical 0.5-1.5%")
+            add("WARN", deal, f"servicing_fee_annual_pct {sf} outside typical 0.5-1.5%")
     if wac is not None:
         if wac < 2 or wac > 15:
-            add("WARN", deal, f"note_wac {wac} outside typical 2-15%")
+            add("WARN", deal, f"weighted_avg_coupon {wac} outside typical 2-15%")
 
 
 def main():
