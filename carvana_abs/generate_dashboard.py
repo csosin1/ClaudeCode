@@ -163,6 +163,241 @@ PLOTLY_CONFIG = {
 _PLOTLY_CONFIG_JSON = json.dumps(PLOTLY_CONFIG)
 
 
+# ─────────────────────────────────────────────────────────────────────────
+# Multi-page static-site scaffolding.
+#
+# The dashboard is rendered as a tree of small HTML pages (Recent Trends,
+# Economics, Methodology, Deal index, + one page per deal) that all share a
+# single CSS file and a single JS file. That way the browser only downloads
+# the page the user is actually viewing (~200–800 KB each) instead of one
+# 5-6 MB bundle, and the URL IS the tab — reloading preserves position and
+# bookmarks work natively.
+# ─────────────────────────────────────────────────────────────────────────
+
+BASE_URL_PATH = "/CarvanaLoanDashBoard"  # nginx prefix — used for absolute asset refs.
+
+# Top-level navigation: (slug, display_name, relative_path_from_base).
+# The deal-index page is the entry point for all per-deal pages.
+NAV_LINKS = [
+    ("recent",       "Recent Trends",          "/"),
+    ("economics",    "Residual Economics",     "/economics/"),
+    ("methodology",  "Methodology & Findings", "/methodology/"),
+    ("deals",        "Deals",                  "/deals/"),
+]
+
+
+SHARED_CSS = """
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f5f5f5;color:#212121}
+header{background:#1976D2;color:white;padding:12px 16px;position:sticky;top:0;z-index:100;display:flex;align-items:center;justify-content:space-between}
+header h1{font-size:1.1rem;font-weight:600}
+/* Top nav bar — one link per top-level page, active state highlighted. */
+nav.topnav{display:flex;flex-wrap:wrap;gap:4px;padding:6px 12px;position:sticky;top:44px;z-index:99;background:#f5f5f5;border-bottom:1px solid #e0e0e0}
+nav.topnav a{padding:6px 12px;border:1px solid #ccc;border-radius:6px;background:white;color:#212121;text-decoration:none;font-size:.75rem;white-space:nowrap}
+nav.topnav a.active{background:#1976D2;color:white;border-color:#1976D2}
+.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:6px;padding:8px 12px}
+.metric{background:white;border-radius:8px;padding:8px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.1)}
+.mv{font-size:1.1rem;font-weight:700;color:#1976D2}.ml{font-size:.65rem;color:#666;margin-top:2px}
+.tabs{display:flex;flex-wrap:wrap;gap:4px;padding:6px 12px;position:sticky;top:84px;z-index:98;background:#f5f5f5}
+.tab{padding:5px 10px;border:1px solid #ccc;border-radius:6px;background:white;cursor:pointer;font-size:.75rem;color:#212121;text-decoration:none}
+.tab.active{background:#1976D2;color:white;border-color:#1976D2}
+.tc{padding:0 12px 12px}
+.tbl{overflow-x:auto;margin:8px 0}
+table{width:100%;border-collapse:collapse;font-size:.7rem;background:white;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.1)}
+th{background:#f5f5f5;padding:5px 6px;text-align:left;border-bottom:2px solid #ddd;white-space:nowrap}
+td{padding:4px 6px;border-bottom:1px solid #eee;white-space:nowrap}
+tr:last-child td{font-weight:700;border-top:2px solid #ddd}
+table.compare tr:last-child td{font-weight:normal;border-top:none}
+h3{font-size:.85rem;color:#333;margin:10px 0 4px;padding:0 4px}
+footer{text-align:center;padding:12px;color:#999;font-size:.65rem}
+.js-plotly-plot .plotly .modebar{opacity:1 !important}
+.js-plotly-plot .plotly .modebar-btn{opacity:.75}
+.js-plotly-plot .plotly .modebar-btn:hover{opacity:1}
+.page-wrap{max-width:1400px;margin:0 auto}
+.narrative{max-width:50em}
+.econ-controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:6px 4px 10px;font-size:.75rem}
+.econ-controls label{display:inline-flex;align-items:center;gap:6px;min-height:44px;padding:4px 10px;background:white;border:1px solid #ddd;border-radius:6px;cursor:pointer;user-select:none}
+.econ-controls input[type=checkbox]{width:20px;height:20px;cursor:pointer;margin:0}
+table.econ{font-size:.62rem}
+table.econ td.g-id,table.econ th.g-id{background:rgba(33,150,243,.05)}
+table.econ td.g-init,table.econ th.g-init{background:rgba(76,175,80,.05)}
+table.econ td.g-curr,table.econ th.g-curr{background:rgba(255,193,7,.06)}
+table.econ td.g-var,table.econ th.g-var{background:rgba(158,158,158,.06)}
+table.econ td.g-cap,table.econ th.g-cap{background:rgba(120,144,156,.06)}
+table.econ td.g-first,table.econ th.g-first{border-left:2px solid #b0bec5}
+table.econ tr.group-header th{text-align:center;font-weight:700;font-size:.6rem;letter-spacing:.05em;text-transform:uppercase;padding:6px 4px;border-bottom:2px solid #1976D2;background:#ECEFF1}
+/* Deal-index grid */
+.deal-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px;padding:12px}
+.deal-card{background:white;border-radius:8px;padding:12px;box-shadow:0 1px 3px rgba(0,0,0,.1);text-decoration:none;color:#212121;display:block;transition:transform .08s ease}
+.deal-card:hover{transform:translateY(-1px);box-shadow:0 2px 6px rgba(0,0,0,.15)}
+.deal-card .dc-name{font-weight:700;color:#1976D2;font-size:.95rem}
+.deal-card .dc-meta{color:#666;font-size:.72rem;margin-top:4px}
+.deal-card .dc-issuer{display:inline-block;padding:2px 6px;border-radius:4px;background:#ECEFF1;color:#455A64;font-size:.65rem;font-weight:600;letter-spacing:.02em;margin-top:6px}
+.deal-card.crvna .dc-issuer{background:#E3F2FD;color:#1565C0}
+.deal-card.carmx .dc-issuer{background:#FFF3E0;color:#E65100}
+@media(max-width:600px){.metrics{grid-template-columns:repeat(2,1fr)}.mv{font-size:.95rem}.tab{font-size:.65rem;padding:4px 6px}nav.topnav a{font-size:.7rem;padding:5px 8px}}
+@media(min-width:1280px){
+  .tab{font-size:.85rem;padding:7px 14px}
+  nav.topnav a{font-size:.85rem;padding:7px 14px}
+  header h1{font-size:1.3rem}
+  .metric{padding:10px}
+  .mv{font-size:1.25rem}.ml{font-size:.75rem}
+  table{font-size:.8rem}
+  table.econ{font-size:.72rem}
+}
+"""
+
+# Shared JS: URL-hash sub-tab routing on per-deal pages + a small helper the
+# page shell uses to highlight the active top-nav link. No external deps.
+SHARED_JS = """
+// Sub-tab (in-page) routing via URL hash. Every sub-tab button carries
+// data-subtab="slug"; every content pane carries data-subtab-pane="slug".
+// Clicking a button updates location.hash (no reload). On load and on
+// hashchange we show the matching pane and highlight the matching button.
+(function(){
+  function showSub(slug){
+    var btns = document.querySelectorAll('[data-subtab]');
+    var panes = document.querySelectorAll('[data-subtab-pane]');
+    if (!btns.length) return;
+    // If the requested slug doesn't match any pane, fall back to the first.
+    var valid = Array.prototype.some.call(btns, function(b){
+      return b.getAttribute('data-subtab') === slug;
+    });
+    if (!valid) slug = btns[0].getAttribute('data-subtab');
+    btns.forEach(function(b){
+      b.classList.toggle('active', b.getAttribute('data-subtab') === slug);
+    });
+    panes.forEach(function(p){
+      p.style.display = (p.getAttribute('data-subtab-pane') === slug) ? 'block' : 'none';
+    });
+    // Re-layout any Plotly charts now that their container is visible.
+    setTimeout(function(){ window.dispatchEvent(new Event('resize')); }, 80);
+  }
+  function currentSlug(){
+    var h = (window.location.hash || '').replace(/^#/, '');
+    return h || null;
+  }
+  document.addEventListener('click', function(e){
+    var t = e.target.closest('[data-subtab]');
+    if (!t) return;
+    e.preventDefault();
+    var slug = t.getAttribute('data-subtab');
+    // Update hash without adding a new history entry for every click.
+    history.replaceState(null, '', '#' + slug);
+    showSub(slug);
+  });
+  window.addEventListener('hashchange', function(){
+    var s = currentSlug();
+    if (s) showSub(s);
+  });
+  document.addEventListener('DOMContentLoaded', function(){
+    var btns = document.querySelectorAll('[data-subtab]');
+    if (!btns.length) return;
+    var slug = currentSlug() || btns[0].getAttribute('data-subtab');
+    showSub(slug);
+  });
+})();
+"""
+
+
+# Mapping from human-readable sub-tab label to URL-hash slug. The slug is
+# what appears in the browser bar (e.g. /deals/crvna-2021-P1/#losses).
+SUBTAB_SLUGS = {
+    "Pool Summary":  "pool",
+    "Delinquencies": "dq",
+    "Losses":        "losses",
+    "Notes & OC":    "notes",
+    "Cash Waterfall":"waterfall",
+    "Recovery":      "recovery",
+    "Documents":     "docs",
+}
+
+
+def _subtab_slug(label):
+    """Look up the URL-hash slug for a given sub-tab label. Falls back to a
+    lowercase-underscore form for any label not in the curated registry."""
+    if label in SUBTAB_SLUGS:
+        return SUBTAB_SLUGS[label]
+    return label.lower().replace(" & ", "-").replace(" ", "-").replace("&", "and")
+
+
+def _render_subtab_buttons(sections):
+    """Render the row of sub-tab buttons for a per-deal page. Buttons carry
+    `data-subtab="<slug>"` so shared.js handles activation via URL hash."""
+    out = []
+    for idx, name in enumerate(sections.keys()):
+        slug = _subtab_slug(name)
+        cls = "tab active" if idx == 0 else "tab"
+        # <a> with href="#<slug>" so bookmarkable + no-JS graceful fallback.
+        out.append(
+            f'<a class="{cls}" data-subtab="{slug}" '
+            f'href="#{slug}" role="tab">{name}</a>'
+        )
+    return "\n".join(out)
+
+
+def _render_subtab_panes(sections):
+    """Render the content divs for a per-deal page. Each pane carries
+    `data-subtab-pane="<slug>"`; shared.js shows/hides based on URL hash."""
+    out = []
+    for idx, (name, body) in enumerate(sections.items()):
+        slug = _subtab_slug(name)
+        disp = "block" if idx == 0 else "none"
+        out.append(
+            f'<div class="tc" data-subtab-pane="{slug}" '
+            f'style="display:{disp}">{body}</div>'
+        )
+    return "\n".join(out)
+
+
+def _slugify_deal(issuer_prefix, deal):
+    """Turn a deal id into a URL-safe slug.
+
+    Carvana deals: 2021-P1 → crvna-2021-P1
+    CarMax  deals: 2021-1  → carmx-2021-1
+    """
+    return f"{issuer_prefix}-{deal}".lower()
+
+
+def _nav_bar(active_slug, asset_prefix=BASE_URL_PATH):
+    """Render the persistent top-nav bar. Active link highlighted.
+
+    asset_prefix is the nginx-mounted base (e.g. /CarvanaLoanDashBoard) so
+    links work regardless of which nested page the user is on.
+    """
+    items = []
+    for slug, name, rel in NAV_LINKS:
+        cls = ' class="active"' if slug == active_slug else ""
+        items.append(f'<a href="{asset_prefix}{rel}"{cls}>{name}</a>')
+    return '<nav class="topnav">' + "".join(items) + "</nav>"
+
+
+def _page_shell(title, active_nav, body_html, asset_prefix=BASE_URL_PATH):
+    """Wrap a page body in the shared HTML shell.
+
+    Every page gets the same <head> (shared CSS, Plotly CDN, shared JS) and
+    the same persistent top-nav bar. Only the body differs.
+    """
+    css_href = f"{asset_prefix}/assets/shared.css"
+    js_src = f"{asset_prefix}/assets/shared.js"
+    return f"""<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>{title}</title>
+<link rel="stylesheet" href="{css_href}">
+<script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+<script defer src="{js_src}"></script>
+</head><body>
+<header><h1>Carvana ABS Dashboard</h1></header>
+{_nav_bar(active_nav, asset_prefix)}
+<div class="page-wrap">
+<main>
+{body_html}
+</main>
+<footer>Data from SEC EDGAR | Generated {datetime.now().strftime('%Y-%m-%d %H:%M UTC')}</footer>
+</div>
+</body></html>"""
+
+
 def chart(traces, layout, height=350):
     """Generate a Plotly.js chart div using raw JSON data."""
     global _chart_id
@@ -1108,18 +1343,10 @@ def generate_carmax_deal_content(deal):
 <div class="metric"><div class="mv">{dq_display}</div><div class="ml">Total DQ Rate</div></div>
 </div>"""
 
-    # Deal slugs must not collide with Carvana deal slugs. Carvana deals look
-    # like "2021-P1" and already slugify to "2021_P1"; CarMax deals look like
-    # "2021-1" which would slugify to "2021_1" — no collision with Carvana's
-    # "-P"/"-N" suffixed names, but we prefix with "cm_" to remove any doubt.
-    deal_safe = f"cm_{deal.replace('-', '_')}"
-    tabs_html = ""; content_html = ""; first = True
-    for name, body in sections.items():
-        tid = f"{deal_safe}_{name.replace(' ','_').replace('&','and')}"
-        tabs_html += f'<button class="tab{" active" if first else ""}" onclick="showTab(\'{tid}\',this)">{name}</button>\n'
-        content_html += f'<div id="{tid}" class="tc" style="display:{"block" if first else "none"}">{body}</div>\n'
-        first = False
-
+    # CarMax sub-tab buttons — hash-routed by shared.js (no inline onclick).
+    # Sub-tab slugs mirror Carvana per-deal pages for consistency.
+    tabs_html = _render_subtab_buttons(sections)
+    content_html = _render_subtab_panes(sections)
     return metrics_html, f'<div class="tabs">{tabs_html}</div>\n{content_html}'
 
 
@@ -2210,15 +2437,9 @@ def generate_deal_content(deal):
 <div class="metric"><div class="mv">{dq_display}</div><div class="ml">30+ DQ Rate</div></div>
 </div>"""
 
-    # Build tab buttons and content
-    deal_safe = deal.replace("-","_")
-    tabs_html = ""; content_html = ""; first = True
-    for name, body in sections.items():
-        tid = f"{deal_safe}_{name.replace(' ','_').replace('&','and')}"
-        tabs_html += f'<button class="tab{" active" if first else ""}" onclick="showTab(\'{tid}\',this)">{name}</button>\n'
-        content_html += f'<div id="{tid}" class="tc" style="display:{"block" if first else "none"}">{body}</div>\n'
-        first = False
-
+    # Carvana sub-tab buttons — hash-routed by shared.js (no inline onclick).
+    tabs_html = _render_subtab_buttons(sections)
+    content_html = _render_subtab_panes(sections)
     return metrics_html, f'<div class="tabs">{tabs_html}</div>\n{content_html}'
 
 
@@ -4499,6 +4720,128 @@ Loss forecasts from {forecast_source} model. {'Markov model running — forecast
 
 
 
+def _write_page(out_dir, rel_path, html):
+    """Write an HTML file into out_dir at rel_path (e.g. "economics/index.html").
+    Creates parent directories as needed. Returns the absolute path written."""
+    full = os.path.join(out_dir, rel_path)
+    os.makedirs(os.path.dirname(full), exist_ok=True)
+    with open(full, "w", encoding="utf-8") as f:
+        f.write(html)
+    return full
+
+
+def _deal_page_title(issuer_prefix, deal):
+    if issuer_prefix == "crvna":
+        return f"Carvana {deal} — Dashboard"
+    return f"CarMax {deal} — Dashboard"
+
+
+def _deal_page_body(issuer_prefix, deal, metrics_html, tabs_html):
+    """Body for a per-deal page: header line + metrics + sub-tab nav/panes."""
+    if issuer_prefix == "crvna":
+        heading = f"Carvana Auto Receivables Trust {deal}"
+    else:
+        heading = f"CarMax Auto Owner Trust {deal}"
+    back = f'<p style="padding:8px 12px 0;font-size:.7rem"><a href="{BASE_URL_PATH}/deals/" style="color:#1976D2;text-decoration:none">&larr; All deals</a></p>'
+    return (f'{back}'
+            f'<h2 style="padding:4px 12px 0;font-size:1.05rem;color:#333">{heading}</h2>\n'
+            f'{metrics_html}\n{tabs_html}')
+
+
+def _load_deal_meta(issuer_prefix, deal):
+    """Load cutoff_date + initial_pool_balance for the deal-index card.
+    Returns (cutoff_str, ipb_float) — either can be None if not in deal_terms."""
+    db = ACTIVE_DB if issuer_prefix == "crvna" else CARMAX_DB
+    if not db:
+        return (None, None)
+    try:
+        conn = sqlite3.connect(db)
+        row = conn.execute(
+            "SELECT cutoff_date, initial_pool_balance FROM deal_terms WHERE deal=?",
+            (deal,)
+        ).fetchone()
+        conn.close()
+        if row:
+            return (row[0], row[1])
+    except Exception:
+        pass
+    return (None, None)
+
+
+def _render_deal_index(carvana_deals, carmax_deals):
+    """Build the /deals/ landing page: a grid of cards linking to each deal."""
+    cards = []
+    # Carvana deals — newest first (deal ids sort chronologically).
+    for deal in sorted(carvana_deals, reverse=True):
+        cutoff, ipb = _load_deal_meta("crvna", deal)
+        slug = _slugify_deal("crvna", deal)
+        ipb_str = fm(ipb) if ipb else "—"
+        cutoff_str = cutoff or "—"
+        cards.append(
+            f'<a class="deal-card crvna" href="{BASE_URL_PATH}/deals/{slug}/">'
+            f'<div class="dc-name">Carvana {deal}</div>'
+            f'<div class="dc-meta">Cutoff: {cutoff_str} · Initial pool: {ipb_str}</div>'
+            f'<span class="dc-issuer">CRVNA</span></a>'
+        )
+    for deal in sorted(carmax_deals, reverse=True):
+        cutoff, ipb = _load_deal_meta("carmx", deal)
+        slug = _slugify_deal("carmx", deal)
+        ipb_str = fm(ipb) if ipb else "—"
+        cutoff_str = cutoff or "—"
+        cards.append(
+            f'<a class="deal-card carmx" href="{BASE_URL_PATH}/deals/{slug}/">'
+            f'<div class="dc-name">CarMax {deal}</div>'
+            f'<div class="dc-meta">Cutoff: {cutoff_str} · Initial pool: {ipb_str}</div>'
+            f'<span class="dc-issuer">CARMX</span></a>'
+        )
+    n = len(cards)
+    header = (
+        '<h2 style="padding:12px 12px 0;font-size:1.05rem;color:#1976D2">Deals</h2>'
+        f'<p style="padding:4px 12px;font-size:.8rem;color:#555">'
+        f'{n} deals across Carvana (CRVNA) and CarMax (CARMX). '
+        f'Each card opens the deal page with Pool Summary, Delinquencies, Losses, '
+        f'Notes &amp; OC, Cash Waterfall, Recovery, and Documents as sub-tabs.</p>'
+    )
+    return header + '<div class="deal-grid">' + "\n".join(cards) + '</div>'
+
+
+def _render_comparison_hub(prime_html, nonprime_html, carmax_prime_html,
+                           cross_issuer_html, model_html):
+    """Auxiliary comparison/modeling content that used to live as extra rows
+    in the dropdown. Appended to the deal-index page so none of it is orphaned
+    — each section gets an anchor link at the top.
+
+    This is intentionally secondary to the deal cards (which are the primary
+    navigation target for the Deals page).
+    """
+    sections = []
+    toc = []
+    def _add(slug, title, html):
+        if not html:
+            return
+        toc.append(f'<a href="#{slug}" style="color:#1976D2;text-decoration:none">{title}</a>')
+        sections.append(
+            f'<section id="{slug}" style="padding:0 4px">'
+            f'<h3 style="font-size:1rem;color:#1976D2;margin:18px 0 6px;padding:0 8px;'
+            f'border-top:1px solid #e0e0e0;padding-top:14px">{title}</h3>'
+            f'{html}</section>'
+        )
+    _add("prime",        "Carvana Prime comparison",     prime_html)
+    _add("nonprime",     "Carvana Non-Prime comparison", nonprime_html)
+    _add("carmax-prime", "CarMax Prime comparison",      carmax_prime_html)
+    _add("cross-issuer", "Carvana vs CarMax — Prime",    cross_issuer_html)
+    _add("model",        "Default model",                model_html)
+    if not sections:
+        return ""
+    toc_html = (
+        '<div style="padding:8px 12px;background:#ECEFF1;border-radius:6px;'
+        'margin:16px 12px 0;font-size:.75rem">'
+        '<strong>Comparison &amp; modeling sections:</strong> '
+        + " &middot; ".join(toc) + '</div>'
+    )
+    return toc_html + "\n".join(sections)
+
+
 def main():
     global _chart_id
     _chart_id = 0
@@ -4529,7 +4872,8 @@ def main():
     else:
         logger.info("CarMax DB not found — skipping CarMax deal tabs.")
 
-    # Generate comparison sections
+    # Generate comparison sections (appended as secondary content on the
+    # Deals index page — see _render_comparison_hub).
     logger.info("Generating Prime comparison...")
     prime_html = generate_comparison_content(
         [d for d in PRIME_DEALS if d in deal_contents], "Prime Deals")
@@ -4555,16 +4899,18 @@ def main():
     logger.info("Generating Residual Economics tab...")
     economics_html = generate_economics_tab()
 
-    # Generate recent trends tab (new landing page — tab 1)
+    # Generate recent trends tab (landing page)
     logger.info("Generating Recent Trends tab...")
     try:
         recent_trends_html = generate_recent_trends_tab()
     except Exception as e:
         logger.error(f"Recent Trends tab failed: {e}")
-        recent_trends_html = f"<div class='tc' style='display:block;padding:16px'><p>Recent Trends unavailable: {e}</p></div>"
+        recent_trends_html = (
+            f"<div class='tc' style='display:block;padding:16px'>"
+            f"<p>Recent Trends unavailable: {e}</p></div>"
+        )
 
-    # Generate methodology & findings tab (reads analytics cache; must run after
-    # compute_methodology.py has produced deploy/methodology_cache/analytics.json).
+    # Generate methodology & findings tab (reads analytics cache).
     logger.info("Generating Methodology & Findings tab...")
     try:
         from carvana_abs.methodology_tab import generate_methodology_tab
@@ -4578,145 +4924,76 @@ def main():
             f"<p>Methodology tab unavailable: {e}</p></div>"
         )
 
-    # Build deal selector dropdown with comparison entries at top
-    first_deal = list(deal_contents.keys())[0]
-    options = '<option value="__recent__" selected>--- Recent Trends ---</option>\n'
-    options += '<option value="__economics__">--- Residual Economics ---</option>\n'
-    options += '<option value="__methodology__">--- Methodology &amp; Findings ---</option>\n'
-    options += '<option value="__model__">--- Default Model ---</option>\n'
-    options += '<option value="__prime__">--- Prime Comparison (Carvana) ---</option>\n'
-    options += '<option value="__nonprime__">--- Non-Prime Comparison (Carvana) ---</option>\n'
-    if carmax_prime_html:
-        options += '<option value="__carmax_prime__">--- CarMax Prime Comparison ---</option>\n'
-    if cross_issuer_html:
-        options += '<option value="__cross__">--- Carvana vs CarMax — Prime ---</option>\n'
-    options += '<option disabled>──────────────────</option>\n'
-    options += "\n".join(
-        f'<option value="{d}">Carvana {d}</option>'
-        for d in deal_contents)
-    # CarMax per-deal entries — prefix "cm_" in the value to keep them in a
-    # disjoint namespace from Carvana deal IDs.
-    if carmax_deal_contents:
-        options += "\n" + "\n".join(
-            f'<option value="cm_{d}">CarMax {d}</option>'
-            for d in carmax_deal_contents)
-    deal_selector = f'<div class="deal-select"><select id="dealSelect" onchange="switchDeal(this.value)">{options}</select></div>'
+    # ── Write the multi-page tree into static_site/preview/ ────────────────
+    out_dir = os.path.join(OUT_DIR, "preview")
+    os.makedirs(out_dir, exist_ok=True)
 
-    # Build per-deal content divs
-    all_deal_html = ""
-    # Recent Trends tab shown by default (landing page — tab 1)
-    all_deal_html += f'<div id="deal-__recent__" class="deal-block" style="display:block">\n{recent_trends_html}\n</div>\n'
-    # Residual Economics tab (tab 2, hidden by default)
-    all_deal_html += f'<div id="deal-__economics__" class="deal-block" style="display:none">\n{economics_html}\n</div>\n'
-    # Methodology & Findings tab (tab 3, hidden by default)
-    all_deal_html += f'<div id="deal-__methodology__" class="deal-block" style="display:none">\n{methodology_html}\n</div>\n'
-    # Add model and comparison sections (hidden by default)
-    all_deal_html += f'<div id="deal-__model__" class="deal-block" style="display:none">\n{model_html}\n</div>\n'
-    all_deal_html += f'<div id="deal-__prime__" class="deal-block" style="display:none">\n{prime_html}\n</div>\n'
-    all_deal_html += f'<div id="deal-__nonprime__" class="deal-block" style="display:none">\n{nonprime_html}\n</div>\n'
-    if carmax_prime_html:
-        all_deal_html += f'<div id="deal-__carmax_prime__" class="deal-block" style="display:none">\n{carmax_prime_html}\n</div>\n'
-    if cross_issuer_html:
-        all_deal_html += f'<div id="deal-__cross__" class="deal-block" style="display:none">\n{cross_issuer_html}\n</div>\n'
-    # Add individual deal sections (all hidden — economics tab is default)
+    # Shared static assets.
+    os.makedirs(os.path.join(out_dir, "assets"), exist_ok=True)
+    css_path = os.path.join(out_dir, "assets", "shared.css")
+    js_path = os.path.join(out_dir, "assets", "shared.js")
+    with open(css_path, "w", encoding="utf-8") as f:
+        f.write(SHARED_CSS)
+    with open(js_path, "w", encoding="utf-8") as f:
+        f.write(SHARED_JS)
+    logger.info(
+        f"Assets: shared.css={os.path.getsize(css_path)/1024:.1f} KB, "
+        f"shared.js={os.path.getsize(js_path)/1024:.1f} KB")
+
+    pages_written = []
+
+    # Top-level pages.
+    p = _write_page(out_dir, "index.html",
+                    _page_shell("Carvana ABS — Recent Trends", "recent",
+                                recent_trends_html))
+    pages_written.append(p)
+    p = _write_page(out_dir, "economics/index.html",
+                    _page_shell("Carvana ABS — Residual Economics", "economics",
+                                economics_html))
+    pages_written.append(p)
+    p = _write_page(out_dir, "methodology/index.html",
+                    _page_shell("Carvana ABS — Methodology & Findings",
+                                "methodology", methodology_html))
+    pages_written.append(p)
+
+    # Deal index (primary) + comparison sections (secondary).
+    deals_body = _render_deal_index(list(deal_contents.keys()),
+                                    list(carmax_deal_contents.keys()))
+    deals_body += _render_comparison_hub(prime_html, nonprime_html,
+                                         carmax_prime_html, cross_issuer_html,
+                                         model_html)
+    p = _write_page(out_dir, "deals/index.html",
+                    _page_shell("Carvana ABS — Deals", "deals", deals_body))
+    pages_written.append(p)
+
+    # Per-deal pages — Carvana first, then CarMax. Each one gets its own
+    # directory (/deals/<slug>/index.html) so trailing-slash URLs work.
     for deal, (metrics, tabs) in deal_contents.items():
-        all_deal_html += f'<div id="deal-{deal}" class="deal-block" style="display:none">\n{metrics}\n{tabs}\n</div>\n'
-    # CarMax per-deal sections. Div id prefix matches the option value above.
+        slug = _slugify_deal("crvna", deal)
+        body = _deal_page_body("crvna", deal, metrics, tabs)
+        title = _deal_page_title("crvna", deal)
+        p = _write_page(out_dir, f"deals/{slug}/index.html",
+                        _page_shell(title, "deals", body))
+        pages_written.append(p)
+
     for deal, (metrics, tabs) in carmax_deal_contents.items():
-        all_deal_html += (
-            f'<div id="deal-cm_{deal}" class="deal-block" style="display:none">\n'
-            f'<h2 style="padding:8px 12px 0;font-size:1rem;color:#333">'
-            f'CarMax Auto Owner Trust {deal}</h2>\n'
-            f'{metrics}\n{tabs}\n</div>\n'
-        )
+        slug = _slugify_deal("carmx", deal)
+        body = _deal_page_body("carmx", deal, metrics, tabs)
+        title = _deal_page_title("carmx", deal)
+        p = _write_page(out_dir, f"deals/{slug}/index.html",
+                        _page_shell(title, "deals", body))
+        pages_written.append(p)
 
-    page = f"""<!DOCTYPE html><html lang="en"><head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>Carvana ABS Dashboard</title>
-<script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
-<style>
-*{{margin:0;padding:0;box-sizing:border-box}}
-body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f5f5f5;color:#212121}}
-header{{background:#1976D2;color:white;padding:12px 16px;position:sticky;top:0;z-index:100;display:flex;align-items:center;justify-content:space-between}}
-header h1{{font-size:1.1rem;font-weight:600}}
-.deal-select{{padding:4px 12px}}
-.deal-select select{{font-size:.9rem;padding:6px 10px;border-radius:6px;border:1px solid #ccc;width:100%;max-width:300px}}
-.metrics{{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:6px;padding:8px 12px}}
-.metric{{background:white;border-radius:8px;padding:8px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.1)}}
-.mv{{font-size:1.1rem;font-weight:700;color:#1976D2}}.ml{{font-size:.65rem;color:#666;margin-top:2px}}
-.tabs{{display:flex;flex-wrap:wrap;gap:4px;padding:6px 12px;position:sticky;top:44px;z-index:99;background:#f5f5f5}}
-.tab{{padding:5px 10px;border:1px solid #ccc;border-radius:6px;background:white;cursor:pointer;font-size:.75rem}}
-.tab.active{{background:#1976D2;color:white;border-color:#1976D2}}
-.tc{{padding:0 12px 12px}}
-.tbl{{overflow-x:auto;margin:8px 0}}
-table{{width:100%;border-collapse:collapse;font-size:.7rem;background:white;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.1)}}
-th{{background:#f5f5f5;padding:5px 6px;text-align:left;border-bottom:2px solid #ddd;white-space:nowrap}}
-td{{padding:4px 6px;border-bottom:1px solid #eee;white-space:nowrap}}
-tr:last-child td{{font-weight:700;border-top:2px solid #ddd}}
-table.compare tr:last-child td{{font-weight:normal;border-top:none}}
-h3{{font-size:.85rem;color:#333;margin:10px 0 4px;padding:0 4px}}
-footer{{text-align:center;padding:12px;color:#999;font-size:.65rem}}
-/* ── Plotly modebar: always visible (no hover-to-reveal) ── */
-.js-plotly-plot .plotly .modebar{{opacity:1 !important}}
-.js-plotly-plot .plotly .modebar-btn{{opacity:.75}}
-.js-plotly-plot .plotly .modebar-btn:hover{{opacity:1}}
-/* ── Desktop rendering pass — cap max content width for readability on wide screens ── */
-.page-wrap{{max-width:1400px;margin:0 auto}}
-.narrative{{max-width:50em}}
-/* ── Residual Economics table ── */
-.econ-controls{{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:6px 4px 10px;font-size:.75rem}}
-.econ-controls label{{display:inline-flex;align-items:center;gap:6px;min-height:44px;padding:4px 10px;background:white;border:1px solid #ddd;border-radius:6px;cursor:pointer;user-select:none}}
-.econ-controls input[type=checkbox]{{width:20px;height:20px;cursor:pointer;margin:0}}
-table.econ{{font-size:.62rem}}
-/* Group tints — 4% opacity */
-table.econ td.g-id,table.econ th.g-id{{background:rgba(33,150,243,.05)}}
-table.econ td.g-init,table.econ th.g-init{{background:rgba(76,175,80,.05)}}
-table.econ td.g-curr,table.econ th.g-curr{{background:rgba(255,193,7,.06)}}
-table.econ td.g-var,table.econ th.g-var{{background:rgba(158,158,158,.06)}}
-table.econ td.g-cap,table.econ th.g-cap{{background:rgba(120,144,156,.06)}}
-/* Thin vertical separator between groups */
-table.econ td.g-first,table.econ th.g-first{{border-left:2px solid #b0bec5}}
-/* Group header row */
-table.econ tr.group-header th{{text-align:center;font-weight:700;font-size:.6rem;letter-spacing:.05em;text-transform:uppercase;padding:6px 4px;border-bottom:2px solid #1976D2;background:#ECEFF1}}
-@media(max-width:600px){{.metrics{{grid-template-columns:repeat(2,1fr)}}.mv{{font-size:.95rem}}.tab{{font-size:.65rem;padding:4px 6px}}}}
-@media(min-width:1280px){{
-  .tab{{font-size:.85rem;padding:7px 14px}}
-  .deal-select select{{font-size:1rem;max-width:420px;padding:8px 12px}}
-  header h1{{font-size:1.3rem}}
-  .metric{{padding:10px}}
-  .mv{{font-size:1.25rem}}.ml{{font-size:.75rem}}
-  table{{font-size:.8rem}}
-  table.econ{{font-size:.72rem}}
-}}
-</style></head><body>
-<header><h1>Carvana ABS Dashboard</h1></header>
-<div class="page-wrap">
-{deal_selector}
-{all_deal_html}
-<footer>Data from SEC EDGAR | Generated {datetime.now().strftime('%Y-%m-%d %H:%M UTC')}</footer>
-</div>
-<script>
-function showTab(id,btn){{
-    // Hide all tabs in current deal, show selected
-    var deal = btn.closest('.deal-block');
-    deal.querySelectorAll('.tc').forEach(e=>e.style.display='none');
-    deal.querySelectorAll('.tab').forEach(e=>e.classList.remove('active'));
-    document.getElementById(id).style.display='block';
-    btn.classList.add('active');
-    setTimeout(()=>window.dispatchEvent(new Event('resize')),100);
-}}
-function switchDeal(deal){{
-    document.querySelectorAll('.deal-block').forEach(e=>e.style.display='none');
-    document.getElementById('deal-'+deal).style.display='block';
-    setTimeout(()=>window.dispatchEvent(new Event('resize')),100);
-}}
-</script>
-</body></html>"""
-
-    out = os.path.join(OUT_DIR, "index.html")
-    with open(out, "w", encoding="utf-8") as f:
-        f.write(page)
-    logger.info(f"Dashboard: {out} ({os.path.getsize(out)/1024:.0f} KB, {len(deal_contents)} deals)")
+    # Summary for the logs.
+    total_bytes = sum(os.path.getsize(p) for p in pages_written)
+    sizes = [os.path.getsize(p) for p in pages_written]
+    logger.info(
+        f"Wrote {len(pages_written)} pages to {out_dir} "
+        f"(min={min(sizes)/1024:.0f} KB, "
+        f"median={sorted(sizes)[len(sizes)//2]/1024:.0f} KB, "
+        f"max={max(sizes)/1024:.0f} KB, "
+        f"total={total_bytes/1024/1024:.1f} MB across tree). "
+        f"Carvana deals: {len(deal_contents)}. CarMax deals: {len(carmax_deal_contents)}.")
 
 
 if __name__ == "__main__":
