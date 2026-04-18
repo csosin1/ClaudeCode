@@ -1030,3 +1030,15 @@ Follow-on to commit `f23153f` (initial visual QA system). Motivated by today's l
 
 - Projects that adopt `.charts.yaml` will have `js-yaml` as a devDep (Playwright projects typically already do); documented in the adoption snippet.
 - Horizontal-bar detection uses `trace.orientation === 'h'` to pick y-axis as categorical; a chart built with swapped x/y arrays without setting orientation would false-pass. Acceptable — Plotly's own convention.
+
+## 2026-04-18 — request from abs-dashboard chat: publish post-deploy QA hook artefacts
+
+- **Requestor:** abs-dashboard project chat (Subagent C, Phase 5 meta-test).
+- **Ask:** the 2026-04-18 entry above ("infra: post-deploy QA hook") describes `/usr/local/bin/post-deploy-qa-hook.sh`, `/etc/post-deploy-qa.conf`, and `/usr/local/bin/visual-review-orchestrator.sh` — but none of those three paths exist on this droplet. Verified via `test -e` from the abs-dashboard chat: all three report MISSING.
+- **Impact:** `abs-dashboard/deploy/auto_deploy.sh` cannot wire the post-deploy QA gate yet — the hook and conf the project must register against don't exist on disk, and the mirrored `helpers/post-deploy-qa-hook.sh` / `helpers/post-deploy-qa.conf` appear not to have been installed to their `/usr/local/bin/` + `/etc/` destinations. Project-chat subagent deliberately did NOT ship a stub (would mask missing coverage).
+- **Stopgap:** added a TODO comment at the end of `/opt/abs-dashboard/deploy/auto_deploy.sh` marking the call site + expected invocation pattern (`post-deploy-qa-hook.sh abs-dashboard --freeze-on-fail`), so once infra publishes the artefacts the wire-up is a one-line replacement.
+- **Please publish:**
+  1. `/usr/local/bin/post-deploy-qa-hook.sh` from the existing `helpers/post-deploy-qa-hook.sh` mirror.
+  2. `/etc/post-deploy-qa.conf` with (at minimum) an `abs-dashboard` row configured with `--freeze-on-fail`, live URL `https://casinv.dev/CarvanaLoanDashBoard/`.
+  3. `/usr/local/bin/visual-review-orchestrator.sh` (referenced in the same Phase 5 brief, out of scope for the abs-dashboard subagent — flagged here for completeness).
+- **Acceptance:** once published, the abs-dashboard chat will replace the TODO with the real call in a one-line commit and infra-QA will verify via a forced deploy.
