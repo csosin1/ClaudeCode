@@ -43,6 +43,39 @@ def _get_int(element, tag: str) -> Optional[int]:
     return None
 
 
+def _get_credit_score(element, tag: str = "obligorCreditScore") -> Optional[int]:
+    """Extract credit score, handling the combined-score text format.
+
+    Older Carvana/CarMax ABS-EE XML: plain integer like "714".
+    Newer Carvana vintages (2026-P1+) began reporting two scores in one field,
+    e.g. "VS 714, FICO 774" (Vantage + FICO). We prefer FICO when present.
+    Falls back to the first integer in the string.
+    """
+    text = _get_text(element, tag)
+    if not text:
+        return None
+    # Fast path: pure integer
+    try:
+        return int(float(text))
+    except ValueError:
+        pass
+    # Parse combined format: look for "FICO <num>" first, else any integer.
+    import re
+    m = re.search(r"FICO\s+(\d{3,4})", text, re.IGNORECASE)
+    if m:
+        try:
+            return int(m.group(1))
+        except ValueError:
+            pass
+    m = re.search(r"(\d{3,4})", text)
+    if m:
+        try:
+            return int(m.group(1))
+        except ValueError:
+            pass
+    return None
+
+
 def parse_auto_loan_xml(xml_content: str) -> dict:
     """Parse an ABS-EE auto loan XML file.
 
@@ -98,7 +131,7 @@ def parse_auto_loan_xml(xml_content: str) -> dict:
             "vehicle_model_year": _get_int(asset, "vehicleModelYear"),
             "vehicle_type": _get_text(asset, "vehicleTypeCode"),
             "vehicle_value": _get_float(asset, "vehicleValueAmount"),
-            "obligor_credit_score": _get_int(asset, "obligorCreditScore"),
+            "obligor_credit_score": _get_credit_score(asset, "obligorCreditScore"),
             "obligor_credit_score_type": _get_text(asset, "obligorCreditScoreType"),
             "obligor_geographic_location": _get_text(asset, "obligorGeographicLocation"),
             "co_obligor_indicator": _get_text(asset, "coObligorIndicator"),
