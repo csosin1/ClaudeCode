@@ -3195,7 +3195,9 @@ def _rt_load_issuer(raw_db, issuer):
     """Load (terms, perf) for a single issuer's raw DB.
 
     terms[deal] -> dict(ipb, cutoff, wal, issuer)
-    perf[deal]  -> list of dicts {dist, cnl, ebp, nco} sorted by dist ascending
+    perf[deal]  -> list of dicts {dist, cnl, ebp, nco, dq_3160, dq_6190,
+                   dq_91120, dq_121p, recoveries, gross_co} sorted by dist
+                   ascending
     """
     from collections import defaultdict as _dd
     terms, perf = {}, _dd(list)
@@ -3208,9 +3210,14 @@ def _rt_load_issuer(raw_db, issuer):
         ).fetchall():
             if ipb and ipb < 5e9:
                 terms[deal] = {'ipb': ipb, 'cutoff': cutoff, 'issuer': issuer}
-        for deal, dd, cnl, ebp, nco in conn.execute(
+        for (deal, dd, cnl, ebp, nco,
+             dq1, dq2, dq3, dq4, rec, gco) in conn.execute(
             "SELECT deal, distribution_date, cumulative_net_losses, "
-            "ending_pool_balance, net_charged_off_amount FROM pool_performance"
+            "ending_pool_balance, net_charged_off_amount, "
+            "delinquent_31_60_balance, delinquent_61_90_balance, "
+            "delinquent_91_120_balance, delinquent_121_plus_balance, "
+            "recoveries, gross_charged_off_amount "
+            "FROM pool_performance"
         ).fetchall():
             dt = _rt_parse_date(dd)
             if dt is None:
@@ -3220,6 +3227,12 @@ def _rt_load_issuer(raw_db, issuer):
                 'cnl': cnl or 0,
                 'ebp': ebp or 0,
                 'nco': nco or 0,
+                'dq_3160': dq1 or 0,
+                'dq_6190': dq2 or 0,
+                'dq_91120': dq3 or 0,
+                'dq_121p': dq4 or 0,
+                'recoveries': rec or 0,
+                'gross_co': gco or 0,
             })
         for deal in perf:
             perf[deal].sort(key=lambda r: r['dist'])
@@ -3378,13 +3391,8 @@ def generate_recent_trends_tab():
 
         # Actual DQ 30+ rate (% of ending pool balance).
         actual_dq30_pct = None
-        dq_bal = 0.0
-        dq_src = latest
-        for k in ('delinquent_31_60_balance', 'delinquent_61_90_balance',
-                  'delinquent_91_120_balance', 'delinquent_121_plus_balance'):
-            v = dq_src.get(k) if isinstance(dq_src, dict) else None
-            if v:
-                dq_bal += v
+        dq_bal = (latest.get('dq_3160', 0) + latest.get('dq_6190', 0)
+                  + latest.get('dq_91120', 0) + latest.get('dq_121p', 0))
         if outstanding > 0:
             actual_dq30_pct = dq_bal / outstanding * 100
 
@@ -3406,28 +3414,35 @@ def generate_recent_trends_tab():
                 continue
 
             # Actual monthly loss, charge-offs, recoveries (bps of ipb).
+            # pool_performance stores monthly flows (not cumulative), so each
+            # row's nco / gross_co / recoveries is that period only.
             delta_cnl = (this_r['cnl'] - prev_r['cnl'])
-            this_nco = this_r.get('nco') if isinstance(this_r, dict) else None
-            # nco is monthly NET charged off as stored in pool_performance.
-            actual_chargeoff_bps = (this_nco / ipb * 10_000) if (this_nco is not None and ipb > 0) else None
+            this_nco = this_r.get('nco')
+            this_gco = this_r.get('gross_co')
+            this_rec = this_r.get('recoveries')
+            # Monthly charge-offs = gross charge-offs (what the pool lost to
+            # default before recoveries). Fall back to delta-cnl if gross not
+            # reported separately.
+            if this_gco is not None and ipb > 0:
+                actual_chargeoff_bps = this_gco / ipb * 10_000
+            elif this_nco is not None and ipb > 0:
+                actual_chargeoff_bps = this_nco / ipb * 10_000
+            else:
+                actual_chargeoff_bps = None
             actual_monthly_loss_bps = (delta_cnl / ipb * 10_000) if ipb > 0 else None
 
-            # Recoveries: delta cumulative_liquidation_proceeds is the best
-            # direct proxy, but pool_performance.recoveries at the monthly
-            # level isn't always present.  Use (monthly_chargeoff - monthly_net_loss)
-            # as recoveries (i.e. what was recovered on net-vs-gross).
+            # Recoveries: pool_performance.recoveries is the period-level
+            # recovery flow. Convention: positive = good for holder.
             actual_recoveries_bps = None
-            if actual_chargeoff_bps is not None and actual_monthly_loss_bps is not None:
-                # Convention: positive = good for holder.
+            if this_rec is not None and ipb > 0:
+                actual_recoveries_bps = this_rec / ipb * 10_000
+            elif actual_chargeoff_bps is not None and actual_monthly_loss_bps is not None:
+                # Fallback: implied recoveries = gross_co − net_loss.
                 actual_recoveries_bps = actual_chargeoff_bps - actual_monthly_loss_bps
 
             # Actual DQ 30+ % at this month.
-            this_dq_bal = 0.0
-            for k in ('delinquent_31_60_balance', 'delinquent_61_90_balance',
-                      'delinquent_91_120_balance', 'delinquent_121_plus_balance'):
-                v = this_r.get(k) if isinstance(this_r, dict) else None
-                if v:
-                    this_dq_bal += v
+            this_dq_bal = (this_r.get('dq_3160', 0) + this_r.get('dq_6190', 0)
+                           + this_r.get('dq_91120', 0) + this_r.get('dq_121p', 0))
             this_ebp = this_r.get('ebp') if isinstance(this_r, dict) else None
             actual_dq_at_i = (this_dq_bal / this_ebp * 100) if (this_ebp and this_ebp > 0) else None
 
