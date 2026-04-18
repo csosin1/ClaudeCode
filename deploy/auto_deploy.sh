@@ -76,6 +76,21 @@ if [ "$LOCAL" != "$REMOTE" ]; then
         echo "$(date): Promoted preview to live."
     fi
 
+    # One-time: install weekly new-deal-discovery cron.
+    # Re-runs if the source file content changes (hash-gated).
+    if [ -f /opt/abs-dashboard/deploy/cron.d/abs-discover-deals ]; then
+        WANT=$(sha256sum /opt/abs-dashboard/deploy/cron.d/abs-discover-deals | awk '{print $1}')
+        HAVE=$(cat /opt/.abs_discover_cron_hash 2>/dev/null || echo "none")
+        if [ "$WANT" != "$HAVE" ]; then
+            echo "$(date): Installing /etc/cron.d/abs-discover-deals (hash $WANT)..."
+            mkdir -p /var/log/abs-dashboard
+            cp /opt/abs-dashboard/deploy/cron.d/abs-discover-deals /etc/cron.d/abs-discover-deals
+            chmod 644 /etc/cron.d/abs-discover-deals
+            chown root:root /etc/cron.d/abs-discover-deals
+            echo "$WANT" > /opt/.abs_discover_cron_hash
+        fi
+    fi
+
     # Update the running copy of this script
     cp /opt/abs-dashboard/deploy/auto_deploy.sh /opt/auto_deploy.sh 2>/dev/null || true
 

@@ -1,0 +1,11 @@
+# /etc/cron.d/abs-discover-deals
+# Weekly scan of SEC EDGAR for newly-issued Carvana / CarMax securitizations.
+# The script only logs + notifies — it does NOT auto-edit config.py.
+# Install on the droplet:
+#   sudo cp /opt/abs-dashboard/deploy/cron.d/abs-discover-deals /etc/cron.d/abs-discover-deals
+#   sudo chmod 644 /etc/cron.d/abs-discover-deals
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+SEC_USER_AGENT="Clifford Sosin clifford.sosin@casinvestmentpartners.com"
+# Sundays at 08:00 UTC
+0 8 * * 0 root /opt/abs-venv/bin/python /opt/abs-dashboard/deploy/discover_new_deals.py >> /var/log/abs-dashboard/new_deals_discovered.log 2>&1
