@@ -1079,3 +1079,22 @@ Follow-on to commit `f23153f` (initial visual QA system). Motivated by today's l
   2. `/etc/post-deploy-qa.conf` with (at minimum) an `abs-dashboard` row configured with `--freeze-on-fail`, live URL `https://casinv.dev/CarvanaLoanDashBoard/`.
   3. `/usr/local/bin/visual-review-orchestrator.sh` (referenced in the same Phase 5 brief, out of scope for the abs-dashboard subagent — flagged here for completeness).
 - **Acceptance:** once published, the abs-dashboard chat will replace the TODO with the real call in a one-line commit and infra-QA will verify via a forced deploy.
+
+## 2026-04-17 infra: narrative tools for platform introspection
+
+Built two on-demand reporting scripts for a non-technical reader:
+
+- `/usr/local/bin/project-debrief.sh <project> [--since=7d]` — four-section
+  narrative (worked / stumbled / cost / worth-watching) pulling from git log,
+  LESSONS.md, CHANGES.md, tokens.json, user-action list.
+- `/usr/local/bin/lessons-effectiveness-audit.sh [--since=quarter]` — scans
+  every LESSONS entry and reports whether its pattern recurred, did-not-recur,
+  or is indeterminate. Uses specific-keyword extraction + date-filtered log
+  scans to avoid false positives.
+
+Both mirrored to `helpers/`. Smoketest 17/17 PASS.
+
+Assumptions for Infra-QA to verify:
+- tokens.json cwd_slug convention (opt-<project>*) is stable.
+- LESSONS entries use `## YYYY-MM-DD` as canonical header (also handles `## [YYYY-MM-DD]`).
+- Neither script mutates state; safe to run from any chat.
