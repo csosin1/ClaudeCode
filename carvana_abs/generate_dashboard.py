@@ -149,6 +149,20 @@ def fm(v):
     return f"${v:,.0f}"
 
 
+# Global Plotly config — applied to every chart in the dashboard. Leaves
+# `resetScale2d` (the reset-view / home button) in the modebar so users can
+# always recover after a zoom or pan. Removes lasso / box-select (not useful
+# on these charts) and the Plotly logo. Any new chart rendered via `chart()`
+# inherits this automatically; any future renderer should also use this dict.
+PLOTLY_CONFIG = {
+    "displayModeBar": True,
+    "displaylogo": False,
+    "responsive": True,
+    "modeBarButtonsToRemove": ["lasso2d", "select2d"],
+}
+_PLOTLY_CONFIG_JSON = json.dumps(PLOTLY_CONFIG)
+
+
 def chart(traces, layout, height=350):
     """Generate a Plotly.js chart div using raw JSON data."""
     global _chart_id
@@ -163,7 +177,7 @@ def chart(traces, layout, height=350):
     layout["xaxis"]["automargin"] = True
     layout.setdefault("yaxis", {})["automargin"] = True
     layout_json = json.dumps(layout)
-    return f'<div id="{cid}" style="width:100%;height:{height}px;background:white;border-radius:8px;margin:8px 0;box-shadow:0 1px 3px rgba(0,0,0,.1)"></div>\n<script>Plotly.newPlot("{cid}",{traces_json},{layout_json},{{displayModeBar:false,responsive:true}});</script>\n'
+    return f'<div id="{cid}" style="width:100%;height:{height}px;background:white;border-radius:8px;margin:8px 0;box-shadow:0 1px 3px rgba(0,0,0,.1)"></div>\n<script>Plotly.newPlot("{cid}",{traces_json},{layout_json},{_PLOTLY_CONFIG_JSON});</script>\n'
 
 
 def _restatement_overlay(x_list, y_list):
@@ -3477,18 +3491,31 @@ def generate_recent_trends_tab():
         'Carvana Non-Prime': '#D32F2F',
         'CarMax': '#F47920',
     }
+    # Carry-forward: for each deal, as-of each month-end use the most recent
+    # filing on or before that month. Seasoned deals that have stopped filing
+    # (e.g. many CarMax vintages wound down) still contribute their last-known
+    # cal factor. Otherwise the weighted cal for those months would be driven
+    # by the 1–2 most recently filing deals and mis-match Table A.
+    def _month_key(y, m):
+        return y * 12 + m
+
     for seg in ('Carvana Prime', 'Carvana Non-Prime', 'CarMax'):
         xs, ys = [], []
         for (y, m) in last12:
             num = 0.0
             den = 0.0
+            target_k = _month_key(y, m)
             for deal, (dseg, ipb, mcal) in deal_month_cal.items():
                 if dseg != seg:
                     continue
-                cal = mcal.get((y, m))
-                if cal is None:
+                best_k, best_cal = None, None
+                for (yy, mm), cal in mcal.items():
+                    k = _month_key(yy, mm)
+                    if k <= target_k and (best_k is None or k > best_k):
+                        best_k, best_cal = k, cal
+                if best_cal is None:
                     continue
-                num += cal * ipb
+                num += best_cal * ipb
                 den += ipb
             if den > 0:
                 xs.append(f"{y}-{m:02d}")
@@ -4826,12 +4853,66 @@ tr:last-child td{{font-weight:700;border-top:2px solid #ddd}}
 table.compare tr:last-child td{{font-weight:normal;border-top:none}}
 h3{{font-size:.85rem;color:#333;margin:10px 0 4px;padding:0 4px}}
 footer{{text-align:center;padding:12px;color:#999;font-size:.65rem}}
+/* ── Plotly modebar: always visible (no hover-to-reveal) ── */
+.js-plotly-plot .plotly .modebar{{opacity:1 !important}}
+.js-plotly-plot .plotly .modebar-btn{{opacity:.75}}
+.js-plotly-plot .plotly .modebar-btn:hover{{opacity:1}}
+/* ── Desktop rendering pass — cap max content width for readability on wide screens ── */
+.page-wrap{{max-width:1400px;margin:0 auto}}
+.narrative{{max-width:50em}}
+/* ── Residual Economics enhanced table ── */
+.econ-controls{{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:6px 4px 10px;font-size:.75rem}}
+.econ-controls label{{display:inline-flex;align-items:center;gap:6px;min-height:44px;padding:4px 10px;background:white;border:1px solid #ddd;border-radius:6px;cursor:pointer;user-select:none}}
+.econ-controls input[type=checkbox]{{width:20px;height:20px;cursor:pointer;margin:0}}
+.econ-controls .csv-btn{{min-height:44px;padding:8px 14px;background:#1976D2;color:white;border:none;border-radius:6px;font-weight:600;cursor:pointer;font-size:.75rem}}
+.econ-controls .csv-btn:hover{{background:#1565C0}}
+table.econ{{font-size:.62rem}}
+table.econ th{{cursor:pointer;position:relative;padding-right:14px}}
+table.econ th[data-sortable="0"]{{cursor:default}}
+table.econ th.sorted-asc::after{{content:"▲";position:absolute;right:4px;top:50%;transform:translateY(-50%);font-size:.55rem;color:#1976D2}}
+table.econ th.sorted-desc::after{{content:"▼";position:absolute;right:4px;top:50%;transform:translateY(-50%);font-size:.55rem;color:#1976D2}}
+/* Group tints — 4% opacity */
+table.econ td.g-id,table.econ th.g-id{{background:rgba(33,150,243,.05)}}
+table.econ td.g-init,table.econ th.g-init{{background:rgba(76,175,80,.05)}}
+table.econ td.g-curr,table.econ th.g-curr{{background:rgba(255,193,7,.06)}}
+table.econ td.g-var,table.econ th.g-var{{background:rgba(158,158,158,.06)}}
+table.econ td.g-cap,table.econ th.g-cap{{background:rgba(120,144,156,.06)}}
+/* Thin vertical separator between groups */
+table.econ td.g-first,table.econ th.g-first{{border-left:2px solid #b0bec5}}
+/* Sticky deal-name column */
+table.econ td.sticky-deal,table.econ th.sticky-deal{{position:sticky;left:0;z-index:3;background:white;box-shadow:2px 0 3px -2px rgba(0,0,0,.2)}}
+table.econ tr.avg-row td.sticky-deal{{background:#E3F2FD}}
+table.econ tr.nonprime-divider td.sticky-deal{{background:#FFCCBC}}
+/* Variance color coding */
+table.econ td.var-pos{{background:rgba(46,125,50,.12);color:#1B5E20;font-weight:600}}
+table.econ td.var-neg{{background:rgba(198,40,40,.12);color:#B71C1C;font-weight:600}}
+/* Group header row */
+table.econ tr.group-header th{{text-align:center;font-weight:700;font-size:.6rem;letter-spacing:.05em;text-transform:uppercase;padding:6px 4px;border-bottom:2px solid #1976D2;background:#ECEFF1}}
 @media(max-width:600px){{.metrics{{grid-template-columns:repeat(2,1fr)}}.mv{{font-size:.95rem}}.tab{{font-size:.65rem;padding:4px 6px}}}}
+@media(min-width:1280px){{
+  .tab{{font-size:.85rem;padding:7px 14px}}
+  .deal-select select{{font-size:1rem;max-width:420px;padding:8px 12px}}
+  header h1{{font-size:1.3rem}}
+  .metric{{padding:10px}}
+  .mv{{font-size:1.25rem}}.ml{{font-size:.75rem}}
+  table{{font-size:.8rem}}
+  table.econ{{font-size:.72rem}}
+}}
+/* ── Print-friendly CSS ── */
+@media print{{
+  .modebar,.js-plotly-plot .plotly .modebar,button,.tabs,.deal-select,.econ-controls,header{{display:none !important}}
+  body{{background:white}}
+  table{{font-size:8pt;box-shadow:none}}
+  .deal-block{{page-break-before:auto}}
+  .tc{{padding:0}}
+}}
 </style></head><body>
 <header><h1>Carvana ABS Dashboard</h1></header>
+<div class="page-wrap">
 {deal_selector}
 {all_deal_html}
 <footer>Data from SEC EDGAR | Generated {datetime.now().strftime('%Y-%m-%d %H:%M UTC')}</footer>
+</div>
 <script>
 function showTab(id,btn){{
     // Hide all tabs in current deal, show selected
