@@ -4106,28 +4106,82 @@ def generate_economics_tab():
     # Interleave Carvana Prime and CarMax by cutoff date for main table
     prime_and_carmax = sorted(crvna_prime + carmx_deals, key=lambda x: x.get("cutoff_date") or "")
 
+    def _group_of(d):
+        if d["issuer"] == "CARMX":
+            return "kmx-prime"
+        if "-N" in d["deal"]:
+            return "cv-nonprime"
+        return "cv-prime"
+
+    # ── Column definitions (new 4-group layout) ─────────────────────────────
+    # (css_class, header_label, sort_type, sortable?, tooltip)
+    COL_DEFS = [
+        ("g-id g-first", "Issuer", "string", 1, "Deal issuer: CRVNA = Carvana, CARMX = CarMax."),
+        ("g-id sticky-deal", "Deal", "string", 1, "Deal shelf identifier (e.g. 2024-P3)."),
+        ("g-id", "Cutoff", "date", 1, "Cutoff date of the receivables from the 424B prospectus."),
+        ("g-id", "Orig Bal", "numeric", 1, "Original aggregate principal balance at cutoff."),
+        ("g-init g-first", "WAC", "numeric", 1, "Consumer WAC: pool-weighted-average contract rate at cutoff."),
+        ("g-init", "CoD", "numeric", 1, "Cost of Debt: weighted-average note coupon at issuance (424B)."),
+        ("g-init", "XS/yr", "numeric", 1, "Annualized excess spread = WAC − CoD − servicing − expected losses/yr."),
+        ("g-init", "WAL", "numeric", 1, "Weighted-average life of the collateral at issuance (base case)."),
+        ("g-init", "Tot XS", "numeric", 1, "Total excess spread over full WAL (life-of-deal, % of initial pool)."),
+        ("g-init", "Svc", "numeric", 1, "Servicing &amp; other fees over full WAL (% of initial pool)."),
+        ("g-init", "Exp Loss", "numeric", 1, "Expected lifetime cumulative net losses at issuance (% of initial pool)."),
+        ("g-init", "Exp Resid", "numeric", 1, "Expected residual profit = Tot XS − Svc − Exp Loss."),
+        ("g-curr g-first", "Act Int", "numeric", 1, "Cumulative consumer interest earned to date (from monthly certificates)."),
+        ("g-curr", "Act Svc", "numeric", 1, "Cumulative servicing + other fees paid to date."),
+        ("g-curr", "WAL now", "numeric", 1, "Updated WAL — realized paydowns plus Markov-projected remaining life."),
+        ("g-curr", "Proj Loss", "numeric", 1, "Projected lifetime net losses — realized plus Markov-projected remaining."),
+        ("g-curr", "Act Resid", "numeric", 1, "Realized+projected residual = Act Int − Act Svc − Proj Loss."),
+        ("g-var g-first", "Var %", "numeric", 1, "Variance vs initial forecast = Act Resid − Exp Resid (% of initial pool)."),
+        ("g-var", "Var $", "numeric", 1, "Variance in dollars = Variance% × initial pool balance."),
+        ("g-var", "%Done", "numeric", 1, "Forecast completion — realized losses as a % of projected lifetime losses."),
+        ("g-var", "Trig Risk", "numeric", 1, "Model-estimated probability a cumulative net-loss trigger trips before final maturity."),
+        ("g-cap g-first", "AAA", "numeric", 1, "Senior AAA note class as % of initial pool balance."),
+        ("g-cap", "AA", "numeric", 1, "AA note class as % of initial pool balance."),
+        ("g-cap", "A", "numeric", 1, "A note class as % of initial pool balance."),
+        ("g-cap", "BBB", "numeric", 1, "BBB note class as % of initial pool balance."),
+        ("g-cap", "OC", "numeric", 1, "Overcollateralization (assets − liabilities) as % of initial pool."),
+        ("g-cap", "Terms", "string", 0, "Trigger / OC step-up / reserve schedule compacted from the prospectus."),
+    ]
+    NUM_COLS = len(COL_DEFS)  # 27
+    GROUP_HEADERS = [
+        ("g-id", "Identity", 4),
+        ("g-init", "Initial Forecast (at issuance)", 8),
+        ("g-curr", "Current Forecast (realized + Markov)", 5),
+        ("g-var", "Deltas / Variance", 4),
+        ("g-cap", "Loan / Cap Structure", 6),
+    ]
+
+    def _num(val):
+        if val is None or (isinstance(val, float) and pd.isna(val)):
+            return ""
+        return val
+
+    def _pct_disp(v, dec=2):
+        if v is None or (isinstance(v, float) and pd.isna(v)):
+            return '<span style="color:#999">—</span>'
+        return f"{v*100:.{dec}f}%"
+
     def _build_table_rows(deal_list):
         rows_html = ""
         for d in deal_list:
             ipb = d["initial_pool_balance"]
-            cutoff = d.get("cutoff_date") or "—"
-            if cutoff != "—":
-                # Format as Mon-YY
+            cutoff_raw = d.get("cutoff_date") or ""
+            cutoff_disp = "—"
+            if cutoff_raw:
                 try:
                     from datetime import datetime as _dt
-                    dt = _dt.strptime(cutoff, "%Y-%m-%d")
-                    cutoff = dt.strftime("%b-%y")
+                    dt = _dt.strptime(cutoff_raw, "%Y-%m-%d")
+                    cutoff_disp = dt.strftime("%b-%y")
                 except Exception:
-                    pass
+                    cutoff_disp = cutoff_raw
 
-            # Trigger schedule compact
-            trigger_text = ""
-            cnl_sched = d.get("cnl_trigger_schedule")
+            # Compact trigger / OC / reserve summary (semantics unchanged)
             dq_sched = d.get("dq_trigger_schedule")
             oc_t = d.get("oc_target_pct")
             oc_f = d.get("oc_floor_pct")
             res_pct = d.get("initial_reserve_pct")
-
             parts = []
             if dq_sched:
                 try:
@@ -4139,53 +4193,81 @@ def generate_economics_tab():
                         parts.append(f"DQ {first}-{last}%")
                 except Exception:
                     pass
-            if oc_t:
-                parts.append(f"OC↑{oc_t*100:.1f}%")
-            if oc_f:
-                parts.append(f"OC↓{oc_f*100:.1f}%")
-            if res_pct:
-                parts.append(f"Res {res_pct*100:.1f}%")
+            if oc_t: parts.append(f"OC↑{oc_t*100:.1f}%")
+            if oc_f: parts.append(f"OC↓{oc_f*100:.1f}%")
+            if res_pct: parts.append(f"Res {res_pct*100:.1f}%")
             trigger_text = "; ".join(parts) if parts else "—"
 
-            wal_str = f"{d['wal']:.1f}y" if d.get("wal") else '<span style="color:#999">—</span>'
+            var_pct = d.get("variance")
+            var_dollars = var_pct * ipb if (var_pct is not None and ipb is not None) else None
+            var_cls = ""
+            if var_pct is not None:
+                if var_pct > 0.001: var_cls = " var-pos"
+                elif var_pct < -0.001: var_cls = " var-neg"
 
-            row_class = ""
-            if d["issuer"] == "CARMX":
-                row_class = ' style="background:#FFF8E1"'
-            elif "-N" in d["deal"]:
-                row_class = ' style="background:#FBE9E7"'
+            issuer = d["issuer"]
+            deal_id = d["deal"]
+            group = _group_of(d)
 
-            rows_html += f"""<tr{row_class}>
-<td style="font-weight:600">{d['issuer']}</td>
-<td>{d['deal']}</td>
-<td>{cutoff}</td>
-<td title="${ipb:,.0f}">{fm(ipb)}</td>
-<td>{pf(d['aaa_pct'],1)}</td>
-<td>{pf(d['aa_pct'],1)}</td>
-<td>{pf(d['a_pct'],1)}</td>
-<td>{pf(d['bbb_pct'],1)}</td>
-<td>{pf(d['oc_pct'],1)}</td>
-<td style="font-size:.6rem;max-width:120px;white-space:normal;line-height:1.2">{trigger_text}</td>
-<td>{pf(d.get('consumer_wac'),2)}</td>
-<td>{pf(d.get('cost_of_debt'),2)}</td>
-<td>{pf(d.get('excess_spread_yr'),2)}</td>
-<td>{wal_str}</td>
-<td>{dollar_hover(d.get('total_excess_spread'), ipb)}</td>
-<td>{dollar_hover(d.get('total_servicing_cost'), ipb)}</td>
-<td>{dollar_hover(d.get('expected_loss_pct'), ipb)}</td>
-<td>{pf_color(d.get('expected_residual'))}</td>
-<td>{dollar_hover(d.get('actual_cum_interest_pct'), ipb)}</td>
-<td>{dollar_hover(d.get('actual_cum_servicing_pct'), ipb)}</td>
-<td>{dollar_hover(d.get('projected_loss_pct'), ipb)}</td>
-<td>{pf_color(d.get('actual_residual'))}</td>
-<td>{pf_color(d.get('variance'))}</td>
-<td>{pf(d.get('pct_complete'),0) if d.get('pct_complete') is not None else '<span style="color:#999">—</span>'}</td>
-<td>{trigger_badge(d.get('trigger_risk'))}</td>
-</tr>\n"""
+            wal_v = d.get("wal")
+            wal_disp = f"{wal_v:.1f}y" if (wal_v is not None and not (isinstance(wal_v, float) and pd.isna(wal_v))) else '<span style="color:#999">—</span>'
+
+            def pct_cell(grp_cls, key, dec=2, hover_dollar=False):
+                v = d.get(key)
+                sort_v = _num(v)
+                disp = _pct_disp(v, dec)
+                title = ""
+                if hover_dollar and v is not None and ipb is not None:
+                    title = f' title="${v*ipb:,.0f}"'
+                return f'<td class="{grp_cls}" data-sort="{sort_v}"{title}>{disp}</td>'
+
+            cells = []
+            # Identity (4)
+            cells.append(f'<td class="g-id g-first" data-sort="{issuer}">{issuer}</td>')
+            cells.append(f'<td class="g-id sticky-deal" data-sort="{deal_id}" style="font-weight:600">{deal_id}</td>')
+            cells.append(f'<td class="g-id" data-sort="{cutoff_raw}">{cutoff_disp}</td>')
+            cells.append(f'<td class="g-id" data-sort="{_num(ipb)}" title="${ipb:,.0f}">{fm(ipb)}</td>')
+            # Initial Forecast (8)
+            cells.append(pct_cell("g-init g-first", "consumer_wac", 2))
+            cells.append(pct_cell("g-init", "cost_of_debt", 2))
+            cells.append(pct_cell("g-init", "excess_spread_yr", 2))
+            cells.append(f'<td class="g-init" data-sort="{_num(wal_v)}">{wal_disp}</td>')
+            cells.append(pct_cell("g-init", "total_excess_spread", 2, True))
+            cells.append(pct_cell("g-init", "total_servicing_cost", 2, True))
+            cells.append(pct_cell("g-init", "expected_loss_pct", 2, True))
+            er = d.get("expected_residual")
+            cells.append(f'<td class="g-init" data-sort="{_num(er)}">{pf_color(er)}</td>')
+            # Current Forecast (5)
+            cells.append(pct_cell("g-curr g-first", "actual_cum_interest_pct", 2, True))
+            cells.append(pct_cell("g-curr", "actual_cum_servicing_pct", 2, True))
+            cells.append(f'<td class="g-curr" data-sort="{_num(wal_v)}">{wal_disp}</td>')
+            cells.append(pct_cell("g-curr", "projected_loss_pct", 2, True))
+            ar = d.get("actual_residual")
+            cells.append(f'<td class="g-curr" data-sort="{_num(ar)}">{pf_color(ar)}</td>')
+            # Deltas / Variance (4)
+            cells.append(f'<td class="g-var g-first{var_cls}" data-sort="{_num(var_pct)}">{_pct_disp(var_pct,2)}</td>')
+            var_d_disp = fm(var_dollars) if var_dollars is not None else '<span style="color:#999">—</span>'
+            cells.append(f'<td class="g-var{var_cls}" data-sort="{_num(var_dollars)}">{var_d_disp}</td>')
+            pc = d.get("pct_complete")
+            pc_disp = f"{pc*100:.0f}%" if (pc is not None and not (isinstance(pc,float) and pd.isna(pc))) else '<span style="color:#999">—</span>'
+            cells.append(f'<td class="g-var" data-sort="{_num(pc)}">{pc_disp}</td>')
+            trig_prob = d.get("trigger_risk")
+            cells.append(f'<td class="g-var" data-sort="{_num(trig_prob)}">{trigger_badge(trig_prob)}</td>')
+            # Cap Structure (6)
+            cells.append(pct_cell("g-cap g-first", "aaa_pct", 1))
+            cells.append(pct_cell("g-cap", "aa_pct", 1))
+            cells.append(pct_cell("g-cap", "a_pct", 1))
+            cells.append(pct_cell("g-cap", "bbb_pct", 1))
+            cells.append(pct_cell("g-cap", "oc_pct", 1))
+            cells.append(f'<td class="g-cap" data-sort="" style="font-size:.58rem;max-width:140px;white-space:normal;line-height:1.2">{trigger_text}</td>')
+
+            rows_html += (
+                f'<tr class="data-row" data-group="{group}">' + "".join(cells) + "</tr>\n"
+            )
         return rows_html
 
-    def _weighted_avg_row(deal_list, label):
-        """Compute weighted-average summary row."""
+    def _weighted_avg_row(deal_list, label, group_key=""):
+        """Weighted-average summary row, pinned to bottom, excluded from sort."""
         total_ipb = sum(d["initial_pool_balance"] for d in deal_list)
         if total_ipb == 0:
             return ""
@@ -4204,76 +4286,211 @@ def generate_economics_tab():
             "projected_loss_pct", "actual_residual", "variance", "pct_complete",
         ]}
 
+        def p(v, dec=2):
+            if v is None or (isinstance(v, float) and pd.isna(v)):
+                return "—"
+            return f"{v*100:.{dec}f}%"
+
         wal_str = f"{wa['wal']:.1f}y" if wa.get("wal") else "—"
-        return f"""<tr style="background:#E3F2FD;font-weight:700">
-<td colspan="3">{label}</td>
-<td>{fm(total_ipb)}</td>
-<td>{pf(wa['aaa_pct'],1)}</td><td>{pf(wa['aa_pct'],1)}</td>
-<td>{pf(wa['a_pct'],1)}</td><td>{pf(wa['bbb_pct'],1)}</td>
-<td>{pf(wa['oc_pct'],1)}</td><td></td>
-<td>{pf(wa['consumer_wac'],2)}</td><td>{pf(wa['cost_of_debt'],2)}</td>
-<td>{pf(wa['excess_spread_yr'],2)}</td><td>{wal_str}</td>
-<td>{pf(wa['total_excess_spread'],2)}</td><td>{pf(wa['total_servicing_cost'],2)}</td>
-<td>{pf(wa['expected_loss_pct'],2)}</td><td>{pf_color(wa['expected_residual'])}</td>
-<td>{pf(wa['actual_cum_interest_pct'],2)}</td><td>{pf(wa['actual_cum_servicing_pct'],2)}</td>
-<td>{pf(wa['projected_loss_pct'],2)}</td><td>{pf_color(wa['actual_residual'])}</td>
-<td>{pf_color(wa['variance'])}</td><td>{pf(wa['pct_complete'],0) if wa.get('pct_complete') else '—'}</td>
-<td></td>
-</tr>\n"""
+        var_pct = wa.get("variance")
+        var_dollars = (var_pct * total_ipb) if var_pct is not None else None
+        var_cls = ""
+        if var_pct is not None:
+            if var_pct > 0.001: var_cls = " var-pos"
+            elif var_pct < -0.001: var_cls = " var-neg"
+
+        cells = []
+        cells.append('<td class="g-id g-first"></td>')
+        cells.append(f'<td class="g-id sticky-deal" style="background:#E3F2FD">{label}</td>')
+        cells.append('<td class="g-id"></td>')
+        cells.append(f'<td class="g-id">{fm(total_ipb)}</td>')
+        cells.append(f'<td class="g-init g-first">{p(wa["consumer_wac"],2)}</td>')
+        cells.append(f'<td class="g-init">{p(wa["cost_of_debt"],2)}</td>')
+        cells.append(f'<td class="g-init">{p(wa["excess_spread_yr"],2)}</td>')
+        cells.append(f'<td class="g-init">{wal_str}</td>')
+        cells.append(f'<td class="g-init">{p(wa["total_excess_spread"],2)}</td>')
+        cells.append(f'<td class="g-init">{p(wa["total_servicing_cost"],2)}</td>')
+        cells.append(f'<td class="g-init">{p(wa["expected_loss_pct"],2)}</td>')
+        cells.append(f'<td class="g-init">{pf_color(wa["expected_residual"])}</td>')
+        cells.append(f'<td class="g-curr g-first">{p(wa["actual_cum_interest_pct"],2)}</td>')
+        cells.append(f'<td class="g-curr">{p(wa["actual_cum_servicing_pct"],2)}</td>')
+        cells.append(f'<td class="g-curr">{wal_str}</td>')
+        cells.append(f'<td class="g-curr">{p(wa["projected_loss_pct"],2)}</td>')
+        cells.append(f'<td class="g-curr">{pf_color(wa["actual_residual"])}</td>')
+        cells.append(f'<td class="g-var g-first{var_cls}">{p(var_pct,2)}</td>')
+        cells.append(f'<td class="g-var{var_cls}">{fm(var_dollars) if var_dollars is not None else "—"}</td>')
+        cells.append(f'<td class="g-var">{p(wa["pct_complete"],0) if wa.get("pct_complete") else "—"}</td>')
+        cells.append('<td class="g-var"></td>')
+        cells.append(f'<td class="g-cap g-first">{p(wa["aaa_pct"],1)}</td>')
+        cells.append(f'<td class="g-cap">{p(wa["aa_pct"],1)}</td>')
+        cells.append(f'<td class="g-cap">{p(wa["a_pct"],1)}</td>')
+        cells.append(f'<td class="g-cap">{p(wa["bbb_pct"],1)}</td>')
+        cells.append(f'<td class="g-cap">{p(wa["oc_pct"],1)}</td>')
+        cells.append('<td class="g-cap"></td>')
+
+        group_attr = f' data-group="{group_key}"' if group_key else ""
+        return (
+            f'<tr class="avg-row"{group_attr} style="background:#E3F2FD;font-weight:700">'
+            + "".join(cells) + "</tr>\n"
+        )
 
     forecast_source = "Markov chain" if has_markov else "logistic regression"
     forecast_note = "" if has_markov else ' <span style="color:#F57F17;font-size:.6rem">(LR model — Markov pending)</span>'
 
+    # ── Build the dynamic parts of the header from COL_DEFS ─────────────────
+    group_header_cells = "".join(
+        f'<th class="{gcls} g-first" colspan="{span}">{label}</th>'
+        for (gcls, label, span) in GROUP_HEADERS
+    )
+    col_header_cells = ""
+    for idx, (cls, label, stype, sortable, tooltip) in enumerate(COL_DEFS):
+        title_attr = f' title="{label}: {tooltip}"'
+        sortable_attr = f' data-sortable="{sortable}" data-type="{stype}" data-col="{idx}"'
+        onclick = f' onclick="econSort({idx})"' if sortable else ''
+        col_header_cells += f'<th class="{cls}"{sortable_attr}{title_attr}{onclick}>{label}</th>'
+
     h = f"""<div style="padding:8px 12px">
 <h2 style="font-size:1rem;margin-bottom:4px">Residual Economics — All Deals{forecast_note}</h2>
-<p style="font-size:.7rem;color:#666;margin-bottom:8px">
-Hover any % cell for dollar amount. Yellow rows = CarMax. Orange rows = Carvana non-prime.
+<p style="font-size:.7rem;color:#666;margin:4px 0 6px;max-width:50em">
+Hover any % cell for dollar amount. Hover any column header for its methodology definition.
+Click a header to sort; click again for descending. Averages stay pinned at the bottom.
 Loss forecasts from {forecast_source} model. {'Markov model running — forecasts will update.' if not has_markov else ''}
 </p>
+<div class="econ-controls" role="toolbar" aria-label="Residual Economics filters">
+  <label><input type="checkbox" class="econ-filter" value="cv-prime" checked onclick="econFilter()"> Carvana Prime</label>
+  <label><input type="checkbox" class="econ-filter" value="cv-nonprime" checked onclick="econFilter()"> Carvana Non-Prime</label>
+  <label><input type="checkbox" class="econ-filter" value="kmx-prime" checked onclick="econFilter()"> CarMax Prime</label>
+  <button type="button" class="csv-btn" onclick="econDownloadCSV()">Download CSV</button>
 </div>
-<div class="tbl" style="max-height:70vh;overflow:auto">
-<table style="font-size:.6rem">
+</div>
+<div class="tbl" id="econTableWrap" style="max-height:78vh;overflow:auto">
+<table class="econ" id="econTable">
 <thead>
-<tr style="position:sticky;top:0;z-index:2;background:#f5f5f5">
-<th colspan="4" style="text-align:center;border-bottom:2px solid #1976D2">Identity</th>
-<th colspan="5" style="text-align:center;border-bottom:2px solid #388E3C">Capital Structure (% init pool)</th>
-<th style="text-align:center;border-bottom:2px solid #607D8B">Terms</th>
-<th colspan="8" style="text-align:center;border-bottom:2px solid #FF9800">Initial Forecast (% orig bal)</th>
-<th colspan="4" style="text-align:center;border-bottom:2px solid #7B1FA2">Realized / Projected</th>
-<th colspan="3" style="text-align:center;border-bottom:2px solid #D32F2F">Variance &amp; Risk</th>
-</tr>
-<tr style="position:sticky;top:22px;z-index:2;background:#f5f5f5">
-<th>Issuer</th><th>Deal</th><th>Cutoff</th><th>Orig Bal</th>
-<th>AAA</th><th>AA</th><th>A</th><th>BBB</th><th>OC</th>
-<th>Triggers / OC / Reserve</th>
-<th>WAC</th><th>CoD</th><th>XS/yr</th><th>WAL</th>
-<th>Tot XS</th><th>Svc</th><th>Exp Loss</th><th>Exp Resid</th>
-<th>Act Int</th><th>Act Svc</th><th>Proj Loss</th><th>Act Resid</th>
-<th>Var</th><th>%Done</th><th>Trig Risk</th>
-</tr>
+<tr class="group-header">{group_header_cells}</tr>
+<tr class="col-header" style="position:sticky;top:0;z-index:2;background:#f5f5f5">{col_header_cells}</tr>
 </thead>
 <tbody>
 """
 
-    # Main section: Prime + CarMax interleaved
+    # Data rows (sortable) — Prime + CarMax interleaved, plus non-prime below
     h += _build_table_rows(prime_and_carmax)
-
-    # Summary rows
-    if crvna_prime:
-        h += _weighted_avg_row(crvna_prime, "Carvana Prime Avg")
-    if carmx_deals:
-        h += _weighted_avg_row(carmx_deals, "CarMax Avg")
-    if prime_and_carmax:
-        h += _weighted_avg_row(prime_and_carmax, "All Prime Avg")
-
-    # Non-prime section
     if crvna_nonprime:
-        h += f"""<tr><td colspan="25" style="background:#FFCCBC;text-align:center;font-weight:700;padding:6px">
-Carvana Non-Prime</td></tr>\n"""
         h += _build_table_rows(crvna_nonprime)
-        h += _weighted_avg_row(crvna_nonprime, "Carvana Non-Prime Avg")
+
+    # Averages pinned to bottom, NOT sortable; each tagged with data-group so
+    # the filter hides them when the corresponding group is unchecked.
+    if crvna_prime:
+        h += _weighted_avg_row(crvna_prime, "Carvana Prime Avg", "cv-prime")
+    if carmx_deals:
+        h += _weighted_avg_row(carmx_deals, "CarMax Avg", "kmx-prime")
+    if crvna_nonprime:
+        h += _weighted_avg_row(crvna_nonprime, "Carvana Non-Prime Avg", "cv-nonprime")
+    if prime_and_carmax:
+        h += _weighted_avg_row(prime_and_carmax, "All Prime Avg (Carvana+CarMax)", "all-prime")
 
     h += "</tbody></table></div>\n"
+
+    # ── Filter / sort / CSV JavaScript (vanilla, no external libs) ─────────
+    h += """
+<script>
+(function(){
+  var table = document.getElementById('econTable');
+  if (!table) return;
+  var tbody = table.tBodies[0];
+
+  window.econFilter = function(){
+    var enabled = {};
+    document.querySelectorAll('input.econ-filter').forEach(function(c){
+      enabled[c.value] = c.checked;
+    });
+    tbody.querySelectorAll('tr.data-row').forEach(function(r){
+      r.style.display = enabled[r.dataset.group] ? '' : 'none';
+    });
+    tbody.querySelectorAll('tr.avg-row').forEach(function(r){
+      var g = r.dataset.group;
+      if (g === 'all-prime') {
+        r.style.display = (enabled['cv-prime'] && enabled['kmx-prime']) ? '' : 'none';
+      } else {
+        r.style.display = enabled[g] ? '' : 'none';
+      }
+    });
+  };
+
+  window._econSortState = {col: null, dir: 0};
+  window.econSort = function(col){
+    var ths = table.tHead.querySelectorAll('tr.col-header th');
+    var th = ths[col];
+    if (!th || th.dataset.sortable !== '1') return;
+    var state = window._econSortState;
+    if (state.col === col) {
+      state.dir = state.dir === 1 ? -1 : 1;
+    } else {
+      state.col = col; state.dir = 1;
+    }
+    ths.forEach(function(t){ t.classList.remove('sorted-asc','sorted-desc'); });
+    th.classList.add(state.dir === 1 ? 'sorted-asc' : 'sorted-desc');
+
+    var type = th.dataset.type || 'string';
+    var dataRows = Array.prototype.slice.call(tbody.querySelectorAll('tr.data-row'));
+    var avgRows = Array.prototype.slice.call(tbody.querySelectorAll('tr.avg-row'));
+
+    dataRows.sort(function(a, b){
+      var av = a.cells[col].dataset.sort;
+      var bv = b.cells[col].dataset.sort;
+      var empty = function(v){ return v === undefined || v === null || v === ''; };
+      if (empty(av) && empty(bv)) return 0;
+      if (empty(av)) return 1;   // empties always bottom
+      if (empty(bv)) return -1;
+      var cmp;
+      if (type === 'numeric') {
+        cmp = parseFloat(av) - parseFloat(bv);
+      } else if (type === 'date') {
+        cmp = (av < bv) ? -1 : (av > bv ? 1 : 0);
+      } else {
+        cmp = av.localeCompare(bv);
+      }
+      return state.dir * cmp;
+    });
+    dataRows.forEach(function(r){ tbody.appendChild(r); });
+    avgRows.forEach(function(r){ tbody.appendChild(r); });
+  };
+
+  window.econDownloadCSV = function(){
+    var rows = [];
+    var headerCells = table.tHead.querySelectorAll('tr.col-header th');
+    var headerVals = Array.prototype.map.call(headerCells, function(h){
+      return h.textContent.trim();
+    });
+    rows.push(headerVals);
+    tbody.querySelectorAll('tr').forEach(function(r){
+      if (r.style.display === 'none') return;
+      var vals = Array.prototype.map.call(r.cells, function(c){
+        var raw = c.dataset.sort;
+        if (raw !== undefined && raw !== '' && raw !== null) return raw;
+        return c.textContent.trim().replace(/\\s+/g, ' ');
+      });
+      rows.push(vals);
+    });
+    var csv = rows.map(function(r){
+      return r.map(function(v){
+        v = String(v);
+        if (v.indexOf(',') >= 0 || v.indexOf('"') >= 0 || v.indexOf('\\n') >= 0) {
+          return '"' + v.replace(/"/g,'""') + '"';
+        }
+        return v;
+      }).join(',');
+    }).join('\\n');
+    var blob = new Blob([csv], {type:'text/csv;charset=utf-8'});
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'residual_economics_' + new Date().toISOString().slice(0,10) + '.csv';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
+  };
+})();
+</script>
+"""
 
     # ── 9. Pointer to the Methodology & Findings tab (moved out of inline) ──
     h += (
