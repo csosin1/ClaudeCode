@@ -1,3 +1,9 @@
+---
+kind: skill
+last_verified: 2026-04-18
+refresh_cadence: on_touch
+sunset: null
+---
 # Visual Lint — three-layer visual QA
 
 ## When to use

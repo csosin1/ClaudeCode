@@ -1,4 +1,14 @@
+---
+kind: skill
+last_verified: 2026-04-18
+refresh_cadence: on_touch
+sunset: null
+---
 # SQLite across multiple writers — avoid WAL
+
+## When to use
+
+Use this skill when working on sqlite across multiple writers — avoid wal. (Placeholder — sharpen with the specific triggers: which tasks, which error modes, which project phases invoke it.)
 
 ## Purpose
 Any project where a SQLite file is written by more than one process (a long-lived service + operator CLI tools + a background worker) needs to be careful about `journal_mode`. WAL's speed wins come with a subtle failure mode that silently eats data when processes restart uncleanly.

@@ -1,4 +1,14 @@
+---
+kind: skill
+last_verified: 2026-04-18
+refresh_cadence: on_touch
+sunset: null
+---
 # browser-use internals: safe monkey-patching and the mid-flight LLM swap
+
+## When to use
+
+Use this skill when working on browser-use internals: safe monkey-patching and the mid-flight llm swap. (Placeholder — sharpen with the specific triggers: which tasks, which error modes, which project phases invoke it.)
 
 ## What this is about
 `browser-use` drives a headed browser with an LLM in a step loop. Out of the box, the LLM is fixed at `Agent` construction time. For most runs that's fine. But:

@@ -1,3 +1,9 @@
+---
+kind: runbook
+last_verified: 2026-04-18
+refresh_cadence: on_touch
+sunset: null
+---
 # Migration Runbook — Apps to New Prod Droplet
 
 _Option B: apps move to new prod droplet; Claude + orchestration stay on current (dev) droplet. Existing URLs preserved via nginx reverse-proxy on dev. Claude chats, bookmarks, watchdog — all unchanged._

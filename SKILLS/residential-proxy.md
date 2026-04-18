@@ -1,4 +1,14 @@
+---
+kind: skill
+last_verified: 2026-04-18
+refresh_cadence: on_touch
+sunset: null
+---
 # Skill: Residential Proxy (Decodo/Smartproxy)
+
+## When to use
+
+Use this skill when working on residential proxy (decodo/smartproxy). (Placeholder — sharpen with the specific triggers: which tasks, which error modes, which project phases invoke it.)
 
 ## What This Skill Does
 

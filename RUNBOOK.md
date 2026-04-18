@@ -1,3 +1,9 @@
+---
+kind: runbook
+last_verified: 2026-04-18
+refresh_cadence: on_touch
+sunset: null
+---
 # Runbook — site-deploy
 Last updated: 2026-04-12
 
