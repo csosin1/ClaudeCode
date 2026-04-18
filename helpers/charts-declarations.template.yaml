@@ -1,0 +1,49 @@
+# charts-declarations.template.yaml
+# Copy to /opt/<project>/.charts.yaml and fill in per chart.
+# Consumed by helpers/visual-lint.js :: assertChartCategoriesComplete.
+#
+# Projects declare what each chart SHOULD look like; the assertion verifies
+# reality against the declaration. The generic "chart not empty" check
+# cannot know that a chart SHOULD have 4 LTV bands or 7 issuer tiers —
+# that's domain knowledge only the project can assert. Declaring it makes
+# the expectation explicit and testable in CI.
+#
+# Motivated by the 2026-04-17 "Hazard by LTV band" live-site bug where
+# three of four LTV bands rendered empty due to upstream unit scaling.
+# A declaration like the example below would have failed QA pre-promote.
+#
+# Usage in tests/<project>.spec.ts:
+#
+#   import yaml from 'js-yaml';
+#   import fs from 'fs';
+#   import { assertChartCategoriesComplete } from '/opt/site-deploy/helpers/visual-lint.js';
+#
+#   const declarations = yaml.load(fs.readFileSync('/opt/<project>/.charts.yaml', 'utf8'));
+#   await assertChartCategoriesComplete(page, declarations);
+
+charts:
+  "<stable-chart-id>":                         # used in test output + logs
+    selector: "#chart-xxx .js-plotly-plot"     # CSS selector locating the chart
+    description: "human-readable what this chart shows"
+    expected_categories:                       # required if chart has categorical axis
+      - "<value-1>"
+      - "<value-2>"
+    expected_series_min: 1                     # minimum distinct series rendered
+    data_points_per_category_min: 1            # each category must have >= this many valid points
+    # Optional hygiene overrides (default true):
+    require_title: true
+    require_x_axis_label: true
+    require_y_axis_label: true
+
+# Example (the chart the user reported on 2026-04-17):
+#
+# charts:
+#   "5b_hazard_by_ltv":
+#     selector: "#chart-5b .js-plotly-plot"
+#     description: "Monthly default hazard (bps) by LTV band, by issuer tier"
+#     expected_categories: ["<80%", "80-99%", "100-119%", "120%+"]
+#     expected_series_min: 2
+#     data_points_per_category_min: 1
+#     require_title: true
+#     require_x_axis_label: true
+#     require_y_axis_label: true

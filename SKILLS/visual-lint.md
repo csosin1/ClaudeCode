@@ -61,6 +61,56 @@ await runAxe(page, { excluded: ['region'] });  // excluded rules don't run
 
 `runAxe` pulls the full axe-core rule set — ~90 rules covering WCAG 2.1 AA, ARIA correctness, landmark structure, form labelling, image alternatives, link semantics, and keyboard/focus order. See https://dequeuniversity.com/rules/axe/ for the full list. It's the canonical implementation of WCAG contrast math; don't roll your own.
 
+## Chart hygiene
+
+The initial B-plus rules cover the "renders properly" pillar well (empty-chart detection via Plotly `gd.data`, axe-core a11y, entity/placeholder scans). Chart QA has two more pillars the generic rules can't reach on their own:
+
+- **Accurate data** — is what the chart shows actually what the data says? Partially covered by `assertNoEmptyCharts`, but it can't know a chart SHOULD have four LTV bands vs two vs seven. That requires the project to declare its expectations.
+- **Displayed usefully** — title present? axes labeled? legend not clipped? SVG not overflowing the card at 390px? All generic, all chartable as deterministic rules.
+
+The chart-hygiene extensions close both gaps. Added 2026-04-17 as a follow-on to the initial visual QA system (commit `f23153f`), motivated by the live-site "Hazard by LTV band" bug where three of four bands rendered empty due to an upstream unit-scaling collision, caught only when the user sent a screenshot.
+
+### The five chart-hygiene assertions
+
+| Function | Catches |
+|---|---|
+| `assertChartHasTitle(page, selector)` | Chart shipped without a title — reader can't tell what it shows. Accepts Plotly `layout.title.text`, an `<h2>/<h3>/<h4>` inside the chart element, or a sibling header in the parent container. |
+| `assertChartAxesLabeled(page, selector, {requireX, requireY})` | Axis present but label missing. Default requires both; pass `{requireX: false}` for horizontal bars where the y-axis is the category, etc. |
+| `assertChartCategoriesComplete(page, declarations)` | The declarative API — see below. Direct catcher for silently-collapsed categorical distributions. |
+| `assertLegendNotClipped(page, selector)` | Legend runs off the container's right/bottom edge, or overlaps the plot area (legend-on-bars accident). |
+| `assertNoChartOverflow(page, selector)` | Chart's SVG extends past its parent container — clipped labels / chopped extremes, usually on 390px mobile. |
+
+### The `.charts.yaml` declarative schema
+
+A generic "chart is not empty" check is blind to the shape a chart should have. The `.charts.yaml` file lets the project declare, per chart, what reality should look like. Schema lives at `helpers/charts-declarations.template.yaml`:
+
+```yaml
+charts:
+  "5b_hazard_by_ltv":
+    selector: "#chart-5b .js-plotly-plot"
+    description: "Monthly default hazard (bps) by LTV band, by issuer tier"
+    expected_categories: ["<80%", "80-99%", "100-119%", "120%+"]
+    expected_series_min: 2
+    data_points_per_category_min: 1
+    require_title: true
+    require_x_axis_label: true
+    require_y_axis_label: true
+```
+
+`assertChartCategoriesComplete` reads `gd.data` and `gd.layout`, then for each declared chart verifies: every `expected_categories` value is present on the categorical axis; every expected category has at least `data_points_per_category_min` non-null points summed across traces; total distinct series count is at least `expected_series_min`; and (optionally) the title / axis labels per the hygiene flags. Any failure throws with a listing of which chart, which categories went missing, and what was rendered instead.
+
+### How to author a good `.charts.yaml` entry
+
+Worked example — the 2026-04-17 Hazard-by-LTV bug:
+
+1. **Pick a stable id** — `5b_hazard_by_ltv`, not `chart-3`. This id shows up in QA logs; you want it meaningful.
+2. **Selector must be specific** — `#chart-5b .js-plotly-plot` beats `.js-plotly-plot:nth-of-type(12)`. Ids survive reorders; positional selectors don't.
+3. **`expected_categories` is the load-bearing field** — exactly the labels the reader should see on the axis. If the chart is `["<80%", "80-99%", "100-119%", "120%+"]`, declare all four. A chart collapsing to just `["<80%"]` fails the assertion with a clear "missing categories: [\"80-99%\", \"100-119%\", \"120%+\"]" message.
+4. **`expected_series_min: 2`** — for a multi-line chart, declaring the minimum catches the case where all but one tier silently drop out.
+5. **`data_points_per_category_min: 1`** — the stricter guardrail. An expected category that exists on the axis but has zero data points (the exact Hazard-by-LTV bug) fails here.
+
+Adopt incrementally: start by declaring the two or three most investor-visible charts. The declaration is cheap — three to eight lines per chart — and catches a bug class that otherwise only surfaces via screenshots.
+
 ## A-llm semantic layer
 
 Two subagents per page × viewport, dispatched in parallel by `helpers/visual-review-orchestrator.sh`:
@@ -164,7 +214,28 @@ Concrete steps for a new project chat adopting visual-lint:
    });
    ```
 
-4. **Wire the A-llm orchestrator into `qa.yml`** (after the deterministic tests pass):
+4. **Create `.charts.yaml` with declarations for every production chart**:
+   ```
+   cp /opt/site-deploy/helpers/charts-declarations.template.yaml /opt/<project>/.charts.yaml
+   $EDITOR /opt/<project>/.charts.yaml
+   ```
+   Declare every user-facing chart: selector, expected_categories, expected_series_min, data_points_per_category_min. This is the load-bearing piece of the "accurate data" pillar — the generic `assertNoEmptyCharts` check cannot know the shape a chart should have. Then in the spec:
+   ```ts
+   import yaml from 'js-yaml';
+   import fs from 'fs';
+   import { assertChartCategoriesComplete, assertChartHasTitle,
+            assertChartAxesLabeled, assertLegendNotClipped,
+            assertNoChartOverflow } from '/opt/site-deploy/helpers/visual-lint.js';
+
+   const declarations = yaml.load(fs.readFileSync('/opt/<project>/.charts.yaml', 'utf8'));
+   await assertChartCategoriesComplete(page, declarations);
+   await assertChartHasTitle(page);
+   await assertChartAxesLabeled(page);
+   await assertLegendNotClipped(page);
+   await assertNoChartOverflow(page);
+   ```
+
+5. **Wire the A-llm orchestrator into `qa.yml`** (after the deterministic tests pass):
    ```yaml
    - name: Visual review (A-llm layer)
      run: |
@@ -173,7 +244,7 @@ Concrete steps for a new project chat adopting visual-lint:
          /opt/<project>/.perf.yaml
    ```
 
-5. **Worked example — carvana-abs-2**:
+6. **Worked example — carvana-abs-2**:
    - `REVIEW_CONTEXT.md` declares "investor-grade polish; no loan-level PII ever; numbers must trace to SEC 10-K filings."
    - Spec calls all six starter functions + `assertNoEmptyCharts` + `assertNoScrollTraps` (both motivated by the Methodology incident).
    - qa.yml runs the orchestrator against `.perf.yaml` (already declares the relevant pages × viewports).
@@ -203,6 +274,13 @@ Growing section. Each entry: symptom → detection → fix pattern → LESSONS l
 - **Detection**: `assertNoScrollTraps(page)` — finds any scrollable ancestor with client-height below threshold (default 30vh) wrapping a taller child.
 - **Fix**: remove `overflow: auto` + `max-height` from the wrapper; let the table render at its natural height, or replace with pagination / virtualized scrolling. If scroll-capture is truly desired, make it explicit with `overscroll-behavior: contain` and a visible scroll affordance.
 - **LESSONS**: 2026-04-17 abs-dashboard Methodology incident.
+
+### 4. Chart categories silently collapsed to one due to upstream unit-scaling bug
+
+- **Symptom**: categorical chart renders with the correct x-axis tick labels (e.g. `<80%`, `80-99%`, `100-119%`, `120%+`) but only the first band has data; the other three are visually empty. The chart looks "fine" in isolation — no empty-container signal, no console error, no zero-sized element — because Plotly still draws the axis ticks even when the underlying `trace.x`/`trace.y` for those categories collapsed during upstream aggregation. Generic "chart not empty" checks pass because there IS data for one band.
+- **Detection**: `assertChartCategoriesComplete(page, declarations)` against a `.charts.yaml` entry that declares all four expected categories and `data_points_per_category_min: 1`. The assertion fails with `empty categories: ["80-99%", "100-119%", "120%+"]` pointing directly at the regression. The generic `assertNoEmptyCharts` alone cannot catch this — it has no way to know the chart should have four bands rather than one.
+- **Fix pattern**: audit upstream data-unit assumptions at the producer seam. The 2026-04-17 root cause was LTV stored as a fraction (0.82) in one pipeline stage and as a percent (82) in the bucketing function; the edge values `(80, 100, 120)` filtered all 99%+ of rows into a single bucket. Unit-test the producer with a property check: for every bucket in `bucket_edges`, at least one row from a representative sample should land in it. Combine with the declarative chart-side assertion so a regression at either layer fails QA.
+- **LESSONS**: 2026-04-17 live-site Hazard-by-LTV incident (caught via user screenshot, not QA). The motivating case for commit `f23153f`'s chart-hygiene follow-on.
 
 ## Cost expectations
 

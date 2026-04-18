@@ -906,3 +906,42 @@ Disabled `general-deploy.timer` on prod (was running all project deploy scripts 
 - 14:17Z cron_ingest fire today: check /var/log/abs-ingestion.log on prod for "start"/"done" pair.
 - Sunday 06:00Z cron_refresh fire: same pattern on prod.
 - Confirm DB exclusions hold: run post-deploy-rsync.sh manually, verify *.db never appears in rsync transfer output regardless of source mtime.
+
+---
+
+## infra: chart-hygiene extensions to visual-lint (2026-04-17)
+
+Follow-on to commit `f23153f` (initial visual QA system). Motivated by today's live-site "Hazard by LTV band" bug — a categorical chart rendered with three of four LTV bands empty due to an upstream unit-scaling collision; no QA assertion caught it, and it surfaced only via user screenshot. The initial `assertNoEmptyCharts` rule could not catch this because it has no way to know the chart SHOULD have four bands rather than one.
+
+### What shipped
+
+- **Five new assertions in `helpers/visual-lint.js`** — all Plotly-aware (`gd.data` + `gd.layout`), matching the existing module style:
+  - `assertChartHasTitle(page, selector)` — Plotly `layout.title.text` OR `<h2>/<h3>/<h4>` inside/around the chart.
+  - `assertChartAxesLabeled(page, selector, {requireX, requireY})` — non-empty `xaxis.title.text` / `yaxis.title.text` per flags.
+  - `assertChartCategoriesComplete(page, declarations)` — declarative API driven by `.charts.yaml`; verifies expected categories present, series-count floor, per-category point count, and optional title/axis hygiene.
+  - `assertLegendNotClipped(page, selector)` — legend inside container rect, not overlapping plot-area.
+  - `assertNoChartOverflow(page, selector)` — chart SVG not extending past parent container on any edge.
+
+- **`helpers/charts-declarations.template.yaml`** — copy-to-project template for `.charts.yaml`, with the Hazard-by-LTV worked example as the canonical reference. Consumed by `assertChartCategoriesComplete`.
+
+- **`SKILLS/visual-lint.md`** — new "Chart hygiene" section inserted after the B-plus layer section (existing content untouched). Covers the five assertions, the declarative `.charts.yaml` schema with the Hazard-by-LTV worked example, and a new adoption step (step 4). New anti-pattern catalog entry #4 "Chart categories silently collapsed to one due to upstream unit-scaling bug" — symptom, detection (`assertChartCategoriesComplete`), fix pattern (producer-seam unit audit), LESSONS reference.
+
+### Files modified
+
+- `helpers/visual-lint.js` — +340 lines (five new functions + export block).
+- `helpers/charts-declarations.template.yaml` — new, 47 lines.
+- `SKILLS/visual-lint.md` — +74 lines (Chart hygiene section + adoption step + anti-pattern #4).
+- `CHANGES.md` — this entry.
+
+### Things for Infra-QA to verify
+
+- `node --check helpers/visual-lint.js` passes (verified in worktree).
+- Module exports match documented list in `SKILLS/visual-lint.md`.
+- `.charts.yaml` template is valid YAML (`python -c "import yaml; yaml.safe_load(open('helpers/charts-declarations.template.yaml'))"`).
+- No existing project spec breaks — new functions are additions, no behavior changes to the original nine.
+- Reviewer rule #14 (chart-assertion coverage) implicitly covers the new functions; no rule edits needed.
+
+### Assumptions
+
+- Projects that adopt `.charts.yaml` will have `js-yaml` as a devDep (Playwright projects typically already do); documented in the adoption snippet.
+- Horizontal-bar detection uses `trace.orientation === 'h'` to pick y-axis as categorical; a chart built with swapped x/y arrays without setting orientation would false-pass. Acceptable — Plotly's own convention.
