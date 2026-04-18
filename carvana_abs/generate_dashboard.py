@@ -2925,6 +2925,719 @@ def _safe_div(a, b):
     return a / b
 
 
+def _rt_parse_date(s):
+    """Parse pool_performance distribution_date (m/d/Y or Y-m-d). Returns datetime or None."""
+    if not s:
+        return None
+    for fmt in ('%m/%d/%Y', '%Y-%m-%d', '%m-%d-%Y'):
+        try:
+            return datetime.strptime(str(s).strip(), fmt)
+        except Exception:
+            pass
+    return None
+
+
+def _rt_months_since(cutoff_str, dist_dt):
+    """Whole-months from cutoff to distribution date, minimum 1."""
+    c = _rt_parse_date(cutoff_str)
+    if not c or not dist_dt:
+        return None
+    return max(1, (dist_dt.year - c.year) * 12 + (dist_dt.month - c.month))
+
+
+def _rt_segment(deal, issuer):
+    """Classify a deal into one of: Carvana Prime, Carvana Non-Prime, CarMax."""
+    if issuer == 'CARMX':
+        return 'CarMax'
+    return 'Carvana Prime' if '-P' in deal else 'Carvana Non-Prime'
+
+
+def _rt_load_issuer(raw_db, issuer):
+    """Load (terms, perf) for a single issuer's raw DB.
+
+    terms[deal] -> dict(ipb, cutoff)
+    perf[deal]  -> list of dicts {dist, cnl, ebp, nco} sorted by dist ascending
+    """
+    from collections import defaultdict as _dd
+    terms, perf = {}, _dd(list)
+    if not os.path.exists(raw_db):
+        return terms, perf
+    conn = sqlite3.connect(raw_db)
+    try:
+        for deal, ipb, cutoff in conn.execute(
+            "SELECT deal, initial_pool_balance, cutoff_date FROM deal_terms"
+        ).fetchall():
+            if ipb and ipb < 5e9:
+                terms[deal] = {'ipb': ipb, 'cutoff': cutoff, 'issuer': issuer}
+        for deal, dd, cnl, ebp, nco in conn.execute(
+            "SELECT deal, distribution_date, cumulative_net_losses, "
+            "ending_pool_balance, net_charged_off_amount FROM pool_performance"
+        ).fetchall():
+            dt = _rt_parse_date(dd)
+            if dt is None:
+                continue
+            perf[deal].append({
+                'dist': dt,
+                'cnl': cnl or 0,
+                'ebp': ebp or 0,
+                'nco': nco or 0,
+            })
+        for deal in perf:
+            perf[deal].sort(key=lambda r: r['dist'])
+    finally:
+        conn.close()
+    return terms, dict(perf)
+
+
+def _rt_peer_curves(all_terms, all_perf):
+    """Build peer-median CNL-pct curves by (segment, seasoning_month).
+
+    Returns dict[segment][month] -> (median_pct, n_peers).
+    """
+    from collections import defaultdict as _dd
+    raw = _dd(lambda: _dd(list))  # [segment][month] -> [pct,...]
+    for deal, t in all_terms.items():
+        rows = all_perf.get(deal, [])
+        if not rows or not t.get('ipb'):
+            continue
+        seg = _rt_segment(deal, t['issuer'])
+        for r in rows:
+            m = _rt_months_since(t['cutoff'], r['dist'])
+            if m is None:
+                continue
+            pct = r['cnl'] / t['ipb'] * 100.0
+            raw[seg][m].append(pct)
+    out = {}
+    for seg, mm in raw.items():
+        out[seg] = {}
+        for m, vals in mm.items():
+            s = sorted(vals)
+            n = len(s)
+            med = s[n // 2] if n % 2 else 0.5 * (s[n // 2 - 1] + s[n // 2])
+            out[seg][m] = (med, n)
+    return out
+
+
+def _rt_cal(actual_pct, peer_curves, seg, month, min_peers=3):
+    """Compute cal factor actual/peer-median for a deal at a given seasoning month.
+
+    Returns (cal, peer_median_pct, n_peers) — cal is None if insufficient peers
+    or peer median is zero.
+    """
+    mm = peer_curves.get(seg, {}).get(month)
+    if not mm:
+        return None, None, 0
+    med, n = mm
+    if n < min_peers or not med:
+        return None, med, n
+    return actual_pct / med, med, n
+
+
+def generate_recent_trends_tab():
+    """Build the 'Recent Trends' landing-page analyst note.
+
+    Auto-generated from pool_performance + deal_terms in both issuer DBs.
+    Answers: how are Carvana and CarMax loans doing relative to peer-vintage
+    benchmarks, and what changed in the most recent filing cycle.
+
+    No Markov forecast dependency — uses peer-group median CNL curves as the
+    benchmark. When `deal_forecasts` (Markov) becomes available in the future,
+    this tab will pick up a richer comparison via the same patterns.
+    """
+    from collections import defaultdict as _dd
+    from statistics import median as _median
+
+    # ── 1. Load raw data for both issuers ────────────────────────────────
+    crv_db = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          "db", "carvana_abs.db")
+    cmx_db = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                          "carmax_abs", "db", "carmax_abs.db")
+
+    all_terms, all_perf = {}, {}
+    for db, issuer in [(crv_db, 'CRVNA'), (cmx_db, 'CARMX')]:
+        t, p = _rt_load_issuer(db, issuer)
+        all_terms.update(t)
+        all_perf.update(p)
+
+    if not all_terms:
+        return "<div class='tc' style='display:block;padding:16px'><p>No data available yet.</p></div>"
+
+    peer_curves = _rt_peer_curves(all_terms, all_perf)
+
+    # ── 2. Per-deal metrics: latest cal, prior cal, 30-day delta ─────────
+    per_deal = {}  # deal -> dict
+    latest_dist_seen = None
+
+    for deal, t in all_terms.items():
+        rows = all_perf.get(deal, [])
+        if not rows or not t.get('ipb'):
+            continue
+        seg = _rt_segment(deal, t['issuer'])
+        cutoff = t['cutoff']
+        ipb = t['ipb']
+
+        latest = rows[-1]
+        prior = rows[-2] if len(rows) >= 2 else None
+        if latest_dist_seen is None or latest['dist'] > latest_dist_seen:
+            latest_dist_seen = latest['dist']
+
+        m_latest = _rt_months_since(cutoff, latest['dist'])
+        latest_pct = latest['cnl'] / ipb * 100.0
+        cal, peer_med, n_peers = _rt_cal(latest_pct, peer_curves, seg, m_latest)
+
+        prior_cal = None
+        delta_cal = None
+        delta_cnl_bps = None  # change in realized cnl_pct (bps of pool)
+        if prior:
+            m_prior = _rt_months_since(cutoff, prior['dist'])
+            prior_pct = prior['cnl'] / ipb * 100.0
+            prior_cal, _, _ = _rt_cal(prior_pct, peer_curves, seg, m_prior)
+            if cal is not None and prior_cal is not None:
+                delta_cal = cal - prior_cal
+            # actual month-over-month losses in bps of initial pool
+            delta_cnl_bps = (latest['cnl'] - prior['cnl']) / ipb * 10_000
+
+        # Trailing 6-month average monthly loss pace (bps of IPB)
+        ttm6 = None
+        if len(rows) >= 7:
+            bps_vals = []
+            for i in range(max(0, len(rows) - 6), len(rows)):
+                if i == 0:
+                    continue
+                bps_vals.append(
+                    (rows[i]['cnl'] - rows[i - 1]['cnl']) / ipb * 10_000)
+            if bps_vals:
+                ttm6 = sum(bps_vals) / len(bps_vals)
+
+        # 3-month trailing surprise vs 6-month baseline
+        surprise_3m = None
+        if len(rows) >= 7 and ttm6 is not None:
+            last3 = []
+            for i in range(max(1, len(rows) - 3), len(rows)):
+                last3.append(
+                    (rows[i]['cnl'] - rows[i - 1]['cnl']) / ipb * 10_000)
+            if last3:
+                surprise_3m = sum(last3) / len(last3) - ttm6
+
+        per_deal[deal] = {
+            'segment': seg,
+            'issuer': t['issuer'],
+            'ipb': ipb,
+            'latest_dist': latest['dist'],
+            'seasoning_months': m_latest,
+            'realized_cnl_pct': latest_pct,
+            'peer_median_pct': peer_med,
+            'n_peers': n_peers,
+            'cal': cal,
+            'prior_cal': prior_cal,
+            'delta_cal_30d': delta_cal,
+            'delta_cnl_bps_30d': delta_cnl_bps,
+            'ttm6_bps': ttm6,
+            'surprise_3m_bps': surprise_3m,
+        }
+
+    if not per_deal:
+        return "<div class='tc' style='display:block;padding:16px'><p>No deals with pool-performance data yet.</p></div>"
+
+    # ── 3. Segment aggregates (weighted by ipb) ──────────────────────────
+    seg_agg = {}
+    for seg in ('Carvana Prime', 'Carvana Non-Prime', 'CarMax'):
+        rows = [d for d in per_deal.values() if d['segment'] == seg]
+        if not rows:
+            continue
+        total_ipb = sum(r['ipb'] for r in rows) or 1
+        # weighted cal factor (ipb-weighted), only over deals with a cal value
+        cal_rows = [r for r in rows if r['cal'] is not None]
+        w_cal = None
+        if cal_rows:
+            w_cal = sum(r['cal'] * r['ipb'] for r in cal_rows) / sum(r['ipb'] for r in cal_rows)
+        # 30-day change in weighted cal
+        cal_delta_rows = [r for r in rows if r['delta_cal_30d'] is not None]
+        w_cal_delta = None
+        if cal_delta_rows:
+            w_cal_delta = sum(r['delta_cal_30d'] * r['ipb'] for r in cal_delta_rows) / sum(r['ipb'] for r in cal_delta_rows)
+        # latest month loss bps (weighted)
+        loss_bps_rows = [r for r in rows if r['delta_cnl_bps_30d'] is not None]
+        w_last_month_bps = None
+        if loss_bps_rows:
+            w_last_month_bps = sum(r['delta_cnl_bps_30d'] * r['ipb'] for r in loss_bps_rows) / sum(r['ipb'] for r in loss_bps_rows)
+        # 6-month baseline pace
+        ttm6_rows = [r for r in rows if r['ttm6_bps'] is not None]
+        w_ttm6 = None
+        if ttm6_rows:
+            w_ttm6 = sum(r['ttm6_bps'] * r['ipb'] for r in ttm6_rows) / sum(r['ipb'] for r in ttm6_rows)
+        w_surprise_3m = None
+        surp_rows = [r for r in rows if r['surprise_3m_bps'] is not None]
+        if surp_rows:
+            w_surprise_3m = sum(r['surprise_3m_bps'] * r['ipb'] for r in surp_rows) / sum(r['ipb'] for r in surp_rows)
+
+        under = sum(1 for r in cal_rows if r['cal'] is not None and r['cal'] > 1.10)
+        over = sum(1 for r in cal_rows if r['cal'] is not None and r['cal'] < 0.90)
+        worst = max(cal_rows, key=lambda r: r['cal']) if cal_rows else None
+        best = min(cal_rows, key=lambda r: r['cal']) if cal_rows else None
+
+        seg_agg[seg] = {
+            'n_deals': len(rows),
+            'n_cal_deals': len(cal_rows),
+            'total_ipb': total_ipb,
+            'weighted_cal': w_cal,
+            'weighted_cal_30d_delta': w_cal_delta,
+            'last_month_loss_bps': w_last_month_bps,
+            'ttm6_loss_bps': w_ttm6,
+            'surprise_3m_bps': w_surprise_3m,
+            'n_under': under,
+            'n_over': over,
+            'worst_deal': worst['deal'] if worst and False else (worst and max(
+                (d for d, v in per_deal.items() if v is worst), default=None)),
+            'worst_cal': worst['cal'] if worst else None,
+            'best_deal': (best and max(
+                (d for d, v in per_deal.items() if v is best), default=None)),
+            'best_cal': best['cal'] if best else None,
+        }
+    # Fix worst_deal/best_deal lookup (above used `is` which is object-identity
+    # and works for the single row but the max/min-over-deal-ids was awkward)
+    for seg, agg in seg_agg.items():
+        rows = [(d, v) for d, v in per_deal.items()
+                if v['segment'] == seg and v['cal'] is not None]
+        if rows:
+            worst = max(rows, key=lambda kv: kv[1]['cal'])
+            best = min(rows, key=lambda kv: kv[1]['cal'])
+            agg['worst_deal'], agg['worst_cal'] = worst[0], worst[1]['cal']
+            agg['best_deal'], agg['best_cal'] = best[0], best[1]['cal']
+
+    # ── 4. Vintage breakdown for CarMax commentary ───────────────────────
+    cmx_by_year = _dd(list)
+    for deal, v in per_deal.items():
+        if v['segment'] != 'CarMax' or v['cal'] is None:
+            continue
+        yr = deal.split('-')[0] if '-' in deal else None
+        if yr and yr.isdigit():
+            cmx_by_year[int(yr)].append(v)
+    cmx_worst_vintage = None
+    cmx_best_vintage = None
+    if cmx_by_year:
+        yr_scores = {}
+        for yr, vs in cmx_by_year.items():
+            total_ipb = sum(v['ipb'] for v in vs) or 1
+            w = sum(v['cal'] * v['ipb'] for v in vs) / total_ipb
+            yr_scores[yr] = (w, len(vs))
+        cmx_worst_vintage = max(yr_scores.items(), key=lambda kv: kv[1][0])
+        cmx_best_vintage = min(yr_scores.items(), key=lambda kv: kv[1][0])
+
+    # ── 5. Biggest movers (top 5 by abs delta_cal_30d) ───────────────────
+    movers = [(d, v) for d, v in per_deal.items()
+              if v['delta_cal_30d'] is not None]
+    movers.sort(key=lambda kv: abs(kv[1]['delta_cal_30d']), reverse=True)
+    movers = movers[:5]
+
+    def _mover_note(v):
+        delta = v['delta_cal_30d']
+        if delta is None:
+            return '-'
+        # Large negative jump in realized cnl -> servicer restatement
+        if v['delta_cnl_bps_30d'] is not None and v['delta_cnl_bps_30d'] < -5:
+            return 'servicer restatement (cnl revised down)'
+        if v['seasoning_months'] and v['seasoning_months'] <= 6:
+            return 'early-cycle noise'
+        if abs(delta) > 0.15:
+            return ('pace accelerating vs peers' if delta > 0
+                    else 'pace moderating vs peers')
+        return 'normal month-over-month drift'
+
+    # ── 6. Headline narrative generation ─────────────────────────────────
+    def _bps(v):
+        if v is None:
+            return 'n/a'
+        return f"{v:+.0f} bps"
+
+    def _cal(v):
+        if v is None:
+            return 'n/a'
+        return f"{v:.2f}x"
+
+    latest_date_str = (latest_dist_seen.strftime('%B %Y')
+                       if latest_dist_seen else 'the latest filing')
+
+    def _direction_phrase(w_cal):
+        if w_cal is None:
+            return 'tracking with insufficient peer depth'
+        if w_cal > 1.05:
+            return f"tracking <b>{(w_cal - 1) * 100:.0f}% above</b> peer-vintage medians"
+        if w_cal < 0.95:
+            return f"tracking <b>{(1 - w_cal) * 100:.0f}% below</b> peer-vintage medians"
+        return "tracking <b>in line with</b> peer-vintage medians"
+
+    # Build dynamic headline + 2 paragraphs
+    crv_p = seg_agg.get('Carvana Prime', {})
+    crv_n = seg_agg.get('Carvana Non-Prime', {})
+    cmx = seg_agg.get('CarMax', {})
+
+    headline_bits = []
+    if crv_p.get('weighted_cal') is not None:
+        headline_bits.append(
+            f"Carvana Prime {_direction_phrase(crv_p['weighted_cal'])}")
+    if cmx.get('weighted_cal') is not None:
+        headline_bits.append(
+            f"CarMax {_direction_phrase(cmx['weighted_cal'])}")
+    if not headline_bits:
+        headline = (f"As of {latest_date_str}, peer-benchmark coverage is too "
+                    "thin to render a weighted summary — early vintages only.")
+    else:
+        headline = (f"As of {latest_date_str}, " + "; ".join(headline_bits)
+                    + ". Full issuer detail below.")
+
+    def _para_issuer(label, agg, deal_list_fn=None):
+        if not agg:
+            return f"<p><b>{label}.</b> No active deals in the dataset.</p>"
+        bits = []
+        bits.append(
+            f"<b>{label}.</b> {agg['n_cal_deals']} of {agg['n_deals']} deals "
+            f"have sufficient peer depth for a cal factor."
+        )
+        if agg.get('weighted_cal') is not None:
+            bits.append(
+                f"Portfolio-weighted cal factor "
+                f"<b>{agg['weighted_cal']:.2f}x</b>"
+            )
+            if agg.get('weighted_cal_30d_delta') is not None:
+                bits.append(
+                    f"(30-day change {agg['weighted_cal_30d_delta']:+.2f}x)"
+                )
+            bits[-1] = bits[-1] + "."
+        if agg.get('last_month_loss_bps') is not None:
+            line = (f"Last month's realized loss pace was "
+                    f"<b>{agg['last_month_loss_bps']:.0f} bps</b> of pool")
+            if agg.get('ttm6_loss_bps') is not None:
+                delta = agg['last_month_loss_bps'] - agg['ttm6_loss_bps']
+                line += (f", versus a trailing-6-month baseline of "
+                         f"{agg['ttm6_loss_bps']:.0f} bps "
+                         f"({'+' if delta>=0 else ''}{delta:.0f} bps surprise).")
+            else:
+                line += "."
+            bits.append(line)
+        bits.append(
+            f"{agg.get('n_under', 0)} deal(s) underperforming "
+            f"(cal &gt; 1.10x); {agg.get('n_over', 0)} outperforming "
+            f"(cal &lt; 0.90x)."
+        )
+        if agg.get('worst_deal') and agg.get('worst_cal') is not None:
+            bits.append(
+                f"Worst deal: <b>{agg['worst_deal']}</b> at "
+                f"{agg['worst_cal']:.2f}x."
+            )
+        return "<p>" + " ".join(bits) + "</p>"
+
+    para1 = _para_issuer("Carvana Prime", crv_p)
+    para1_np = _para_issuer("Carvana Non-Prime", crv_n)
+
+    cmx_vintage_note = ""
+    if cmx_worst_vintage and cmx_best_vintage and cmx_worst_vintage[0] != cmx_best_vintage[0]:
+        cmx_vintage_note = (
+            f" Across vintages, the {cmx_worst_vintage[0]} cohort "
+            f"(weighted {cmx_worst_vintage[1][0]:.2f}x) is the weakest, while "
+            f"the {cmx_best_vintage[0]} cohort "
+            f"({cmx_best_vintage[1][0]:.2f}x) is strongest."
+        )
+
+    para2 = _para_issuer("CarMax", cmx)
+    if cmx_vintage_note:
+        # Insert vintage note into the CarMax paragraph
+        para2 = para2.replace("</p>", cmx_vintage_note + "</p>")
+
+    # ── 7. Build tables ──────────────────────────────────────────────────
+    def _pct(v, dp=2):
+        return f"{v:.{dp}f}%" if v is not None else '-'
+
+    def _num(v, dp=2, suffix=''):
+        return f"{v:.{dp}f}{suffix}" if v is not None else '-'
+
+    def _delta_cal_s(v):
+        if v is None:
+            return '-'
+        return f"{v:+.2f}x"
+
+    # Table A — snapshot
+    tbl_a_rows = ""
+    for seg in ('Carvana Prime', 'Carvana Non-Prime', 'CarMax'):
+        a = seg_agg.get(seg)
+        if not a:
+            continue
+        tbl_a_rows += (
+            f"<tr><td>{seg}</td>"
+            f"<td>{a['n_deals']}</td>"
+            f"<td>{_num(a.get('weighted_cal'), 2, 'x')}</td>"
+            f"<td>{_delta_cal_s(a.get('weighted_cal_30d_delta'))}</td>"
+            f"<td>{a.get('n_under', 0)}</td>"
+            f"<td>{a.get('n_over', 0)}</td>"
+            f"<td>{a.get('worst_deal','-')} ({_num(a.get('worst_cal'),2,'x')})</td>"
+            f"<td>{a.get('best_deal','-')} ({_num(a.get('best_cal'),2,'x')})</td>"
+            f"</tr>"
+        )
+    tbl_a = (
+        "<table class='compare'><thead><tr>"
+        "<th>Segment</th><th># deals</th><th>WAvg cal</th>"
+        "<th>30-day Δ cal</th><th>Underperform (&gt;1.10x)</th>"
+        "<th>Outperform (&lt;0.90x)</th>"
+        "<th>Worst deal</th><th>Best deal</th>"
+        f"</tr></thead><tbody>{tbl_a_rows}</tbody></table>"
+    )
+
+    # Table B — last-month actual vs baseline pace
+    tbl_b_rows = ""
+    for seg in ('Carvana Prime', 'Carvana Non-Prime', 'CarMax'):
+        a = seg_agg.get(seg)
+        if not a:
+            continue
+        lm = a.get('last_month_loss_bps')
+        base = a.get('ttm6_loss_bps')
+        surprise = (lm - base) if (lm is not None and base is not None) else None
+        surp3 = a.get('surprise_3m_bps')
+        tbl_b_rows += (
+            f"<tr><td>{seg}</td>"
+            f"<td>{_num(lm, 0, ' bps') if lm is not None else '-'}</td>"
+            f"<td>{_num(base, 0, ' bps') if base is not None else '-'}</td>"
+            f"<td>{('+' if surprise is not None and surprise>=0 else '') + _num(surprise, 0, ' bps') if surprise is not None else '-'}</td>"
+            f"<td>{('+' if surp3 is not None and surp3>=0 else '') + _num(surp3, 0, ' bps') if surp3 is not None else '-'}</td>"
+            f"</tr>"
+        )
+    tbl_b = (
+        "<table class='compare'><thead><tr>"
+        "<th>Segment</th><th>Last month loss (bps of pool)</th>"
+        "<th>Trailing 6-mo baseline</th>"
+        "<th>Last-month surprise</th>"
+        "<th>3-mo rolling surprise</th>"
+        f"</tr></thead><tbody>{tbl_b_rows}</tbody></table>"
+    )
+
+    # Table C — biggest movers
+    tbl_c_rows = ""
+    for deal, v in movers:
+        tbl_c_rows += (
+            f"<tr><td>{deal}</td>"
+            f"<td>{v['segment']}</td>"
+            f"<td>{_num(v.get('prior_cal'),2,'x')}</td>"
+            f"<td>{_num(v.get('cal'),2,'x')}</td>"
+            f"<td>{_delta_cal_s(v.get('delta_cal_30d'))}</td>"
+            f"<td>{_mover_note(v)}</td>"
+            f"</tr>"
+        )
+    if not tbl_c_rows:
+        tbl_c_rows = "<tr><td colspan=6>No deals with prior-period cal comparison.</td></tr>"
+    tbl_c = (
+        "<table class='compare'><thead><tr>"
+        "<th>Deal</th><th>Segment</th><th>Prior cal</th>"
+        "<th>Current cal</th><th>30-day Δ</th><th>Interpretation</th>"
+        f"</tr></thead><tbody>{tbl_c_rows}</tbody></table>"
+    )
+
+    # ── 8. Charts ────────────────────────────────────────────────────────
+    # Chart 1: weighted-average cal factor over last 12 months per segment
+    #   For each month-end over the last 12 cal months (from latest_dist_seen),
+    #   compute the ipb-weighted cal factor for deals in each segment whose
+    #   latest pool_performance row falls in that month.
+    from calendar import monthrange as _mr
+    last12 = []
+    if latest_dist_seen:
+        y, m = latest_dist_seen.year, latest_dist_seen.month
+        for _ in range(12):
+            last12.append((y, m))
+            m -= 1
+            if m == 0:
+                m = 12
+                y -= 1
+        last12 = list(reversed(last12))
+
+    # For each deal, build a month->cal_factor map (using last row in that month)
+    deal_month_cal = {}  # deal -> {(y,m): cal}
+    for deal, t in all_terms.items():
+        rows = all_perf.get(deal, [])
+        if not rows or not t.get('ipb'):
+            continue
+        seg = _rt_segment(deal, t['issuer'])
+        month_last_row = {}
+        for r in rows:
+            key = (r['dist'].year, r['dist'].month)
+            month_last_row[key] = r
+        mcal = {}
+        for key, r in month_last_row.items():
+            mm = _rt_months_since(t['cutoff'], r['dist'])
+            if mm is None:
+                continue
+            pct = r['cnl'] / t['ipb'] * 100.0
+            c, _, _ = _rt_cal(pct, peer_curves, seg, mm)
+            if c is not None:
+                mcal[key] = c
+        deal_month_cal[deal] = (seg, t['ipb'], mcal)
+
+    chart1_traces = []
+    seg_color = {
+        'Carvana Prime': '#1976D2',
+        'Carvana Non-Prime': '#D32F2F',
+        'CarMax': '#F47920',
+    }
+    for seg in ('Carvana Prime', 'Carvana Non-Prime', 'CarMax'):
+        xs, ys = [], []
+        for (y, m) in last12:
+            num = 0.0
+            den = 0.0
+            for deal, (dseg, ipb, mcal) in deal_month_cal.items():
+                if dseg != seg:
+                    continue
+                cal = mcal.get((y, m))
+                if cal is None:
+                    continue
+                num += cal * ipb
+                den += ipb
+            if den > 0:
+                xs.append(f"{y}-{m:02d}")
+                ys.append(round(num / den, 3))
+        if xs:
+            chart1_traces.append({
+                'x': xs,
+                'y': ys,
+                'type': 'scatter',
+                'mode': 'lines+markers',
+                'name': seg,
+                'line': {'color': seg_color.get(seg, '#666'), 'width': 2},
+                'marker': {'size': 6},
+            })
+    # Add 1.0 reference line
+    if chart1_traces:
+        all_x = chart1_traces[0]['x']
+        chart1_traces.append({
+            'x': all_x,
+            'y': [1.0] * len(all_x),
+            'type': 'scatter',
+            'mode': 'lines',
+            'name': 'Peer benchmark (1.0x)',
+            'line': {'color': '#999', 'width': 1, 'dash': 'dash'},
+            'hoverinfo': 'skip',
+        })
+    chart1_html = chart(
+        chart1_traces,
+        {
+            'title': 'Weighted-average cal factor vs peer vintage (last 12 months)',
+            'xaxis': {'title': 'Month'},
+            'yaxis': {'title': 'Cal factor (1.0 = peer median)'},
+            'legend': {'orientation': 'h', 'y': -0.25},
+        },
+        height=340,
+    ) if chart1_traces else "<p style='padding:8px;color:#999'>Chart 1 unavailable — insufficient peer-depth.</p>"
+
+    # Chart 2: monthly loss pace vs trailing-6-mo baseline, last 6 months, per segment
+    last6 = last12[-6:] if last12 else []
+    chart2_traces = []
+    for seg in ('Carvana Prime', 'Carvana Non-Prime', 'CarMax'):
+        actual_xs, actual_ys, base_ys = [], [], []
+        # For each month, compute ipb-weighted month-over-month loss bps
+        for (y, m) in last6:
+            num = 0.0
+            den = 0.0
+            base_num = 0.0
+            base_den = 0.0
+            for deal, t in all_terms.items():
+                if _rt_segment(deal, t['issuer']) != seg:
+                    continue
+                rows = all_perf.get(deal, [])
+                if not rows or not t.get('ipb'):
+                    continue
+                # find row in this month and previous row
+                this_idx = None
+                for i, r in enumerate(rows):
+                    if (r['dist'].year, r['dist'].month) == (y, m):
+                        this_idx = i
+                        break
+                if this_idx is None or this_idx == 0:
+                    continue
+                prev = rows[this_idx - 1]
+                this = rows[this_idx]
+                bps = (this['cnl'] - prev['cnl']) / t['ipb'] * 10_000
+                num += bps * t['ipb']
+                den += t['ipb']
+                # trailing 6 avg ending at this row (inclusive)
+                tw = []
+                for j in range(max(1, this_idx - 5), this_idx + 1):
+                    tw.append(
+                        (rows[j]['cnl'] - rows[j - 1]['cnl']) / t['ipb'] * 10_000)
+                if tw:
+                    base_num += (sum(tw) / len(tw)) * t['ipb']
+                    base_den += t['ipb']
+            if den > 0:
+                actual_xs.append(f"{y}-{m:02d}")
+                actual_ys.append(round(num / den, 2))
+                base_ys.append(round(base_num / base_den, 2) if base_den > 0 else 0)
+        if actual_xs:
+            chart2_traces.append({
+                'x': actual_xs,
+                'y': actual_ys,
+                'type': 'bar',
+                'name': f"{seg} — actual",
+                'marker': {'color': seg_color.get(seg, '#666')},
+            })
+            chart2_traces.append({
+                'x': actual_xs,
+                'y': base_ys,
+                'type': 'scatter',
+                'mode': 'lines+markers',
+                'name': f"{seg} — 6-mo baseline",
+                'line': {'color': seg_color.get(seg, '#666'), 'dash': 'dot', 'width': 1.5},
+                'marker': {'size': 5},
+            })
+    chart2_html = chart(
+        chart2_traces,
+        {
+            'title': 'Monthly loss pace vs 6-month baseline (bps of pool)',
+            'xaxis': {'title': 'Month'},
+            'yaxis': {'title': 'Loss pace (bps of initial pool)'},
+            'legend': {'orientation': 'h', 'y': -0.3},
+            'barmode': 'group',
+        },
+        height=340,
+    ) if chart2_traces else "<p style='padding:8px;color:#999'>Chart 2 unavailable.</p>"
+
+    # ── 9. Data-freshness footer ─────────────────────────────────────────
+    latest_deal = max(per_deal.items(),
+                      key=lambda kv: kv[1]['latest_dist'])
+    freshness = (
+        f"Latest servicer filing: {latest_deal[0]} ({latest_deal[1]['issuer']}) "
+        f"on {latest_deal[1]['latest_dist'].strftime('%Y-%m-%d')} · "
+        f"Peer-benchmark curves rebuilt on every dashboard regeneration. "
+        f"Markov forecast integration: not yet wired (fallback to peer median). · "
+        f"Data sourced from SEC EDGAR."
+    )
+
+    # ── 10. Assemble HTML ────────────────────────────────────────────────
+    html = f"""
+<div class="tc" id="recent-trends-content" style="display:block">
+  <h2 style="padding:12px 4px 0;font-size:1.05rem;color:#1976D2">Recent Trends</h2>
+  <p style="padding:4px;font-size:.8rem;line-height:1.45;color:#333">{headline}</p>
+
+  <h3>Where we are vs. peers</h3>
+  {para1}
+  {para1_np}
+  {para2}
+
+  <h3>Table A — Snapshot as of {latest_date_str}</h3>
+  <div class="tbl">{tbl_a}</div>
+
+  <h3>Table B — Last-month loss pace vs 6-month baseline</h3>
+  <div class="tbl">{tbl_b}</div>
+
+  <h3>Table C — Biggest recent movers (abs 30-day Δ cal)</h3>
+  <div class="tbl">{tbl_c}</div>
+
+  <h3>Chart 1 — Cal factor over time (last 12 months)</h3>
+  {chart1_html}
+
+  <h3>Chart 2 — Monthly loss pace vs baseline (last 6 months)</h3>
+  {chart2_html}
+
+  <p style="padding:10px 4px 20px;font-size:.65rem;color:#888;border-top:1px solid #eee;margin-top:12px">{freshness}</p>
+</div>
+"""
+    return html
+
+
 def generate_economics_tab():
     """Build the residual-economics landing-page HTML.
 
@@ -4024,13 +4737,22 @@ def main():
     logger.info("Generating Default Model analysis...")
     model_html = generate_model_content()
 
-    # Generate residual economics tab (landing page)
+    # Generate residual economics tab
     logger.info("Generating Residual Economics tab...")
     economics_html = generate_economics_tab()
 
+    # Generate recent trends tab (new landing page — tab 1)
+    logger.info("Generating Recent Trends tab...")
+    try:
+        recent_trends_html = generate_recent_trends_tab()
+    except Exception as e:
+        logger.error(f"Recent Trends tab failed: {e}")
+        recent_trends_html = f"<div class='tc' style='display:block;padding:16px'><p>Recent Trends unavailable: {e}</p></div>"
+
     # Build deal selector dropdown with comparison entries at top
     first_deal = list(deal_contents.keys())[0]
-    options = '<option value="__economics__" selected>--- Residual Economics ---</option>\n'
+    options = '<option value="__recent__" selected>--- Recent Trends ---</option>\n'
+    options += '<option value="__economics__">--- Residual Economics ---</option>\n'
     options += '<option value="__model__">--- Default Model ---</option>\n'
     options += '<option value="__prime__">--- Prime Comparison (Carvana) ---</option>\n'
     options += '<option value="__nonprime__">--- Non-Prime Comparison (Carvana) ---</option>\n'
@@ -4052,8 +4774,10 @@ def main():
 
     # Build per-deal content divs
     all_deal_html = ""
-    # Economics tab shown by default (landing page)
-    all_deal_html += f'<div id="deal-__economics__" class="deal-block" style="display:block">\n{economics_html}\n</div>\n'
+    # Recent Trends tab shown by default (landing page — tab 1)
+    all_deal_html += f'<div id="deal-__recent__" class="deal-block" style="display:block">\n{recent_trends_html}\n</div>\n'
+    # Residual Economics tab (tab 2, hidden by default)
+    all_deal_html += f'<div id="deal-__economics__" class="deal-block" style="display:none">\n{economics_html}\n</div>\n'
     # Add model and comparison sections (hidden by default)
     all_deal_html += f'<div id="deal-__model__" class="deal-block" style="display:none">\n{model_html}\n</div>\n'
     all_deal_html += f'<div id="deal-__prime__" class="deal-block" style="display:none">\n{prime_html}\n</div>\n'
