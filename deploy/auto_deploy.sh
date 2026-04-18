@@ -45,6 +45,23 @@ if [ "$LOCAL" != "$REMOTE" ]; then
 
     # Always export dashboard DB, run model, and regenerate preview on code changes.
     # generate_pdfs.py removed — Documents tab now links straight to EDGAR.
+    #
+    # Methodology-rebuild guard: if compute_methodology.py is currently
+    # rebuilding analytics.json (lock at /opt/.methodology_rebuild.lock),
+    # defer the regen. Otherwise we ship a dashboard built against a stale
+    # analytics cache (e.g. empty heatmap / FICO×LTV grid mid-rebuild).
+    # Stale locks (PID no longer alive) are cleared, then we proceed.
+    LOCK=/opt/.methodology_rebuild.lock
+    if [ -f "$LOCK" ]; then
+        LOCK_PID=$(awk -F'|' '{print $1}' "$LOCK" 2>/dev/null)
+        if [ -n "$LOCK_PID" ] && kill -0 "$LOCK_PID" 2>/dev/null; then
+            echo "$(date): methodology rebuild in progress (pid=$LOCK_PID); deferring regen — auto-deploy will retry next cycle" >> /var/log/auto-deploy.log
+            exit 0
+        else
+            echo "$(date): clearing stale methodology rebuild lock (pid=$LOCK_PID not running)" >> /var/log/auto-deploy.log
+            rm -f "$LOCK"
+        fi
+    fi
     /opt/abs-venv/bin/python /opt/abs-dashboard/carvana_abs/export_dashboard_db.py >> /var/log/auto-deploy.log 2>&1 || true
     /opt/abs-venv/bin/python /opt/abs-dashboard/carvana_abs/default_model.py >> /var/log/auto-deploy.log 2>&1 || true
     /opt/abs-venv/bin/python /opt/abs-dashboard/carvana_abs/generate_preview.py >> /var/log/auto-deploy.log 2>&1 || true

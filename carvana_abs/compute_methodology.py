@@ -772,9 +772,51 @@ def cost_of_funds():
 # ==========================================================================
 # Main
 # ==========================================================================
+REBUILD_LOCK = '/opt/.methodology_rebuild.lock'
+
+
+def _acquire_rebuild_lock():
+    """Write a sentinel so concurrent regen pipelines (auto_deploy.sh) know
+    the analytics cache is mid-rebuild and they should defer rather than
+    ship a stale-cache dashboard. Stale locks (PID no longer running) are
+    overwritten — we don't want a crashed prior run to block forever.
+    """
+    try:
+        if os.path.exists(REBUILD_LOCK):
+            with open(REBUILD_LOCK) as f:
+                old = f.read().strip().split('|', 1)
+            old_pid = int(old[0]) if old and old[0].isdigit() else 0
+            alive = False
+            if old_pid:
+                try:
+                    os.kill(old_pid, 0)
+                    alive = True
+                except (OSError, ProcessLookupError):
+                    alive = False
+            if alive:
+                logger.warning(f'rebuild lock held by live PID {old_pid}; overwriting anyway (this run takes precedence)')
+            else:
+                logger.info(f'stale rebuild lock from PID {old_pid} found; overwriting')
+        with open(REBUILD_LOCK, 'w') as f:
+            f.write(f'{os.getpid()}|{datetime.utcnow().isoformat()}Z\n')
+        logger.info(f'rebuild lock acquired ({REBUILD_LOCK}, pid={os.getpid()})')
+    except Exception as e:
+        logger.warning(f'could not acquire rebuild lock: {e} (continuing anyway)')
+
+
+def _release_rebuild_lock():
+    try:
+        if os.path.exists(REBUILD_LOCK):
+            os.remove(REBUILD_LOCK)
+            logger.info(f'rebuild lock released')
+    except Exception as e:
+        logger.warning(f'could not release rebuild lock: {e}')
+
+
 def main():
     t0 = time.time()
     logger.info('=== Methodology analytics build ===')
+    _acquire_rebuild_lock()
     out = {
         'generated_at': datetime.utcnow().isoformat() + 'Z',
         'parameters': {
@@ -822,4 +864,7 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    finally:
+        _release_rebuild_lock()
