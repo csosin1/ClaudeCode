@@ -1,6 +1,29 @@
 # Carvana Loan Dashboard — Project State
 
-_Last updated: 2026-04-14 (pre-resize checkpoint)_
+_Last updated: 2026-04-18 07:10 UTC — overnight 5-deal ingest + retrain complete._
+
+## Overnight 2026-04-18 — 5 missing deals added, full retrain, live site updated
+
+Discovery scanner (`deploy/discover_new_deals.py`) had flagged 5 deals that were never in the DEALS configs: Carvana 2021-P3, 2021-P4, 2025-P1, 2026-P1, and CarMax 2026-2. Overnight session added them to the DEALS registries, ingested all 5, retrained unified Markov on the expanded universe (57 deal_forecasts: 20 Carvana + 37 CarMax, up from 53), regenerated methodology analytics, regenerated + promoted dashboard.
+
+**Commits (this session, in order):**
+- `a9816a5` — Phase 1-2: configs + LESSONS entry
+- `c3e0080` — audit_new_deals.py
+- `72c5610` — audit_new_deals column-name fix
+- `653c442` — xml_parser: handle combined FICO/Vantage score format (found during audit; 2026-P1 was 100% NULL FICO until this fix)
+- `bcd602f` — deploy/overnight_post_markov.sh pipeline
+- `3eeee8e` — audit_final_overnight.py
+- (checkpoint commit) — final AUDIT_FINDINGS + PROJECT_STATE
+
+**Live site:** https://casinv.dev/CarvanaLoanDashBoard/ — HTTP 200, last-modified 2026-04-18 07:03 UTC, 5.85 MB. All 4 new Carvana deals visible on the Residual Economics tab. CarMax 2026-2 is registered but dashboard filters render only deals with an initial_pool_balance; 2026-2 will auto-appear on its first 10-D servicer report.
+
+**Final audit (Phase 8, `audit_final_overnight.py`):** 0 HALT, 0 WARN. Clean pass on first iter.
+
+Full narrative in `AUDIT_FINDINGS.md` under "Overnight ingest iter — 2026-04-18".
+
+_Prior state below (pre-2026-04-18 overnight) preserved for reference._
+
+---
 
 ## Meta-goal (framing for ALL analysis)
 

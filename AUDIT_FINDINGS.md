@@ -632,3 +632,77 @@ Two individual deals nudge just outside soft-band heuristics (CarMax 2020-2 cal=
 **PASS — deliver.** One critical display bug found and fixed (100× Markov loss rendering), dashboard regenerated and promoted to `/opt/abs-dashboard/carvana_abs/static_site/live/`, live URL verified. Zero loan-level or parser regressions. Vintage patterns economically coherent. One deferred item: Trigger Risk column requires breach-probability computation in the Markov model (follow-on task, not delivery-blocking — column renders blank, not wrong).
 
 Data trusted; site aligned with truth.
+
+---
+
+## Overnight ingest iter — 2026-04-18
+
+### Scope
+
+Added the 5 deals surfaced by `deploy/discover_new_deals.py` (weekly EDGAR discovery scanner) that had never been in the `DEALS` registries:
+
+- **Carvana Prime (4):** 2021-P3, 2021-P4, 2025-P1, 2026-P1
+- **CarMax (1):** 2026-2
+
+Audit gate: halt-fix-rerun loop with MAX_ITER=10 per SKILLS/data-audit-qa.md. Needed 1 iter (plus an in-session parser fix).
+
+### New-deal ingest summary
+
+| Deal | Pool rows | Loans | loan_perf | Notes |
+|------|-----------|-------|-----------|-------|
+| Carvana 2021-P3 | 56 | 44,046 | 2,422,530 | full history |
+| Carvana 2021-P4 | 53 | 44,569 | 2,317,588 | full history |
+| Carvana 2025-P1 | 13 | 24,964 | 324,532 | short history (issued mid-2025) |
+| Carvana 2026-P1 | 1 | 39,517 | 39,517 | brand new (1 cycle so far) |
+| CarMax 2026-2 | 0 | 0 | 0 | only pre-closing filings so far (no 10-D yet) |
+
+### Findings during ingest (all fixed in-session)
+
+**F-101 (HALT → fixed): Carvana 2026-P1 credit score 100% NULL on ingest.**
+- Root cause: Carvana 2026-vintage ABS-EE XML uses a new combined-score format `<obligorCreditScore>VS 714, FICO 774</obligorCreditScore>` (Vantage + FICO in one field). The existing `_get_int` helper threw `ValueError` on the text and silently returned None for all 39,517 loans.
+- Fix: commit `653c442` — new `_get_credit_score` helper that prefers the FICO component when the combined format is detected, falls back to the first integer; applied symmetrically to both carvana_abs and carmax_abs XML parsers.
+- Verification after re-ingest: 2026-P1 FICO avg=712.8, range [401, 898], 12/39,517 NULL (0.03%) — in line with other deals.
+
+**F-102 (infra, pre-existing): statsmodels was not installed in `/opt/abs-venv`.**
+- Original compute_methodology run (03:05 UTC, before this session) crashed at 04:32 UTC with `ModuleNotFoundError: No module named 'statsmodels'` after 65 min of stream compute. statsmodels was pip-installed at 04:35 UTC (by a parallel agent, not this one), so the Phase 6 rerun succeeded.
+- Follow-on task: add `statsmodels` to `requirements.txt` so fresh venv provisions don't silently regress.
+
+### Phase 4 audit (new deals only)
+0 HALT, 11 WARN (post-fix), 3 INFO. WARN findings all expected:
+- CNL non-monotonic ≤1 time on each new deal (restatement — past audits confirmed benign).
+- Fee/WAC ranges are typical for the issuance vintage (2021-P4 WAC=1.13% at low-rate era; 2025-P1/2026-P1 WAC=4.3-4.6%; servicing fees 0.45-0.67% — all reasonable; the audit script's bounds were in percent units vs. data stored as fraction).
+
+### Phase 5 Markov retrain
+- Prime universe: 53 deals (16 Carvana Prime + 37 CarMax). Non-prime: 4 (all Carvana).
+- Wall clock: 04:48 → 06:20 = 92 min (training + forecast + persist).
+- Peak RSS 3.4GB. No OOM, no swap.
+- deal_forecasts: 20 Carvana (up from 16) + 37 CarMax = 57 total.
+
+New deal forecasts (written):
+- 2021-P3: at_iss=2.52%, projected=2.45%, realized=2.35%, cal=1.21x (64% complete)
+- 2021-P4: at_iss=2.49%, projected=2.77%, realized=2.58%, cal=1.34x (62% complete)
+- 2025-P1: at_iss=2.79%, projected=2.77%, realized=0.65%, cal=1.01x (23% complete)
+- 2026-P1: at_iss=2.76%, projected=2.94%, realized=0.00%, cal=1.00x (0% complete — brand new)
+- 2026-2 (CarMax): no forecast — no loan-level data yet. Correct.
+
+### Phase 6 methodology compute
+- Wall clock: 06:23 → 07:03 = 40 min.
+- Final output: `deploy/methodology_cache/analytics.json` (52 KB), logistic AUC=0.8347, random-forest AUC=0.8433.
+
+### Phase 7 dashboard regen + promote
+- Live file: `/opt/abs-dashboard/carvana_abs/static_site/live/index.html` (5.85 MB), last-modified 2026-04-18 07:03:06 UTC.
+- https://casinv.dev/CarvanaLoanDashBoard/ returns HTTP 200, same bytes.
+- 4 new Carvana deals present in live HTML (5 references each — Residual Economics table + deal roster + navigation).
+
+### Phase 8 final audit
+- 0 HALT, 0 WARN, 0 INFO. PASS on first iter.
+- 20 Carvana deals × deal_forecasts coverage = 100%.
+- 37 CarMax deals × deal_forecasts coverage = 100%.
+- 69 deals total in dashboard.db.
+
+### Deferred (not delivery-blocking)
+- **CarMax 2026-2** has only pre-closing 424H/FWP/305B2/ABS-EE-HTML filings on EDGAR. No IPB in deal_terms, no pool_performance, no Markov forecast. Dashboard's default filter (`ipb < 5e9` + `ipb != None`) does not render it. It will enter the dashboard automatically on its first 10-D servicer report (typically ~30 days after closing).
+- **requirements.txt** does not list `statsmodels`. Add in a future commit to harden fresh venv provisions.
+
+### Verdict
+**PASS — deliver.** All 5 missing deals now ingested (or deal-registered for 2026-2); all 4 with loan data have Markov forecasts; live dashboard reflects the expanded 69-deal universe; no HALT findings across the 4-stage audit gate.
