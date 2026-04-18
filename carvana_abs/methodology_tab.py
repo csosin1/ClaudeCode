@@ -23,18 +23,25 @@ def _cid(prefix='m'):
     return f'{prefix}{_chart_counter[0]}'
 
 
-def _plotly_div(fig_dict, height=320):
+def _plotly_div(fig_dict, height=320, chart_id=None):
     """Emit a self-contained Plotly div.
 
     Uses the same config as the rest of the dashboard so every chart has
     a visible reset-view button — accidentally panning/zooming a chart
     on mobile is easy, and there has to be a one-tap recovery.
+
+    `chart_id` (optional): a stable human-readable ID emitted as a
+    `data-chart-id` attribute on the outer container. The dynamic `cid`
+    (plt1, plt2, ...) still drives Plotly.newPlot, but the stable ID
+    lets Playwright / visual-lint target the chart across rebuilds
+    (see /opt/abs-dashboard/.charts.yaml).
     """
     cid = _cid('plt')
     js = json.dumps(fig_dict)
     cfg = ('{"displayModeBar":true,"displaylogo":false,"responsive":true,'
            '"modeBarButtonsToRemove":["lasso2d","select2d"]}')
-    return (f'<div id="{cid}" style="height:{height}px;width:100%"></div>'
+    data_attr = f' data-chart-id="{chart_id}"' if chart_id else ''
+    return (f'<div id="{cid}"{data_attr} style="height:{height}px;width:100%"></div>'
             f'<script>Plotly.newPlot("{cid}", {js}.data, {js}.layout, {cfg});</script>')
 
 
@@ -412,7 +419,9 @@ def _build_transition_heatmap(cache):
                 'margin': {'l': 70, 'r': 10, 't': 40, 'b': 50},
             },
         }
-        out_html += _plotly_div(fig, height=280)
+        # Stable-id per rep cell so Playwright can target it across rebuilds.
+        safe_slug = ('4a_heatmap_' + f'{fb}_{lb}_{age_b}').replace('%', 'pct').replace('+', 'plus').replace(' ', '').replace('<', 'lt').replace('>', 'gt')
+        out_html += _plotly_div(fig, height=280, chart_id=safe_slug)
 
     out_html += _p('<em>Reading the heatmaps:</em> each row sums to 100%. The diagonal '
                   '(stay-in-state) dominates for mild delinquency; defaults intensify '
@@ -461,7 +470,7 @@ def _build_hazard_chart(cache):
     prime_names = [n for n in ('CarMax Prime', 'Carvana Prime') if n in series]
     np_names    = [n for n in ('Carvana Non-Prime',)             if n in series]
 
-    def _panel(title, names, height):
+    def _panel(title, names, height, chart_id):
         if not names:
             return ''
         traces = [_trace(n, series[n]) for n in names]
@@ -473,10 +482,10 @@ def _build_hazard_chart(cache):
                    'margin': {'l': 60, 'r': 10, 't': 36, 'b': 50},
                    'legend': {'orientation': 'h', 'y': -0.25},
                    'hovermode': 'x unified'}}
-        return _plotly_div(fig, height=height)
+        return _plotly_div(fig, height=height, chart_id=chart_id)
 
-    return (_panel('Prime tiers', prime_names, 280)
-            + _panel('Carvana Non-Prime', np_names, 260)
+    return (_panel('Prime tiers', prime_names, 280, '4b_hazard_by_age_prime')
+            + _panel('Carvana Non-Prime', np_names, 260, '4b_hazard_by_age_nonprime')
             + _p('The hazard curve is a classic: near-zero at age 0 (no one has '
                  'defaulted yet), peaks around month 13-24 (borrowers who were going to '
                  'struggle have surfaced), then declines as bad-credit loans have '
@@ -510,7 +519,7 @@ def _build_cure_chart(cache):
                       'yaxis': {'title': 'Cured to Current next month (%)'},
                       'margin': {'l': 60, 'r': 10, 't': 10, 'b': 50},
                       'legend': {'orientation': 'h', 'y': -0.25}}}
-    return (_plotly_div(fig, height=300)
+    return (_plotly_div(fig, height=300, chart_id='4c_cure_by_state')
             + _p('One-month cure rates decline monotonically with delinquency depth. '
                  'A 1-pmt loan has a ~40% chance of coming back to Current next month; '
                  'a 5+pmt loan has <5%. Non-prime cures lag prime by 10-15 percentage '
@@ -568,13 +577,17 @@ def _sec5_predictors(cache):
                'tiers.')
             + _h4('5a. Hazard by FICO band')
             + _build_pred_chart(pred, 'fico', ['<580', '580-619', '620-659',
-                                                '660-699', '700-739', '740+'])
+                                                '660-699', '700-739', '740+'],
+                                chart_id='5a_hazard_by_fico')
             + _h4('5b. Hazard by LTV band')
-            + _build_pred_chart(pred, 'ltv', ['<80%', '80-99%', '100-119%', '120%+'])
+            + _build_pred_chart(pred, 'ltv', ['<80%', '80-99%', '100-119%', '120%+'],
+                                chart_id='5b_hazard_by_ltv')
             + _h4('5c. Hazard by original term')
-            + _build_pred_chart(pred, 'term', ['<=48mo', '49-60mo', '61-72mo', '73+mo'])
+            + _build_pred_chart(pred, 'term', ['<=48mo', '49-60mo', '61-72mo', '73+mo'],
+                                chart_id='5c_hazard_by_term')
             + _h4('5d. Hazard by age (re-expressed with issuer split)')
-            + _build_pred_chart(pred, 'age', ['0-6', '7-12', '13-24', '25-36', '37+'])
+            + _build_pred_chart(pred, 'age', ['0-6', '7-12', '13-24', '25-36', '37+'],
+                                chart_id='5d_hazard_by_age')
             + _h4('5e. FICO &times; LTV interaction table (age 13-24, prime + non-prime combined)')
             + _build_fico_ltv_table(grid)
             + _p('The interaction table shows why the model has to bucket FICO and LTV '
@@ -585,7 +598,7 @@ def _sec5_predictors(cache):
     return _section(5, 'Predictor associations', body)
 
 
-def _build_pred_chart(pred, dim, buckets):
+def _build_pred_chart(pred, dim, buckets, chart_id=None):
     """Build a hazard-by-bucket chart for one dimension, split by issuer+tier."""
     if not pred:
         return _p('<em>Data not available.</em>')
@@ -612,10 +625,11 @@ def _build_pred_chart(pred, dim, buckets):
                        'line': {'width': 2.5}})
     fig = {'data': traces,
            'layout': {'yaxis': {'title': 'Monthly default hazard (bps)'},
+                      'xaxis': {'title': f'{dim.upper()} band'},
                       'margin': {'l': 60, 'r': 10, 't': 10, 'b': 50},
                       'legend': {'orientation': 'h', 'y': -0.25},
                       'hovermode': 'x unified'}}
-    return _plotly_div(fig, height=300)
+    return _plotly_div(fig, height=300, chart_id=chart_id)
 
 
 def _build_fico_ltv_table(grid):
@@ -787,7 +801,7 @@ def _sec7_regression(cache):
                 'hovermode': 'x unified',
             }
         }
-        vint_chart = _plotly_div(fig, height=300)
+        vint_chart = _plotly_div(fig, height=300, chart_id='7d_issuer_coef_by_vintage')
 
     body = (
         _p('<strong>What this tells us about Carvana.</strong> Controlling for FICO, LTV, '
@@ -1068,9 +1082,9 @@ def _sec9_cof(cache):
            'Cost of funds &mdash; the dollar-weighted coupon Carvana pays on all rated '
            'tranches at pricing &mdash; is the other half of the residual arithmetic.')
         + _h4('9a. Note WAC vs 2Y Treasury over time')
-        + _plotly_div(fig_wac, height=340)
+        + _plotly_div(fig_wac, height=340, chart_id='9a_note_wac_vs_2y_tsy')
         + _h4('9b. Credit spread (note WAC &minus; 2Y Treasury)')
-        + _plotly_div(fig_spread, height=340)
+        + _plotly_div(fig_spread, height=340, chart_id='9b_credit_spread')
         + _p('Stripping out the benchmark component isolates the credit spread the market '
              'demanded at issuance. Flat-line segments indicate stable risk pricing; '
              'visible jumps correspond to SVB (Mar-2023), regional-bank stress '

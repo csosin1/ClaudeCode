@@ -1,0 +1,29 @@
+{
+  "name": "abs-dashboard",
+  "version": "1.0.0",
+  "description": "Carvana / CarMax ABS dashboard — Playwright QA + visual-lint deps",
+  "private": true,
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "playwright test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/csosin1/ClaudeCode.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/csosin1/ClaudeCode/issues"
+  },
+  "homepage": "https://github.com/csosin1/ClaudeCode#readme",
+  "devDependencies": {
+    "@axe-core/playwright": "^4.11.2",
+    "@playwright/test": "^1.59.1",
+    "@types/js-yaml": "^4.0.9",
+    "js-yaml": "^4.1.1"
+  }
+}

@@ -2,14 +2,17 @@
 .env.*
 *.env
 node_modules/
-package.json
-package-lock.json
+# package.json + package-lock.json are tracked — they're needed by the
+# Playwright QA suite (tests/abs-dashboard.spec.ts requires @axe-core/playwright
+# + js-yaml to run). Previously gitignored for historical reasons.
 qa-report.md
 __pycache__/
 *.pyc
 *.db
 ingestion_decisions.log
 .playwright-mcp/
+test-results/
+playwright-report/
 carvana_abs/filing_cache/
 
 # CarMax ABS-EE XMLs (large loan-level data — 13GB+)
