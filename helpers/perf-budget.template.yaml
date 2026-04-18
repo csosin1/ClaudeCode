@@ -1,0 +1,31 @@
+# Perceived-latency budgets for <project>. Copy to /opt/<project>/.perf.yaml and tune.
+# Enforced by the QA pass per SKILLS/perceived-latency.md. Raising a budget requires
+# a PR with rationale in CHANGES.md.
+
+pages:
+  "/":
+    # Core Web Vitals (milliseconds unless noted)
+    lcp_desktop_max_ms: 2500
+    lcp_mobile_4g_max_ms: 4000
+    inp_max_ms: 100
+    cls_max: 0.1          # unitless
+    ttfb_max_ms: 800
+
+    # Qualitative checks (pass/fail)
+    above_fold_content_required: true
+    below_fold_skeleton_required: true      # any below-fold element >200ms to render needs a placeholder
+    font_display_swap_required: true
+    progressive_render: true                # page must not be blocking-render
+
+  # Add one stanza per critical page. Tab-based SPAs can use per-tab keys too:
+  # "/dashboard#deals":
+  #   lcp_desktop_max_ms: 2500
+  #   ...
+
+defaults:
+  # If a page isn't explicitly listed above, these apply.
+  lcp_desktop_max_ms: 2500
+  lcp_mobile_4g_max_ms: 4000
+  inp_max_ms: 100
+  cls_max: 0.1
+  ttfb_max_ms: 800
