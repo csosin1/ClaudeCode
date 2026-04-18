@@ -11,6 +11,13 @@ Builder appends a per-task entry here after each build. Format:
 - **Things for the reviewer:**
 ```
 
+## 2026-04-18 — infra: codify range-calibration tautology + edge-case sampling (abs-dashboard Residual Economics RCA)
+
+- **What was built:** Two small platform learnings from the abs-dashboard Residual Economics incident (`actual_residual` mixed realized-to-date with lifetime-projected losses; -10% variance on brand-new deals with fine-performing pools). Per user decision after discussion, this was a comprehension bug that no audit catches at root — but two adjacent codifications are worth shipping: (1) a `LESSONS.md` entry warning that sanity ranges calibrated from current-code output are tautological and will bless the bug they're supposed to catch, plus (2) a one-paragraph addition to Phase 1 of `SKILLS/data-audit-qa.md` mandating that the outlier-scan sample always include the three youngest and three oldest items in the distribution, since the residual bug only manifested at the young end.
+- **Files modified:** `LESSONS.md` (new entry at top, newest-first convention), `SKILLS/data-audit-qa.md` (one paragraph appended to Phase 1), `CHANGES.md` (this entry).
+- **Explicitly NOT shipped (per user):** no CLAUDE.md changes, no Phase 6 time-scope schema, no changes to `audit_display_ranges.py`, no project-code changes.
+- **Things for the reviewer:** confirm LESSONS entry sits above the 2026-04-17 entries (newest-first); confirm the Phase 1 addition is prose, not a checklist, and matches surrounding tone.
+
 ## 2026-04-18 — infra: adopt Phase 5 (display-layer sanity ranges) for SKILLS/data-audit-qa.md
 
 - **What was built:** Phase 5 section added to `SKILLS/data-audit-qa.md` covering display-layer sanity ranges for derived/computed columns rendered at display time (the audit surface that Phases 1-4 don't reach). New shared helper `helpers/audit_display_ranges.py` (stdlib-only) implementing per-cell bounds checks, aggregate-sanity checks, and a `DisplayAuditHalt` exception for pipeline integration.

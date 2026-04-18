@@ -29,6 +29,8 @@ Every numeric field / chart / dataset in scope gets a fast outlier pass. Automat
 
 Phase 1 produces a ranked list of suspicious points. Everything flagged graduates automatically into Phase 2 — it gets checked regardless of sample selection.
 
+Alongside random and risk-weighted selection, the Phase 1 sample must always include the three youngest items in the distribution (newest deals, freshest records, most recent entities) and the three oldest. Bugs that only manifest at distribution edges are invisible to middle-weighted samples: brand-new deals expose defects where realized-to-date approaches zero relative to lifetime-projected values (the abs-dashboard `actual_residual` bug surfaced exactly this way), and ancient records expose stale-format or deprecated-schema defects. Edge sampling is cheap — six extra points — and catches a class of bug that risk-weighting alone will miss.
+
 ### Phase 2 — Random-Sample Deep Verification (user-specified %, expensive)
 
 - **Ask the user for a default sample rate** if not provided. Suggest 10% as a starting point; smaller datasets may need higher %, massive ones lower.
