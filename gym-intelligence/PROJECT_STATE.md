@@ -1,6 +1,6 @@
 # Gym Intelligence — Project State
 
-_Last updated: 2026-04-18 ~00:55 UTC — full-DB coverage scrape complete (commit fbe731e); results flagged for duplicate/scope bias before trust_
+_Last updated: 2026-04-18 — research plan for next-session industry-structure build committed (commit 63710b7)_
 
 ## Host topology (post-migration 2026-04-17)
 
