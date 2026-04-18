@@ -3273,12 +3273,12 @@ def generate_recent_trends_tab():
     cmx = seg_agg.get('CarMax', {})
 
     headline_bits = []
-    if crv_p.get('weighted_cal') is not None:
-        headline_bits.append(
-            f"Carvana Prime {_direction_phrase(crv_p['weighted_cal'])}")
-    if cmx.get('weighted_cal') is not None:
-        headline_bits.append(
-            f"CarMax {_direction_phrase(cmx['weighted_cal'])}")
+    for _label, _agg in (('Carvana Prime', crv_p),
+                         ('Carvana Non-Prime', crv_n),
+                         ('CarMax', cmx)):
+        if _agg and _agg.get('weighted_cal') is not None:
+            headline_bits.append(
+                f"{_label} {_direction_phrase(_agg['weighted_cal'])}")
     if not headline_bits:
         headline = (f"As of {latest_date_str}, peer-benchmark coverage is too "
                     "thin to render a weighted summary — early vintages only.")
@@ -3300,9 +3300,11 @@ def generate_recent_trends_tab():
                 f"<b>{agg['weighted_cal']:.2f}x</b>"
             )
             if agg.get('weighted_cal_30d_delta') is not None:
-                bits.append(
-                    f"(30-day change {agg['weighted_cal_30d_delta']:+.2f}x)"
-                )
+                d = agg['weighted_cal_30d_delta']
+                if abs(d) < 0.005:
+                    bits.append("(30-day change: flat)")
+                else:
+                    bits.append(f"(30-day change {d:+.2f}x)")
             bits[-1] = bits[-1] + "."
         if agg.get('last_month_loss_bps') is not None:
             line = (f"Last month's realized loss pace was "
