@@ -158,23 +158,93 @@ def write_atomic(path, payload):
     tmp.write_text(json.dumps(payload, indent=2, default=str))
     tmp.replace(path)
 
+def build_dispatcher_map():
+    """Pass 1: for each subagent session JSONL, find the project slug where its
+    dispatching Task tool_use lives. Subagent tokens attribute to the dispatcher
+    (who's responsible for the work), not to the cwd where the subagent
+    happened to run. Fixes "infra chat shows $6 despite heavy dispatches" where
+    infra's subagents land in opt-site-deploy's bucket because that was cwd.
+
+    Returns: {jsonl_path_str: dispatcher_slug}
+
+    Single-level resolution. Transitive (subagent-of-subagent) falls through to
+    direct parent. Rare at our scale; acceptable limitation.
+    """
+    # First: collect tool_use_id -> slug_where_dispatched, for every Task tool_use
+    tool_use_to_slug = {}
+    for proj_dir in PROJECTS_ROOT.glob("-*"):
+        slug = proj_dir.name.lstrip("-")
+        for jsonl in proj_dir.glob("*.jsonl"):
+            try:
+                fp = open(jsonl, "r", encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            with fp:
+                for line in fp:
+                    try:
+                        d = json.loads(line)
+                    except Exception:
+                        continue
+                    msg = d.get("message") or {}
+                    content = msg.get("content")
+                    if isinstance(content, list):
+                        for c in content:
+                            if isinstance(c, dict) and c.get("type") == "tool_use" and c.get("name") == "Task":
+                                tu_id = c.get("id")
+                                if tu_id:
+                                    tool_use_to_slug[tu_id] = slug
+
+    # Second: for each JSONL, find its parent_tool_use_id; map to dispatcher slug
+    jsonl_dispatcher = {}
+    for proj_dir in PROJECTS_ROOT.glob("-*"):
+        for jsonl in proj_dir.glob("*.jsonl"):
+            try:
+                fp = open(jsonl, "r", encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            parent_tu_id = None
+            with fp:
+                for line in fp:
+                    try:
+                        d = json.loads(line)
+                    except Exception:
+                        continue
+                    parent_tu_id = d.get("parentToolUseID") or d.get("parent_tool_use_id")
+                    if parent_tu_id:
+                        break
+            if parent_tu_id and parent_tu_id in tool_use_to_slug:
+                jsonl_dispatcher[str(jsonl)] = tool_use_to_slug[parent_tu_id]
+    return jsonl_dispatcher
+
+
 def main():
     now = datetime.now(timezone.utc)
     projects = load_projects()
+    dispatcher_map = build_dispatcher_map()
 
-    per_chat = {}
+    # Per-chat data keyed by effective slug (= dispatcher slug if this JSONL is
+    # a subagent session, else the cwd slug)
+    per_chat_raw = defaultdict(lambda: {
+        "token_totals": {
+            b: {"input": 0, "output": 0, "cache_r": 0, "cache_w": 0, "cost": 0.0, "messages": 0}
+            for b in ("today", "last_7d", "last_30d", "all_time")
+        },
+        "skills_hits": defaultdict(lambda: defaultdict(int)),
+    })
     skills_hits_global = defaultdict(lambda: defaultdict(int))
 
     for proj_dir in PROJECTS_ROOT.glob("-*"):
-        slug = proj_dir.name.lstrip("-")
-        chat_name = projects.get(slug, slug)  # fall back to slug if not in conf
-        token_totals = {
-            b: {"input": 0, "output": 0, "cache_r": 0, "cache_w": 0, "cost": 0.0, "messages": 0}
-            for b in ("today", "last_7d", "last_30d", "all_time")
-        }
-        chat_skills_hits = defaultdict(lambda: defaultdict(int))
+        cwd_slug = proj_dir.name.lstrip("-")
         for jsonl in proj_dir.glob("*.jsonl"):
-            scan_jsonl(jsonl, now, token_totals, chat_skills_hits)
+            effective_slug = dispatcher_map.get(str(jsonl), cwd_slug)
+            bucket_data = per_chat_raw[effective_slug]
+            scan_jsonl(jsonl, now, bucket_data["token_totals"], bucket_data["skills_hits"])
+
+    per_chat = {}
+    for slug, bucket_data in per_chat_raw.items():
+        chat_name = projects.get(slug, slug)
+        token_totals = bucket_data["token_totals"]
+        chat_skills_hits = bucket_data["skills_hits"]
 
         # Merge into globals
         for skill, buckets in chat_skills_hits.items():
