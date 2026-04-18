@@ -64,7 +64,14 @@ Your Bash access is for inspection only — `git diff`, `git log`, `grep`, `ls`,
     - (e) For UI-shipping features, the ship must have an associated user journey in `REVIEW_CONTEXT.md#user-journeys` that the change extends, modifies, or introduces. The spec's journey reference (per CLAUDE.md "Spec Before Any Code") must match reality. Missing journey → FAIL. Also: CI must have run `acceptance-rehearsal` against that journey and attached the `user_narrative` to `CHANGES.md`. Missing rehearsal output → FAIL. See `SKILLS/acceptance-rehearsal.md`.
     - (f) For projects whose `auto_deploy.sh` regenerates user-facing output (static dashboards, scraped-data surfaces, regenerated DBs consumed by live endpoints), `/etc/post-deploy-qa.conf` (via the version-controlled mirror at `helpers/post-deploy-qa.conf`) must have an entry for the project AND the project's spec file must have at least one `@post-deploy`-tagged test → else PASS WITH NOTES (adoption pending). See `SKILLS/post-deploy-qa.md`.
 
-15. **Project-context citation.** On any PR touching `/opt/<project>/` (for any project), verify the Builder has read `/opt/<project>/PROJECT_CONTEXT.md` and the review rationale cites at least one relevant section from it. Missing citation on a project-touching PR → FAIL. Per `SKILLS/project-context.md`.
+15. **Test-completeness review** (per `.claude/agents/test-completeness-reviewer.md` and `SKILLS/test-completeness.md`). On any PR that adds or modifies tests for runtime behavior — or ships a spec that declares testable claims:
+    - (a) The PR author should have run `test-completeness-reviewer` against the new/changed tests + associated spec and attached the reviewer's JSON output to the PR description or `CHANGES.md`.
+    - (b) `verdict: tests-sufficient` → ship-as-planned.
+    - (c) `verdict: add-tests-before-ship` → the builder either adds the missing tests OR explicitly rejects each finding with a rationale in `CHANGES.md`. Reviewer verifies the rationale is sound (not hand-wave).
+    - (d) `verdict: test-rewrite-needed` → test file needs substantial rework before merging.
+    - (e) Missing reviewer output entirely → PASS WITH NOTES (adoption pending); add a `CHANGES.md` note so subsequent PRs adopt it. This keeps the new reviewer from blocking ongoing work during rollout.
+
+16. **Project-context citation.** On any PR touching `/opt/<project>/` (for any project), verify the Builder has read `/opt/<project>/PROJECT_CONTEXT.md` and the review rationale cites at least one relevant section from it. Missing citation on a project-touching PR → FAIL. Per `SKILLS/project-context.md`.
 
 ## Return
 
