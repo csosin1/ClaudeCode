@@ -2,6 +2,20 @@
 
 _Last updated: 2026-04-14 (pre-resize checkpoint)_
 
+## Host topology (MUST OBEY)
+
+**abs-dashboard runs on PROD, not dev.** Overnight migration 2026-04-16/17 moved `/opt/abs-dashboard/` to the prod droplet (10.116.0.3, `ssh prod-private`, 8GB RAM, 4 CPUs, 154GB disk). Dev copy at 159.223.127.125 is a rollback snapshot only — any writes to dev paths are discarded within 48hr; dev is memory-constrained (4GB, shared with other projects) and will OOM under real workloads.
+
+**Rule for every compute task:**
+- Markov training / forecast runs: `ssh prod-private /opt/abs-venv/bin/python /opt/abs-dashboard/unified_markov.py`
+- Methodology analytics (regressions, benchmark fetches, heavy Python): same — `ssh prod-private`
+- Dashboard regen + promote: `ssh prod-private` 
+- Audits, spot-checks, one-off scripts: run on prod against prod DBs
+- Watchers (poll-until-cache-exists): `ssh prod-private 'until [ -f ... ]; do sleep ...; done'` — poll prod, not local
+- Dev is ONLY for git commits that must push to origin (prod has no GitHub credentials) and for ssh-outbound to prod
+
+**Incidents log (for context):** 2026-04-17 11:00 UTC Markov launched on dev → OOM → moved to prod. 2026-04-18 02:40 UTC compute_methodology.py launched on dev → swap pressure urgent → moved to prod. Both should have gone to prod from the start. Root cause both times: main session shell is on dev, so `bash` tool runs dev-local unless prefixed with `ssh prod-private`. Fix going forward: **any heavy command must start with `ssh prod-private`**.
+
 ## Current focus
 **All 9 audit items resolved — data trusted and live.** Full audit per SKILLS/data-audit-qa.md completed 3 iterations to clean-pass. Post-fix audit (1,395-tuple sample + 3-cell spot-check) reconfirmed data trusted after display changes landed. Live dashboard regenerated + promoted with all fixes. Fix commits:
 - `bc40ba5` Carvana parser (reserve row + early-cycle)
