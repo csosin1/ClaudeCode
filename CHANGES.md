@@ -11,6 +11,57 @@ Builder appends a per-task entry here after each build. Format:
 - **Things for the reviewer:**
 ```
 
+## 2026-04-18 — abs-dashboard: proposal to extend SKILLS/data-audit-qa.md with display-layer sanity ranges
+
+**Problem:** the current data-audit-qa skill is rigorous on DB-layer concerns (parser correctness, source-trace verification, value invariants on stored columns, cross-table reconciliation) but has no checks on **derived/computed columns rendered at display time**. Two production bugs caught this pattern in 36 hours on the Carvana Loan Dashboard:
+
+1. **2026-04-17 (caught by pre-delivery audit, by luck):** `Exp Loss` / `Proj Loss` columns in the Residual Economics tab rendered at 100× true value (CARMX 2017-1 showed 347.58% vs true 3.48%). Root cause: percent-unit DB value passed through a formatter that multiplied by 100 again. Caught only because spot-checks happened to look at magnitude. Fix in commit `127a6a4`.
+
+2. **2026-04-18 (NOT caught by audit, surfaced by user looking at the tab):** `WAL` column in the Residual Economics tab rendered values from 0.1y to 2.1y across deals when prime-auto-ABS WAL should be 1.8-2.5y for every deal. Root cause: derived-column calculation collapses on brand-new deals with insufficient pool_performance history. Bug propagated into Total Excess Spread, Expected Residual Profit, and Variance columns. WAL has no DB source row — pure render-time compute, so the existing Phase 1-4 of the audit had no surface to catch it.
+
+**Both bugs share a root cause:** derived/computed columns rendered at display time are a distinct audit surface from DB columns, and our skill doesn't address them.
+
+**Proposed extension to SKILLS/data-audit-qa.md — new Phase 5: Display-layer sanity ranges**
+
+For every derived/computed column rendered to a user-facing tab, the audit must:
+
+1. **Define a plausible value range** per column at the point of definition. Examples for an auto-ABS dashboard:
+   - WAL ∈ [1.5, 3.5] years
+   - Cumulative net loss % ∈ [0, 30%]
+   - Excess spread/yr ∈ [0, 15%]
+   - Cost of debt ∈ [0.2%, 8%]
+   - Cap structure tranche % ∈ [0, 100%]
+   - Variance from forecast ∈ [-20%, +20%]
+   - WAC ∈ [3%, 30%]
+2. **Run the range check on every rendered cell** — a per-column histogram pass that flags any cell outside its plausible range as a HALT-finding.
+3. **Aggregate sanity:** weighted average of the column across rows should fall within a tighter range. (For WAL: agg should be ~2.0 ± 0.3y; if it's 1.7y, that's suspicious even if no individual cell is out of range.)
+4. **Cross-column consistency:** where derived columns chain (e.g., `total_excess_spread = excess/yr × WAL`), audit verifies the chain holds within rounding tolerance.
+
+**Implementation pattern (suggest as concrete recipe in the skill):**
+
+```python
+DISPLAY_RANGES = {
+    "wal_years": (1.5, 3.5, "auto ABS amortization should be 1.5-3.5y"),
+    "cum_net_loss_pct": (0, 30, "loss rate above 30% indicates parser or model error"),
+    # ... etc
+}
+
+def audit_display_ranges(rendered_tab_html_or_data):
+    findings = []
+    for col, (lo, hi, why) in DISPLAY_RANGES.items():
+        for row in rendered_tab_html_or_data:
+            v = row[col]
+            if v is not None and not (lo <= v <= hi):
+                findings.append(("HALT", col, row['deal'], v, lo, hi, why))
+    return findings
+```
+
+This runs on every regen + on every promote. The dashboard's daily cron should include this audit step as a non-blocking validation that emits notify.sh on first finding.
+
+**Suggested companion: a new LESSONS.md entry** (in /opt/abs-dashboard/LESSONS.md, project-local) documenting both bugs and the preventive rule: "Derived display columns are a separate audit surface from DB columns. Define a plausible range at the point of column definition. Audit against ranges as Phase 5 of every data-audit-qa pass."
+
+**No infra-agent action required if just adding to SKILLS/data-audit-qa.md.** If you want a generic audit_display_ranges helper in /opt/site-deploy/helpers/, that's a separate small lift; otherwise each project implements its own DISPLAY_RANGES dict and runs the helper inline.
+
 ## 2026-04-17 — infra: code-hygiene SKILL + reviewer rule #13
 
 - **What was built:**
