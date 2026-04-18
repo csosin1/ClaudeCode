@@ -11,6 +11,14 @@ Builder appends a per-task entry here after each build. Format:
 - **Things for the reviewer:**
 ```
 
+## 2026-04-18 — skill: four-agent-debate (codify the structured-disagreement pattern)
+
+- **What was built:** New `SKILLS/four-agent-debate.md` codifying the Research-Advocate-Skeptic-Improver pattern we've now used successfully on three consequential decisions (telemetry design, competitive analysis, 2026-04-18 holistic platform review) and are about to use on project-kickoff design. Documents the asymmetric roles (Research runs first alone; three peers run in parallel; synthesis is orchestrator work), the 3-agent and N-chunk variants, mechanics (shared digest → parallel dispatch → cross-cut synthesis), required output shape (prioritized 3-5 actions + deliberately-NOT-recommended + monitor-going-forward), anti-patterns (no mid-run agent-to-agent visibility; no sequential dispatch; no menu-of-options ending), and the ~20-30 min / low-single-digit-dollar cost envelope.
+- **Files modified:** `SKILLS/four-agent-debate.md` (new, 89 lines); `CHANGES.md` (this entry).
+- **Tests added:** `helpers/skills-shape-lint.sh` passes on the new file (first H2 is `## When to use`).
+- **Assumptions:** Precedent list is kept as a living section in the skill body (append new uses there); when a future debate surfaces a pattern not covered, amend this skill in the same commit.
+- **Things for the reviewer:** Cross-links to `parallel-execution`, `never-idle`, `platform-stewardship` are intentional — debate is a parallel-dispatch consumer and an LESSONS/SKILLS producer. No pointer added to CLAUDE.md (per stewardship pointer-parsimony: this is situational, discovered via `ls SKILLS/` when starting a consequential-decision task).
+
 ## 2026-04-18 — infra: three-hook pre-commit triad + YAML frontmatter migration (doc-integrity)
 
 - **What was built:** Action #1 of the holistic platform review. Three pre-commit hooks that catch the class of bug where CHANGES.md claims artifacts exist that don't (the 2026-04-17 post-deploy-qa-hook incident), where LESSONS.md entries ship without an explicit preventive-tier declaration, and where `SKILLS/*.md` files drift off the "## When to use" first-H2 shape that makes them discoverable. Paired with a one-shot YAML frontmatter migration across every durable platform doc (`SKILLS/*.md`, `RUNBOOK.md`, `MIGRATION_RUNBOOK.md`, every `PROJECT_STATE.md` / `PROJECT_CONTEXT.md` under `/opt/*/`) and a per-entry `<!--lesson ... -->` block on every `LESSONS.md` entry. Freshness is **activity-gated, not calendar-gated**: `refresh_cadence: on_touch` means "re-verify when you touch the area"; there is no background cron comparing `last_verified` to wall clock, and no nag by frequency or dormancy anywhere.
