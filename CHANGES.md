@@ -11,6 +11,31 @@ Builder appends a per-task entry here after each build. Format:
 - **Things for the reviewer:**
 ```
 
+## 2026-04-17 — infra: perceived-latency QA skill
+
+- **What was built:**
+  - `SKILLS/perceived-latency.md` (~230 lines) — the generalizable pattern for perceived-latency QA: three-category pass (functional / perf / UX) run as one Playwright spec with tags; halt-fix-rerun loop mirrors `SKILLS/data-audit-qa.md`; Core Web Vitals thresholds per viewport/network; qualitative feel-fast checks; standard fix playbook keyed by finding-type; escape-hatch loading-state patterns; `.perf.yaml` schema; tooling options (`playwright-lighthouse` recommended, raw Playwright + `web-vitals` as fallback); integration with existing `qa.yml` via tags; report format; anti-patterns; cross-links.
+  - `helpers/perf-budget.template.yaml` — starter `.perf.yaml` a project chat copies to `/opt/<project>/.perf.yaml` and tunes. Declares per-page and default CWV budgets plus the qualitative booleans. Enforcement lives in the QA spec per the SKILL.
+  - `CLAUDE.md` — under "Every Task Passes Three Gates" / QA, added one clause: "asserting functional, perf, and UX budgets per `SKILLS/perceived-latency.md`." Paired-edit compression: tightened the "Data Audit & QA" paragraph (the loop mechanics were duplicated from `SKILLS/data-audit-qa.md`; now a one-liner pointer). Net change: 2 insertions / 2 deletions, zero growth.
+
+- **Why:**
+  - User reported Carvana dashboard felt slow; prior Playwright sweep confirmed 5.6MB HTML body, 347 charts, fonts.ready hangs. User wants a generalizable skill so every project's QA pass asserts perceived-latency budgets (not just functional correctness), and each project chat self-applies it. Infra ships the pattern; project chats execute.
+
+- **Files modified:**
+  - New: `SKILLS/perceived-latency.md`, `helpers/perf-budget.template.yaml`.
+  - Modified: `CLAUDE.md` (one-line addition under QA gate; one-paragraph compression under Data Audit & QA), `CHANGES.md` (this entry).
+  - Not modified: any project source, any project's `.perf.yaml`, any project's `tests/*.spec.ts`, any project's `node_modules` — all per-project work is explicitly out of scope for this infra ship.
+
+- **Assumptions:**
+  - Projects will install `playwright-lighthouse` or `web-vitals` themselves when they adopt the skill — infra does not install per-project deps.
+  - `qa.yml` workflow does not need modification; tag-based grouping happens in the Playwright reporter at report time.
+  - No CLAUDE.md pointer to the new SKILL beyond the QA-gate mention — per infra-builder pointer-parsimony rule, situational skills get discovered via `ls SKILLS/`.
+
+- **Things for the reviewer:**
+  - Confirm the CLAUDE.md net-line-count is zero growth (verified: `git diff --stat` shows 2/2).
+  - Confirm the SKILL cross-references point to existing SKILLS files (`data-audit-qa.md`, `parallel-execution.md`, `platform-stewardship.md`, `root-cause-analysis.md`, `capacity-monitoring.md` — all present in `SKILLS/`).
+  - Confirm no project paths were touched.
+
 ## 2026-04-17 — infra: cost-monitoring MVP — paid-call gateway, log-event, spend-audit
 
 - **What was built:**

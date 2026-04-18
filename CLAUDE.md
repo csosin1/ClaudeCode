@@ -22,7 +22,7 @@ Nothing defective reaches the user. Each task runs through three checkpoints —
 
 1. **Build** — Builder subagent writes the feature AND Playwright tests in `tests/<project>.spec.ts`. Tests must exercise the feature like a user (click, fill, assert real values — no NaN/blanks).
 2. **Review** — Reviewer subagent reads the diff against the spec, `LESSONS.md`, and the security baseline. Must return PASS before deploy.
-3. **QA** — push to `main` deploys to the project's preview URL; `.github/workflows/qa.yml` runs Playwright against preview at 390px and 1280px. Regressions count as failures. On fail: fix and redeploy, no approval needed.
+3. **QA** — push to `main` deploys to the project's preview URL; `.github/workflows/qa.yml` runs Playwright against preview at 390px and 1280px, asserting functional, perf, and UX budgets per `SKILLS/perceived-latency.md`. Regressions fail. On fail: fix and redeploy, no approval needed.
 4. **Accept** — when QA is green, share the preview URL. User's "ship it" is the only approval gate. On accept: promote preview → live.
 
 The main session orchestrates — it does not write code directly.
@@ -73,7 +73,7 @@ Any remote chat — including this one — can fail at any moment. Platform auto
 Weekly per-chat pass + on-demand whenever `/capacity.html` goes `warn`. Cheap wins only: streaming queries, closed handles, closed browsers, SQLite WAL checkpoint + VACUUM, bounded caches, log rotation, gzipped raw caches. Anything needing a schema change, new library, or real perf tradeoff files a separate task. See `SKILLS/memory-hygiene.md`.
 
 ## Data Audit & QA
-For number-intensive projects, every load-bearing dataset or dashboard passes a skeptical-auditor audit. Runs as a **halt-fix-rerun loop**: agents in parallel find, on first finding they halt gracefully, orchestrator groups by root cause and ships upstream fix, audit reruns. Exits only on clean pass. See `SKILLS/data-audit-qa.md`.
+For number-intensive projects, every load-bearing dataset or dashboard passes a skeptical-auditor halt-fix-rerun audit before promote. See `SKILLS/data-audit-qa.md`.
 
 ## Keep-the-User-Informed
 Scope upfront ("~15 min", "~3 hr"). Update `task-status.sh` on start / done / block. Notify via `notify.sh` at discrete milestones and on blockers. Include approximate token cost in the `done` summary. Full conventions in `SKILLS/user-info-conventions.md`.
