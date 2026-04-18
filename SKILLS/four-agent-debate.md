@@ -53,6 +53,32 @@ Research + Tradeoffs + Improver. The Tradeoffs agent does skeptic-lite with the 
 
 For holistic reviews spanning multiple subsystems. Each chunk gets its own committee; every chunk produces an independent digest. The orchestrator synthesizes cross-cuts across chunks — themes appearing in ≥3 chunks or ≥3 agents get elevated in the final action list. Example: the 2026-04-18 platform review ran 4 chunks × avg 3.5 agents = 14 agents and produced a 5-action prioritized list.
 
+## Disagreements must be user-visible
+
+Any debate pattern this skill describes MUST surface agent disagreements to the user as first-class output — not silently merge them away. Silent merge is the anti-pattern: it hides the sharpest signal the committee produced.
+
+**Mechanism (generic across debate variants):**
+
+- Every parallel peer emits a mandatory `disagreements_with_others` block alongside its normal output:
+
+```yaml
+disagreements_with_others:
+  - other_agent: <peer name>
+    my_position: string
+    their_position: string
+    tradeoff: string
+    my_recommendation: keep_mine | defer_to_them | hybrid
+    rationale: string
+```
+
+  An empty list is legitimate ONLY when peers genuinely concur. A peer that claims zero disagreements on a contested topic is a smell — orchestrator flags.
+
+- The orchestrator's deliverable (card, report, action list) MUST render every disagreement entry as a first-class element — paired positions, tradeoff, recommendation — with user-facing buttons or explicit "Override / Discuss" affordances where the deliverable is interactive.
+
+- When the debate is a **refinement loop** (user iterates with the committee), disagreement entries carry stable ids and route targeted re-runs: an "Override" updates one peer's YAML; a "Discuss / push back" re-dispatches that one peer. Never full-committee-re-run for a single disputed item.
+
+**Exemplar:** `SKILLS/project-kickoff.md` is the first debate variant to implement this. Its Draft Plan card surfaces disagreements above the fold and drives the refinement loop. Future debate variants inherit this rule — it belongs to the generic pattern, not to kickoff specifically. See also `feedback_committee_collaborative.md`.
+
 ## Output shape — the deliverable
 
 Prioritized action list. NOT an essay. NOT a menu of options. Top 3-5 concrete actions, each with: **what** (one sentence), **why** (which cross-cut or agent finding), **rough cost** (hours or days), **ship order** (first, second, …).

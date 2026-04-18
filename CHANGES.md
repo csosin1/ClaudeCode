@@ -11,6 +11,33 @@ Builder appends a per-task entry here after each build. Format:
 - **Things for the reviewer:**
 ```
 
+## 2026-04-18 — infra: kickoff protocol reshape — collaborative refinement loop
+
+- **What was built:** Reshape of commit 2a641c1 (task #49). NOT a net-new protocol — this re-frames kickoff as a **collaborative refinement loop with the user** instead of a one-shot report-delivery pipeline. User feedback (`feedback_committee_collaborative.md`, 2026-04-18): "the point of this process is to work with the user to help the user refine and clarify the request so that it can be done well." Silent merge of agent disagreements is the anti-pattern that reshape removes.
+- **Shape change:** committee runs → **Draft Plan card** (surfaces merged spec AND explicit agent disagreements) → user iterates via **Ask / Push back / Add constraint / Answer** → orchestrator routes **targeted re-runs** (not full re-dispatch) → new Draft Plan card per round → loop until user taps **Finalize** (terminal) or **Cancel**. No round cap, no timer.
+- **Files modified (5):**
+  - `SKILLS/project-kickoff.md` — rewrite. New "User interaction during refinement" section with exact routing rules (ask → 1 agent; pushback → 1 agent; constrain → 3 peers; answer → Understand only). Added mandatory `disagreements_with_others` YAML schema on every peer. KICKOFF_REPORT schema gains `status: draft|finalized` and `Round History`. Usage section lists all new subcommands.
+  - `helpers/kickoff.sh` — adds subcommand router (ask | pushback | constrain | answer | refine | finalize | cancel | accept-shim). Persistent per-project state (written to /opt/&lt;project&gt;/.kickoff-state/ at runtime; not committed) so refinement rounds mutate YAMLs incrementally. `render_report` re-emits `KICKOFF_REPORT.md` and a per-round env file. Legacy `--prompt …` initial dispatch preserved. Every action appends to `round.log` and renders a new round-numbered card.
+  - `helpers/accept-card.sh` — adds `--kind draft-plan` branch with a separate HTML renderer. Parses `disagreements_with_others` and `open_questions` blocks from the state-dir YAMLs and emits them as first-class card elements with per-entry `[Override]` / `[Discuss]` and `[Answer]` buttons. Terminal row is `[Finalize] [Cancel]`. Preserves the default milestone-card renderer unchanged for non-kickoff callers.
+  - `SKILLS/four-agent-debate.md` — new section "Disagreements must be user-visible". Generalises the rule: every debate variant emits explicit disagreement entries, not silent merge. Kickoff is the first implementer; future variants inherit.
+  - `CHANGES.md` — this entry.
+- **Invariants honoured:**
+  - No token cost surfaced anywhere (`feedback_cost_model.md`). Outside-spend displayed only when >$0.
+  - No round caps, no calendar timers (`feedback_walkaway_default.md`). Loop ends only on Finalize / Cancel.
+  - No full-re-dispatch on every interaction. Targeted routing is the point.
+  - Deterministic template merge preserved — Draft Plan card surfaces disagreements on top of merge, not instead of it. No 5th synthesize LLM call.
+  - `accept` preserved as backward-compat shim calling `finalize --via-shim`.
+- **Tests added:** `--dry-run` on the initial dispatch and on every new subcommand exits 0 and prints its routing plan without LLM calls (manual smoketest equivalent; no Playwright surface to exercise for pure CLI tooling).
+- **Assumptions:**
+  - The existing orchestrator / main thread is responsible for reading `$STATE/BUILDER_READY` after `finalize` and spawning the first builder — `finalize` itself writes the marker but does not block on a builder invocation (keeps finalize fast + idempotent).
+  - Disagreement ids are stable within a single kickoff run (format `dis-<owner>-<n>`); pushback routing derives the owning agent from the id prefix.
+  - Cancel's "scaffold rollback" is scoped to removing the per-project .kickoff-state directory and moving `KICKOFF_REPORT.md` to the site-deploy graveyard directory (at helpers runtime, not a committed path). It does NOT touch nginx / systemd / filesystem artefacts created by `SKILLS/new-project-checklist.md` — those are shared-infra and owned by `projects-smoketest.sh gate`.
+- **Things for the reviewer:**
+  - The YAML disagreement parser in `accept-card.sh` is regex-based (no PyYAML dep). Handles the `- key: value` multi-line list shape we emit; edge cases around multi-line strings are not covered — acceptable because peer briefs constrain values to single-line strings.
+  - `answer` patches `understand.yaml` via a targeted regex; if Understand emits an unexpected YAML layout the patch falls back to an appended "answered" note at bottom, preserving intent without corrupting the block.
+  - The `refine` subcommand does not re-dispatch any LLM — it only re-renders the card from current state. Cheap operation, safe to call repeatedly.
+- **Gates:** `projects-smoketest.sh gate` 17/17 PASS, `skills-shape-lint.sh` PASS, `doc-reality-check.sh` PASS, `lessons-lint.sh` trivial (no LESSONS changes), initial `--dry-run` exits 0, all 4 subcommand `--dry-run`s exit 0 and print routing plans.
+
 ## 2026-04-18 — infra: review action #4 — two structural doc-surface deletions
 
 - **What was built:** Action #4 of the 2026-04-18 holistic platform review. Two deletions, one commit. Part A folds the former REVIEW_CONTEXT surface into `PROJECT_CONTEXT.md` (new `## QA calibration` + `## User Journeys` sections) across every project; the standalone REVIEW_CONTEXT surface no longer exists. Part B folds the "Spec Before Any Code" CLAUDE.md section into "Clarify Before Building" and pushes the full four-bullet spec template into the new "Spec Template" section of `SKILLS/user-info-conventions.md`, shrinking `/root/.claude/CLAUDE.md` by 3 net lines (98 → 95).
