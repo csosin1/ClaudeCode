@@ -139,6 +139,38 @@ $PY generate_preview.py >> "$LOG" 2>&1
 # 6. Promote preview → live (this project auto-promotes)
 $PY generate_preview.py promote >> "$LOG" 2>&1
 
+# 6b. Display-layer sanity-range audit. Scans the rendered HTML tree under
+# static_site/live/ and validates every numeric cell against DISPLAY_RANGES
+# + aggregate sanity + cross-column chain checks. If HALT findings surface
+# the data is already live (we don't roll back) — we emit a notify.sh push
+# and append to AUDIT_FINDINGS.md so a human can triage. See LESSONS.md
+# entry for 2026-04-18 for the "why".
+AUDIT_OUT=$(mktemp)
+if $PY /opt/abs-dashboard/audit_display_ranges.py --live > "$AUDIT_OUT" 2>&1; then
+    echo "$(date -u): display-range audit PASS" >> "$LOG"
+    tail -20 "$AUDIT_OUT" >> "$LOG"
+else
+    echo "$(date -u): display-range audit FAIL — see AUDIT_FINDINGS.md" >> "$LOG"
+    cat "$AUDIT_OUT" >> "$LOG"
+    {
+        echo ""
+        echo "## $(date -u +%Y-%m-%d) — display-range audit HALT after promote"
+        echo ""
+        echo "Audit script: /opt/abs-dashboard/audit_display_ranges.py"
+        echo "Live tree audited after cron_ingest promote."
+        echo ""
+        echo '```'
+        cat "$AUDIT_OUT"
+        echo '```'
+    } >> /opt/abs-dashboard/AUDIT_FINDINGS.md || true
+    if command -v notify.sh >/dev/null 2>&1; then
+        notify.sh "abs-dashboard: display-range audit HALT" \
+                  "See /opt/abs-dashboard/AUDIT_FINDINGS.md; promote already happened." \
+                  --priority high 2>> "$LOG" || true
+    fi
+fi
+rm -f "$AUDIT_OUT"
+
 # 7. Final-state snapshot for next cycle's comparison. We write at the END so
 # the next run compares against the actual final state of this run (including
 # any rows added by rebuild_summaries).
