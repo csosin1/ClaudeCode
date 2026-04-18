@@ -92,6 +92,82 @@ Canonical fixes for the finding patterns we see repeatedly. Prefer these before 
 | 347 charts rendered on first paint | Render the above-fold N charts eagerly; below-fold charts wait for `IntersectionObserver` entry. Pattern: stub each chart with its final dimensions, swap in real render on-intersect. |
 | Heavy JS bundle | Code-split by route/tab; `import()` dynamically on-demand. Tree-shake unused chart types. Prefer small libs (e.g. uPlot over Chart.js for line charts). |
 
+## Content Decomposition Hygiene
+
+The fix playbook above handles "the page is too slow." This section handles the bigger, messier question: **when should one page be several pages instead?** The default SPA ("put everything at `/`, switch views with JS") is a trap once the dashboard grows past a few hundred KB — but splitting badly (one subdomain per view, one route per click) is also wrong. This is the decision framework for getting it right.
+
+### The core tension
+
+Fewer pages means fewer round-trips, one SEO surface, one analytics pageview per visit, and simpler state. More pages means smaller per-page download, URL-as-state for free, natural back/forward, and — critically — shared asset caching across views. Neither shape is universally right. A 50 KB marketing site shouldn't be split; a 6 MB multi-view dashboard shouldn't be one page. The job is matching shape to content.
+
+### Heuristics for when to split
+
+Walk these roughly in order. First match wins:
+
+- **Over budget, no other fix available.** If the combined page exceeds its `.perf.yaml` budget and the playbook fixes (compression, lazy-load, skeleton-swap, code-split) don't close the gap, split. Budget is the forcing function.
+- **Independently consulted content.** Reference material, distinct dashboards, tabs the user treats as separate destinations — split into routes. If a user would bookmark tab C and come back to it directly next week, tab C wants its own URL.
+- **URL meaningfully identifies the view.** A specific deal, a specific report, a specific time window. That identity belongs in the path, not in JS state. `/deals/ACME-2024-03/` beats `/dashboard?deal=ACME-2024-03` beats `/dashboard#ACME-2024-03`.
+- **Sequential, single-task reading.** A checkout flow, a wizard, an article — keep together. Back/forward would be destructive or confusing; the user is in one session with one goal.
+- **Guided flows where state is fragile.** A multi-step form where the user has entered data in step 2 and is on step 3 — splitting to real routes means the browser's back button can destroy work. SPA-style with explicit navigation guards wins here.
+
+The mental model: **is this content read together or consulted separately?** Together → one page with progressive disclosure. Separately → routes.
+
+### Route split vs subdomain split
+
+When you decide to split, the next question is path-based (`/app/economics/`, `/app/methodology/`) vs subdomain-based (`economics.app.example.com`, `methodology.app.example.com`). Path-based wins by default:
+
+- One TLS cert, not N. Let's Encrypt renewal touches one name instead of fanning out.
+- No CORS surface. Subdomains mean every cross-view fetch becomes a cross-origin request with preflight, cookie-domain rules, and `Access-Control-*` headers to manage.
+- Shared browser cache. Same origin → same cache partition → shared JS/CSS/fonts actually hit.
+- Simpler dev/preview/live topology. One nginx `server` block, one deploy path, one log file.
+
+Subdomains are justified only when (a) the views are genuinely independent apps with their own release cadence, (b) tenant or security isolation demands origin-level separation, or (c) different teams own different backends and a shared origin would couple them. Absent one of those, the subdomain split is cert sprawl and CORS overhead with no load-time benefit.
+
+Worked example: the carvana-abs dashboard (Apr-18 2026) was a 5.85 MB single-page SPA with five major views — economics, methodology, deals, cohort, portfolio. Five subdomains was rejected (cert sprawl, CORS, no load-time benefit over paths). Five paths under one origin (`/carvana-abs/economics/`, `/carvana-abs/deals/<id>/`, …) was chosen: each page 200–800 KB, shared Plotly/fonts/CSS cached once, URL carries the view identity, back button works.
+
+### Shared-asset caching
+
+The multi-page shape only pays off if shared assets actually cache. This requires two things:
+
+1. **Stable asset names across pages.** If page A loads `plotly-2.27.0.min.js` and page B loads `plotly-2.27.0.min.js`, the browser serves page B's copy from cache on navigation. If build tooling hashes the bundle differently per entry point (`plotly.a3f2.js` vs `plotly.b7e9.js` for the same library), you've accidentally defeated the cache. Use stable, version-pinned names for vendored libs; reserve hash-fingerprinting for your own code that actually changes.
+2. **Long-lived cache headers on versioned assets.** `Cache-Control: public, max-age=31536000, immutable` on anything whose URL encodes its version (library files, hashed bundles). The HTML shell stays `no-cache` so deploys land immediately, but the shared library weight amortizes to zero across all subsequent pages.
+
+Together these turn "N pages × M MB each" into "1× M MB first visit + N−1× shell-only subsequent visits."
+
+### URL semantics and state
+
+If the view has a stable identity, put it in the URL. Two wins:
+
+- **State becomes free.** The URL *is* the tab state. No `localStorage`, no query-param reconstruction, no `history.pushState` gymnastics. Navigation is `<a href>`.
+- **Sharing, bookmarking, history all work natively.** Paste the URL in Slack, it opens the right view. Back button lands where the user expects. This is what users mean by "a website that works."
+
+Ranking: `/app/view/<id>/` (best — real route, real history entry) > `/app/#view/<id>` (okay — same-page, history works, slightly ugly) > `/app/?view=<id>&tab=deals` (worst — opaque, easy to break). The hash form is an acceptable **Stage 1 quick win** — flip tab state to `#hash` first to fix back/forward and bookmarking in an afternoon — before doing a proper path split in Stage 2. Call out the staging explicitly so nobody thinks the hash version is the final answer.
+
+### Progressive disclosure (the within-page cousin)
+
+Route-splitting is *across-page*. Progressive disclosure is *within-page*: show the most important content first, reveal more on demand via tabs, accordions, "load more" buttons, `IntersectionObserver`-triggered chart renders. Both patterns reduce bytes-before-meaningful-content; they're complementary, not alternatives.
+
+Rule of thumb: if the content is **related** (same report, same dashboard, same user task), use progressive disclosure. If the content is **independent** (different reports, different dashboards, different user tasks), use route splitting. Mixing them is normal — a split route can itself use accordions inside.
+
+### Anticipatory prefetch
+
+Once content is split across routes, you can hide the network cost of navigation by prefetching the next likely page during idle time: `<link rel="prefetch" href="/next-likely-view/">`. By the time the user clicks, the HTML and its critical assets are already in the cache. Click-to-paint feels instant even though real bytes moved over the wire.
+
+When to use: analytics shows a clear "after page A, users usually go to page B" pattern. When to avoid: mobile users on metered connections — prefetched bytes they never use are wasted money, and iOS Safari's cache eviction means the prefetch may not even survive to the click anyway.
+
+### Vocabulary glossary
+
+- **SPA** (Single-Page App): one HTML document, all views rendered via JS routing.
+- **MPA** (Multi-Page App): each view is its own HTML document, navigation is real page loads.
+- **Route splitting**: breaking an SPA into multiple real URLs (either MPA-style or SPA-with-router), each serving a smaller payload.
+- **Code splitting**: breaking one JS bundle into several, loaded on demand via dynamic `import()`. Orthogonal to route splitting but often paired with it.
+- **Critical rendering path**: the minimum HTML+CSS+JS the browser must process before it can paint the first meaningful pixel. Smaller = faster first paint.
+- **Progressive disclosure**: within one page, show important content first and reveal detail on user interaction.
+- **Above/below the fold**: above = visible without scrolling on first paint; below = requires scroll. "Above the fold" content must be in the initial payload; below-fold can lazy-load.
+- **Anticipatory prefetch**: speculatively fetching the next-likely-navigation target during idle time so it's cache-warm by click.
+- **Shared-asset caching**: multiple pages referencing the same asset URL → browser serves subsequent requests from cache. Requires stable URLs and long `max-age`.
+- **URL state**: encoding the current view in the URL path, hash, or query string so navigation, sharing, and back/forward work without JS-only state.
+
 ## Escape Hatch: Can't-Fix-Show-Loading-State
 
 Sometimes a page genuinely can't be made sub-2.5s — a 10MB PDF download, a slow upstream API, a large ML inference. When the work genuinely is slow, **show a moving indicator that proves the page isn't frozen**.

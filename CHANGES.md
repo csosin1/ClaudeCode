@@ -11,6 +11,19 @@ Builder appends a per-task entry here after each build. Format:
 - **Things for the reviewer:**
 ```
 
+## 2026-04-17 — infra: content decomposition hygiene in perceived-latency SKILL
+
+- **What was built:**
+  - `SKILLS/perceived-latency.md` — added new "Content Decomposition Hygiene" section (~76 lines) between "Standard Fix Playbook" and "Escape Hatch." Teaches the when/how of route-splitting vs keeping one page: the core tension, decision heuristics (over-budget, independently consulted, URL-as-identity, sequential-task, fragile-state), route-split vs subdomain-split (path-based wins by default — cert sprawl, CORS, shared cache arguments), shared-asset caching mechanics (stable names + long max-age), URL semantics (path > hash > query; hash as legitimate Stage 1), progressive disclosure vs route splitting (within-page vs across-page cousins), anticipatory prefetch, and a vocabulary glossary (SPA, MPA, route splitting, code splitting, critical rendering path, progressive disclosure, above/below the fold, anticipatory prefetch, shared-asset caching, URL state).
+- **Files modified:**
+  - `SKILLS/perceived-latency.md` (+76 lines, 267 → 343)
+- **Why:**
+  - The carvana-abs chat arrived at a good architectural fix (split 5.85 MB single-page SPA into path-based multi-page tree) but the existing SKILL only mentioned "tab-split" as one bullet in the fix playbook. A fresh agent hitting "page too big" would stop at lazy-loading and miss the route-split opportunity, and had no vocabulary to reason about SPA-vs-MPA, shared-asset caching, or URL-as-state. Section makes the decision framework teachable and the vocabulary explicit.
+- **Assumptions:**
+  - User picked Option A (extend the existing SKILL) over Option B (new standalone SKILL). No CLAUDE.md pointer change — existing pointer to `perceived-latency` covers the new section.
+- **Things for the reviewer:**
+  - Verify placement (after fix playbook, before escape hatch) matches the brief. Verify the glossary covers vocabulary a non-web-native agent would need. Check the carvana Apr-18 worked example reads correctly.
+
 ## 2026-04-17 — infra: perceived-latency QA skill
 
 - **What was built:**
