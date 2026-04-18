@@ -24,12 +24,18 @@ def _cid(prefix='m'):
 
 
 def _plotly_div(fig_dict, height=320):
-    """Emit a self-contained Plotly div."""
+    """Emit a self-contained Plotly div.
+
+    Uses the same config as the rest of the dashboard so every chart has
+    a visible reset-view button — accidentally panning/zooming a chart
+    on mobile is easy, and there has to be a one-tap recovery.
+    """
     cid = _cid('plt')
     js = json.dumps(fig_dict)
+    cfg = ('{"displayModeBar":true,"displaylogo":false,"responsive":true,'
+           '"modeBarButtonsToRemove":["lasso2d","select2d"]}')
     return (f'<div id="{cid}" style="height:{height}px;width:100%"></div>'
-            f'<script>Plotly.newPlot("{cid}", {js}.data, {js}.layout, '
-            f'{{responsive:true,displayModeBar:false}});</script>')
+            f'<script>Plotly.newPlot("{cid}", {js}.data, {js}.layout, {cfg});</script>')
 
 
 def _section(num, title, body):
@@ -416,7 +422,12 @@ def _build_transition_heatmap(cache):
 
 
 def _build_hazard_chart(cache):
-    """Monthly default hazard (events / exposed) by age bucket, per tier."""
+    """Monthly default hazard (events / exposed) by age bucket, per tier.
+
+    Rendered as two stacked panels — Prime (CarMax + Carvana) and
+    Carvana Non-Prime — because non-prime hazard runs ~4× higher and
+    on a single y-axis the prime curves get crushed flat against zero.
+    """
     hz = (cache or {}).get('hazard_by_age', {})
     if not hz:
         return _p('<em>No hazard data available.</em>')
@@ -427,28 +438,51 @@ def _build_hazard_chart(cache):
         issuer, tier, age_b = key.split('|')
         name = f'{issuer} {tier}'
         series.setdefault(name, {})[age_b] = (v['default_events'], v['months_exposed'])
-    traces = []
-    for name, rec in sorted(series.items()):
+
+    # Color mapping kept consistent across panels.
+    COLORS = {
+        'CarMax Prime':       '#1976D2',
+        'Carvana Prime':      '#388E3C',
+        'Carvana Non-Prime':  '#E64A19',
+    }
+
+    def _trace(name, rec):
         y = []
         for a in ages:
             d, e = rec.get(a, (0, 0))
-            y.append((d / e * 10000) if e > 0 else None)  # annualised? no, monthly bps
-        traces.append({
+            y.append((d / e * 10000) if e > 0 else None)  # monthly bps
+        return {
             'type': 'scatter', 'mode': 'lines+markers',
             'name': name, 'x': ages, 'y': y,
-            'line': {'width': 2.5},
-        })
-    fig = {'data': traces,
-           'layout': {'xaxis': {'title': 'Loan age (months)'},
-                      'yaxis': {'title': 'Monthly default hazard (bps)'},
-                      'margin': {'l': 60, 'r': 10, 't': 10, 'b': 50},
-                      'legend': {'orientation': 'h', 'y': -0.25},
-                      'hovermode': 'x unified'}}
-    return (_plotly_div(fig, height=320)
+            'line': {'width': 2.5, 'color': COLORS.get(name, '#666')},
+            'marker': {'size': 7, 'color': COLORS.get(name, '#666')},
+        }
+
+    prime_names = [n for n in ('CarMax Prime', 'Carvana Prime') if n in series]
+    np_names    = [n for n in ('Carvana Non-Prime',)             if n in series]
+
+    def _panel(title, names, height):
+        if not names:
+            return ''
+        traces = [_trace(n, series[n]) for n in names]
+        fig = {'data': traces,
+               'layout': {
+                   'title': {'text': title, 'font': {'size': 13}, 'x': 0.02},
+                   'xaxis': {'title': 'Loan age (months)'},
+                   'yaxis': {'title': 'Monthly default hazard (bps)', 'rangemode': 'tozero'},
+                   'margin': {'l': 60, 'r': 10, 't': 36, 'b': 50},
+                   'legend': {'orientation': 'h', 'y': -0.25},
+                   'hovermode': 'x unified'}}
+        return _plotly_div(fig, height=height)
+
+    return (_panel('Prime tiers', prime_names, 280)
+            + _panel('Carvana Non-Prime', np_names, 260)
             + _p('The hazard curve is a classic: near-zero at age 0 (no one has '
                  'defaulted yet), peaks around month 13-24 (borrowers who were going to '
                  'struggle have surfaced), then declines as bad-credit loans have '
-                 'already charged off and the remaining pool is self-selected to survive.'))
+                 'already charged off and the remaining pool is self-selected to survive. '
+                 'Non-Prime is on its own panel because its level runs several times '
+                 'higher than Prime and would otherwise crush the Prime curves flat.'))
 
 
 def _build_cure_chart(cache):
