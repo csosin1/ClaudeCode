@@ -1,0 +1,54 @@
+{
+  "timestamp": "2026-04-17T18:18:30.338933",
+  "db_stats": {
+    "filings": 1277,
+    "pool_performance": 620,
+    "monthly_summary": 620,
+    "loan_loss_summary": 42435,
+    "loans": 417074,
+    "pool_with_residual": 442,
+    "deals": {
+      "2020-P1": 60,
+      "2021-N1": 60,
+      "2021-N2": 58,
+      "2021-N3": 55,
+      "2021-N4": 52,
+      "2021-P1": 60,
+      "2021-P2": 57,
+      "2022-P1": 49,
+      "2022-P2": 47,
+      "2022-P3": 43,
+      "2024-P2": 22,
+      "2024-P3": 19,
+      "2024-P4": 16,
+      "2025-P2": 10,
+      "2025-P3": 7,
+      "2025-P4": 5
+    }
+  },
+  "preview": {
+    "exists": true,
+    "size_kb": 5526,
+    "modified": "2026-04-17T18:18:29.325594",
+    "has_dropdown": true,
+    "chart_count": 1049,
+    "deal_count": 71,
+    "has_residual": true,
+    "has_tables": 420
+  },
+  "live": {
+    "exists": true,
+    "size_kb": 5526,
+    "modified": "2026-04-17T18:11:36.300617",
+    "has_dropdown": true,
+    "chart_count": 1049,
+    "deal_count": 71,
+    "has_residual": true,
+    "has_tables": 420
+  },
+  "validation": {
+    "output": "==================================================\nDashboard Validation Report\n==================================================\n  INFO: File size: 5525 KB\n  INFO: Charts: 1049\n  INFO: Deals: 71 \u2014 __economics__, __model__, __prime__, __nonprime__, __carmax_prime__, __cross__, 2020-P1, 2021-N1, 2021-N2, 2021-N3, 2021-N4, 2021-P1, 2021-P2, 2022-P1, 2022-P2, 2022-P3, 2024-P2, 2024-P3, 2024-P4, 2025-P2, 2025-P3, 2025-P4, cm_2014-1, cm_2014-2, cm_2014-3, cm_2014-4, cm_2015-1, cm_2015-2, cm_2015-3, cm_2015-4, cm_2016-1, cm_2016-2, cm_2016-3, cm_2016-4, cm_2017-1, cm_2017-2, cm_2017-3, cm_2017-4, cm_2018-1, cm_2018-2, cm_2018-3, cm_2018-4, cm_2019-1, cm_2019-2, cm_2019-3, cm_2019-4, cm_2020-1, cm_2020-2, cm_2020-3, cm_2020-4, cm_2021-1, cm_2021-2, cm_2021-3, cm_2021-4, cm_2022-1, cm_2022-2, cm_2022-3, cm_2022-4, cm_2023-1, cm_2023-2, cm_2023-3, cm_2023-4, cm_2024-1, cm_2024-2, cm_2024-3, cm_2024-4, cm_2025-1, cm_2025-2, cm_2025-3, cm_2025-4, cm_2026-1\n  INFO: Deal dropdown: YES\n  INFO: Tab buttons: 520\n  INFO: Tables: 420\n  INFO: Waterfall residual: YES\n  INFO: Rate charts: Consumer Rate=120, Trust CoD=20 (of 69 deals)\n  INFO: Prime comparison: YES\n  INFO: Non-Prime comparison: YES\n  INFO: Mobile responsive: YES\n  WARN: Found 425 NaN values in chart data \u2014 may cause empty charts\n  WARN: Chart 1 y-values look like indices (0-1) \u2014 data may not be rendering\n  WARN: Chart 2 y-values look like indices (0-1) \u2014 data may not be rendering\n  WARN: Chart 3 y-values look like indices (0-1) \u2014 data may not be rendering\n  WARN: Chart 4 y-values look like indices (0-0) \u2014 data may not be rendering\n  WARN: 49 deal(s) missing Trust Cost of Debt chart\n\nPASSED with 6 warning(s)",
+    "passed": true
+  },
+  "reingest_version_done": "16"
+}

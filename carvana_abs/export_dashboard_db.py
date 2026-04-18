@@ -1,0 +1,115 @@
+#!/usr/bin/env python3
+"""Export dashboard-only tables to a small, fast database.
+
+The main carvana_abs.db is 1.7GB because of the loan_performance table (20M+ rows).
+The dashboard never reads loan_performance directly — it uses pre-computed summary tables.
+This script copies just the tables the dashboard needs into a ~50MB file.
+
+Usage: python carvana_abs/export_dashboard_db.py
+"""
+import sqlite3
+import os
+import sys
+import logging
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from carvana_abs.config import DB_PATH
+from carvana_abs.db.schema import migrate_dist_date_iso
+
+DASHBOARD_DB = os.path.join(os.path.dirname(DB_PATH), "dashboard.db")
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logger = logging.getLogger(__name__)
+
+# Tables the dashboard actually reads (with approximate sizes)
+TABLES_TO_EXPORT = [
+    "filings",              # ~1249 rows
+    "pool_performance",     # ~615 rows
+    "monthly_summary",      # ~1000 rows
+    "loan_loss_summary",    # ~50K rows
+    "loans",                # ~250K rows (for Loan Explorer only)
+    "notes",                # ~130 rows (static tranche attributes)
+    "model_results",        # ~1 row (JSON blob from default_model.py)
+]
+
+
+def main():
+    if not os.path.exists(DB_PATH):
+        logger.error(f"Source database not found: {DB_PATH}")
+        return
+
+    logger.info(f"Exporting dashboard tables from {DB_PATH} to {DASHBOARD_DB}")
+
+    # Remove old dashboard DB
+    if os.path.exists(DASHBOARD_DB):
+        os.remove(DASHBOARD_DB)
+
+    # 5-min busy_timeout so a momentarily-held writer (daily ingest cron,
+    # Markov mid-checkpoint, etc.) doesn't crash the export with
+    # `database is locked`. Mirrors the carmax-side fix (see comment there).
+    src = sqlite3.connect(DB_PATH, timeout=300)
+    dst = sqlite3.connect(DASHBOARD_DB, timeout=300)
+
+    src.execute("PRAGMA journal_mode=WAL")
+    src.execute("PRAGMA busy_timeout=300000")
+
+    # Ensure the source DB has the dist_date_iso column populated — so the
+    # CREATE-TABLE-from-sqlite_master snapshot copied to dst includes it and
+    # every exported row carries a chronological sort key (audit finding #5).
+    migrate_dist_date_iso(src)
+
+    for table in TABLES_TO_EXPORT:
+        try:
+            # Get table schema
+            schema_row = src.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (table,)
+            ).fetchone()
+            if not schema_row:
+                logger.warning(f"Table {table} not found, skipping")
+                continue
+
+            # Create table in destination
+            dst.execute(schema_row[0])
+
+            # Copy data in chunks — fetchall() on 250k-row `loans` loads the
+            # whole table into a Python list. Stream via cursor instead.
+            cur = src.execute(f"SELECT * FROM {table}")
+            first = cur.fetchmany(1)
+            if not first:
+                logger.info(f"  {table}: 0 rows")
+                continue
+            placeholders = ",".join(["?"] * len(first[0]))
+            insert_sql = f"INSERT INTO {table} VALUES ({placeholders})"
+            dst.executemany(insert_sql, first)
+            total = 1
+            while True:
+                chunk = cur.fetchmany(10000)
+                if not chunk:
+                    break
+                dst.executemany(insert_sql, chunk)
+                total += len(chunk)
+            logger.info(f"  {table}: {total:,} rows")
+        except Exception as e:
+            logger.error(f"  Error exporting {table}: {e}")
+
+    # Copy indexes
+    for row in src.execute("SELECT sql FROM sqlite_master WHERE type='index' AND sql IS NOT NULL"):
+        try:
+            dst.execute(row[0])
+        except Exception:
+            pass  # Index may reference table we didn't copy
+
+    # Optimize the new DB
+    dst.commit()
+    dst.execute("VACUUM")
+    dst.execute("PRAGMA journal_mode=WAL")
+    dst.close()
+    src.close()
+
+    size_mb = os.path.getsize(DASHBOARD_DB) / (1024 * 1024)
+    logger.info(f"Dashboard DB created: {DASHBOARD_DB} ({size_mb:.1f} MB)")
+    logger.info("Done!")
+
+
+if __name__ == "__main__":
+    main()

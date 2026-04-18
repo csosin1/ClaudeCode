@@ -1,0 +1,208 @@
+# .charts.yaml — declarative chart completeness expectations
+# Consumed by /opt/site-deploy/helpers/visual-lint.js :: assertChartCategoriesComplete
+# Wired into tests/abs-dashboard.spec.ts
+#
+# Motivated by the 2026-04-17 live-site "Hazard by LTV band" bug: chart rendered
+# with only one of four LTV bands populated because an upstream unit-scaling bug
+# collapsed the others to empty. Declaring expected_categories here would have
+# failed the QA gate pre-promote.
+#
+# Stable chart IDs are emitted by methodology_tab.py::_plotly_div as
+# `data-chart-id="..."`. Selector shape: `[data-chart-id="<id>"]`.
+#
+# All charts below are on the Methodology tab (Carvana section). Per-deal
+# charts (pool balance, delinquency, charge-off, OC/reserve time series)
+# are listed under `dynamic:` because their x-axis dates shift with each
+# monthly servicer-cert release and can't be declared statically.
+
+charts:
+
+  # ---- Section 4: transition heatmaps + hazard panels ----
+  "4a_heatmap_700-739_80-99pct_13-24":
+    selector: '[data-chart-id="4a_heatmap_700-739_80-99pct_13-24"]'
+    description: "Transition heatmap — Prime-grade buyer rep cell (FICO 700-739, LTV 80-99%, age 13-24mo)"
+    expected_categories: ["Current", "1pmt", "2pmt", "3pmt", "4pmt", "5+pmt", "Default", "Payoff"]
+    expected_series_min: 1
+    data_points_per_category_min: 1
+    require_title: true
+    require_x_axis_label: true
+    require_y_axis_label: true
+
+  "4a_heatmap_620-659_100-119pct_13-24":
+    selector: '[data-chart-id="4a_heatmap_620-659_100-119pct_13-24"]'
+    description: "Transition heatmap — Near-prime underwater rep cell (FICO 620-659, LTV 100-119%, age 13-24mo)"
+    expected_categories: ["Current", "1pmt", "2pmt", "3pmt", "4pmt", "5+pmt", "Default", "Payoff"]
+    expected_series_min: 1
+    data_points_per_category_min: 1
+    require_title: true
+    require_x_axis_label: true
+    require_y_axis_label: true
+
+  "4a_heatmap_580-619_120pluspct_13-24":
+    selector: '[data-chart-id="4a_heatmap_580-619_120pluspct_13-24"]'
+    description: "Transition heatmap — Subprime deep underwater rep cell (FICO 580-619, LTV 120%+, age 13-24mo)"
+    expected_categories: ["Current", "1pmt", "2pmt", "3pmt", "4pmt", "5+pmt", "Default", "Payoff"]
+    expected_series_min: 1
+    data_points_per_category_min: 1
+    require_title: true
+    require_x_axis_label: true
+    require_y_axis_label: true
+
+  "4a_heatmap_740plus_lt80pct_13-24":
+    selector: '[data-chart-id="4a_heatmap_740plus_lt80pct_13-24"]'
+    description: "Transition heatmap — Super-prime equity-buyer rep cell (FICO 740+, LTV <80%, age 13-24mo)"
+    expected_categories: ["Current", "1pmt", "2pmt", "3pmt", "4pmt", "5+pmt", "Default", "Payoff"]
+    expected_series_min: 1
+    data_points_per_category_min: 1
+    require_title: true
+    require_x_axis_label: true
+    require_y_axis_label: true
+
+  "4b_hazard_by_age_prime":
+    selector: '[data-chart-id="4b_hazard_by_age_prime"]'
+    description: "Default hazard by loan age — Prime tiers (CarMax + Carvana)"
+    expected_categories: ["0-6", "7-12", "13-24", "25-36", "37+"]
+    expected_series_min: 2          # CarMax Prime + Carvana Prime
+    data_points_per_category_min: 1
+    require_title: true
+    require_x_axis_label: true
+    require_y_axis_label: true
+
+  "4b_hazard_by_age_nonprime":
+    selector: '[data-chart-id="4b_hazard_by_age_nonprime"]'
+    description: "Default hazard by loan age — Carvana Non-Prime panel"
+    expected_categories: ["0-6", "7-12", "13-24", "25-36", "37+"]
+    expected_series_min: 1
+    data_points_per_category_min: 1
+    require_title: true
+    require_x_axis_label: true
+    require_y_axis_label: true
+
+  "4c_cure_by_state":
+    selector: '[data-chart-id="4c_cure_by_state"]'
+    description: "One-month cure rate by delinquency state, split by issuer+tier"
+    expected_categories: ["1pmt", "2pmt", "3pmt", "4pmt", "5+pmt"]
+    expected_series_min: 2          # at least two of Carvana Prime / Carvana NP / CarMax Prime
+    data_points_per_category_min: 1
+    require_title: false            # chart relies on header <h4> 4c.; no plotly title
+    require_x_axis_label: true
+    require_y_axis_label: true
+
+  # ---- Section 5: predictor association charts ----
+  "5a_hazard_by_fico":
+    selector: '[data-chart-id="5a_hazard_by_fico"]'
+    description: "Monthly default hazard (bps) by FICO band, by issuer+tier"
+    expected_categories: ["<580", "580-619", "620-659", "660-699", "700-739", "740+"]
+    expected_series_min: 2
+    data_points_per_category_min: 1
+    require_title: false
+    require_x_axis_label: true
+    require_y_axis_label: true
+
+  # The marquee chart — this is the one that broke on 2026-04-17.
+  "5b_hazard_by_ltv":
+    selector: '[data-chart-id="5b_hazard_by_ltv"]'
+    description: "Monthly default hazard (bps) by LTV band, by issuer+tier (marquee regression-catcher)"
+    expected_categories: ["<80%", "80-99%", "100-119%", "120%+"]
+    expected_series_min: 2
+    data_points_per_category_min: 1
+    require_title: false
+    require_x_axis_label: true
+    require_y_axis_label: true
+
+  "5c_hazard_by_term":
+    selector: '[data-chart-id="5c_hazard_by_term"]'
+    description: "Monthly default hazard (bps) by original term, by issuer+tier"
+    expected_categories: ["<=48mo", "49-60mo", "61-72mo", "73+mo"]
+    expected_series_min: 2
+    data_points_per_category_min: 1
+    require_title: false
+    require_x_axis_label: true
+    require_y_axis_label: true
+
+  "5d_hazard_by_age":
+    selector: '[data-chart-id="5d_hazard_by_age"]'
+    description: "Monthly default hazard (bps) by loan age bucket, with issuer+tier split"
+    expected_categories: ["0-6", "7-12", "13-24", "25-36", "37+"]
+    expected_series_min: 2
+    data_points_per_category_min: 1
+    require_title: false
+    require_x_axis_label: true
+    require_y_axis_label: true
+
+  # ---- Section 7d: vintage stability scatter ----
+  "7d_issuer_coef_by_vintage":
+    selector: '[data-chart-id="7d_issuer_coef_by_vintage"]'
+    description: "Issuer-CarMax log-odds coefficient by vintage year (with 95% CI error bars)"
+    # Vintages are known: fit on 2017-2025 span per spec comments in methodology_tab.py
+    expected_categories: []         # numeric axis, category check skipped
+    expected_series_min: 1
+    data_points_per_category_min: 1
+    require_title: false
+    require_x_axis_label: true
+    require_y_axis_label: true
+
+  # ---- Section 9: cost of funds (dates-on-x, series-on-legend) ----
+  "9a_note_wac_vs_2y_tsy":
+    selector: '[data-chart-id="9a_note_wac_vs_2y_tsy"]'
+    description: "Weighted-avg note coupon & 2Y Treasury yield over time, by issuer/tier"
+    expected_categories: []         # x-axis is deal-cutoff dates; varies monthly
+    expected_series_min: 2          # at least Carvana + CarMax + Treasury overlay
+    data_points_per_category_min: 1
+    require_title: false
+    require_x_axis_label: true
+    require_y_axis_label: true
+
+  "9b_credit_spread":
+    selector: '[data-chart-id="9b_credit_spread"]'
+    description: "Credit spread (note WAC minus 2Y Treasury) over time, by issuer/tier"
+    expected_categories: []
+    expected_series_min: 2
+    data_points_per_category_min: 1
+    require_title: false
+    require_x_axis_label: true
+    require_y_axis_label: true
+
+
+# -----------------------------------------------------------------------------
+# Charts intentionally NOT declared (would be too fragile as static declarations)
+# -----------------------------------------------------------------------------
+dynamic:
+  "per_deal_pool_balance":
+    reason: >-
+      Rendered once per deal (~70+ deals) in the per-deal tab panels. X-axis is
+      the monthly servicer-cert dates — the category set grows by one every
+      month when a new 10-D arrives. Declaring specific dates would create
+      monthly churn with no corresponding QA value.
+  "per_deal_delinquency_rate":
+    reason: >-
+      Same reason as pool_balance — per-deal time series of 30/60/90+ DQ
+      percentages with dates on x-axis that shift each month.
+  "per_deal_charge_off_curve":
+    reason: >-
+      Per-deal cumulative net loss over time. Values mutate every month;
+      declaring specific categories (dates) is noise.
+  "per_deal_oc_and_reserve":
+    reason: >-
+      Per-deal overcollateralization & reserve-account time series. Series
+      names stable, but x-axis dates shift monthly.
+  "per_deal_projected_loss":
+    reason: >-
+      Markov-model lifetime-loss projection fan chart. Number of projection
+      months varies by deal age. The inner assertNoEmptyCharts rule still
+      ensures these render with data; declaring specific categories would
+      re-implement the model's projection window in YAML.
+  "landing_page_cal_factor_over_time":
+    reason: >-
+      Rolling 12-month window on the landing page — category set slides by
+      one month every ingest. Captured by the generic assertNoEmptyCharts /
+      assertChartHasTitle instead.
+  "landing_page_monthly_loss_pace":
+    reason: >-
+      Same rolling-window reason as cal_factor_over_time.
+  "sec7c_confusion_matrices_and_roc":
+    reason: >-
+      Confusion-matrix + ROC tables use raw HTML rather than Plotly, so they
+      don't show up under .js-plotly-plot at all. Covered by the
+      assertNoContentPlaceholders / assertNoRawHtmlEntities checks on the
+      surrounding text.

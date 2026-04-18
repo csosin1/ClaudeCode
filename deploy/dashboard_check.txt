@@ -1,0 +1,10 @@
+Size: 1123932
+
+2020-P1 tabs: ['Pool_Summary', 'Delinquencies', 'Losses', 'Cash_Waterfall', 'Recovery', 'Notes_and_OC']
+'Documents' in HTML: False
+'Servicer Certificates' in HTML: False
+'Prospectus' in HTML: False
+Local doc links: 0
+SEC/EDGAR link count: 1
+
+No Documents section found for 2020-P1

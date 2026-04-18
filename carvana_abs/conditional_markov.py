@@ -1,0 +1,798 @@
+#!/usr/bin/env python3
+"""Conditional-Markov loss forecast for Carvana ABS pools.
+
+Replaces the time-homogeneous Markov absorption with a forward
+simulation driven by:
+  • State-transition probabilities binned by (tier, current_state,
+    age_bucket, FICO_bucket, LTV_bucket, modified_flag)
+  • Empirical balance trajectory (current/original) by (tier,
+    term_bucket, age) — captures real-world amort, partial prepays,
+    extensions
+  • LGD lookup by (tier, age_bucket, FICO_bucket, LTV_bucket)
+
+Per loan, simulate state-vector forward month-by-month to original
+term, accumulating expected loss = mass-into-Default × balance × LGD.
+Sum across loans per deal.
+
+Outputs are stored in dashboard.db's model_results table under key
+'conditional_markov' so generate_dashboard can render the build-up
+table without re-running the simulation.
+"""
+from __future__ import annotations
+
+import json
+import logging
+import os
+import sqlite3
+import sys
+from collections import defaultdict
+from datetime import datetime
+
+import numpy as np
+
+logging.basicConfig(level=logging.INFO,
+                    format="%(asctime)s [%(levelname)s] %(message)s")
+logger = logging.getLogger(__name__)
+
+# ── Configuration ──────────────────────────────────────────────────────
+PRIME_DEALS = ["2020-P1", "2021-P1", "2021-P2", "2022-P1", "2022-P2",
+               "2022-P3", "2024-P2", "2024-P3", "2024-P4",
+               "2025-P2", "2025-P3", "2025-P4"]
+NONPRIME_DEALS = ["2021-N1", "2021-N2", "2021-N3", "2021-N4"]
+TIER_OF_DEAL = {**{d: "Prime" for d in PRIME_DEALS},
+                **{d: "NonPrime" for d in NONPRIME_DEALS}}
+
+STATES = [0, 1, 2, 3, 4, 5]   # current_delinquency_status, capped at 5
+N_STATES = 6
+ABSORBING = ["Default", "Payoff"]
+
+AGE_BUCKETS = [(0, 6), (6, 12), (12, 24), (24, 36), (36, 48), (48, 60), (60, 999)]
+FICO_BUCKETS = [(0, 620), (620, 660), (660, 700), (700, 740), (740, 999)]
+LTV_BUCKETS  = [(0, 0.90), (0.90, 1.00), (1.00, 1.10), (1.10, 1.20), (1.20, 99)]
+TERM_BUCKETS = [36, 48, 60, 72, 84]
+
+MIN_CELL_OBS = 30  # below this, fall back to coarser stratum
+
+CARVANA_DB = "/opt/abs-dashboard/carvana_abs/db/carvana_abs.db"
+DASHBOARD_DB = "/opt/abs-dashboard/carvana_abs/db/dashboard.db"
+
+# Chronological sort key for "MM-DD-YYYY" date strings
+SORT_KEY = ("substr(reporting_period_end,7,4)||"
+            "substr(reporting_period_end,1,2)||"
+            "substr(reporting_period_end,4,2)")
+
+
+# ── Utilities ──────────────────────────────────────────────────────────
+
+def _bucket(value, bins):
+    for i, (lo, hi) in enumerate(bins):
+        if lo <= value < hi:
+            return i
+    return len(bins) - 1
+
+
+def _term_bucket(term):
+    if term is None:
+        return 60  # default bucket
+    for t in TERM_BUCKETS:
+        if term <= t:
+            return t
+    return TERM_BUCKETS[-1]
+
+
+def _state(cds):
+    if cds is None:
+        return None
+    try:
+        return min(int(cds), 5)
+    except (ValueError, TypeError):
+        return None
+
+
+def _modified(mod_indicator):
+    if mod_indicator is None:
+        return 0
+    s = str(mod_indicator).strip().lower()
+    return 1 if s in ("1", "y", "yes", "true", "t") else 0
+
+
+def _parse_date_mdy(s):
+    """Origination dates are MM/YYYY in this dataset (no day); period dates
+    can be MM-DD-YYYY or YYYY-MM-DD. Try a few formats."""
+    if not s:
+        return None
+    s = str(s).strip()
+    for fmt in ("%m/%Y", "%m-%Y", "%m/%d/%Y", "%m-%d-%Y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(s[:10], fmt)
+        except (ValueError, TypeError):
+            continue
+    return None
+
+
+def _orig_quarter(orig_dt):
+    """Bucket origination date to YYYYQX (e.g. '2021Q3'). Pre-2018
+    collapsed into a single 'pre2018' bucket (very few of those)."""
+    if orig_dt is None:
+        return "unknown"
+    y = orig_dt.year
+    if y < 2018:
+        return "pre2018"
+    q = (orig_dt.month - 1) // 3 + 1
+    return f"{y}Q{q}"
+
+
+# ── Loan covariates loader ────────────────────────────────────────────
+
+def load_loan_covariates(conn, deals):
+    """Returns dict[(deal, asset_number)] = (tier, fico, ltv, term, orig_amount, orig_dt)."""
+    qm = ",".join(["?"] * len(deals))
+    cur = conn.execute(f"""
+        SELECT deal, asset_number, obligor_credit_score, original_ltv,
+               original_loan_term, original_loan_amount, origination_date
+        FROM loans WHERE deal IN ({qm})""", deals)
+    out = {}
+    for deal, asset, fico, ltv, term, amount, orig_date in cur:
+        if not asset:
+            continue
+        tier = TIER_OF_DEAL.get(deal)
+        if tier is None:
+            continue
+        orig_dt = _parse_date_mdy(orig_date)
+        out[(deal, asset)] = {
+            "tier": tier,
+            "fico": float(fico) if fico is not None else None,
+            "ltv": float(ltv) if ltv is not None else None,
+            "term": int(term) if term is not None else None,
+            "term_bucket": _term_bucket(int(term)) if term is not None else 60,
+            "orig_amount": float(amount) if amount is not None else None,
+            "orig_dt": orig_dt,
+            "orig_q": _orig_quarter(orig_dt),
+        }
+    return out
+
+
+# ── Pass 1: build transitions, paydown curves, LGD samples ────────────
+
+def build_aggregates(conn, deals, covariates):
+    """Single streaming pass over loan_performance to build all empirical
+    aggregates. Memory-efficient: only state per (deal, asset) is held.
+    """
+    # Per-loan terminal: did this loan end in default? (charged_off_amount > 0
+    # in any row, equivalent to membership in loan_loss_summary > 0 verified
+    # earlier).
+    qm = ",".join(["?"] * len(deals))
+    defaulted = set()
+    for deal, asset in conn.execute(
+            f"SELECT deal, asset_number FROM loan_loss_summary "
+            f"WHERE total_chargeoff > 0 AND deal IN ({qm})", deals):
+        defaulted.add((deal, asset))
+    paidoff = set()
+    for deal, asset in conn.execute(
+            f"SELECT DISTINCT deal, asset_number FROM loan_performance "
+            f"WHERE deal IN ({qm}) AND zero_balance_code IS NOT NULL", deals):
+        if (deal, asset) not in defaulted:
+            paidoff.add((deal, asset))
+    logger.info(f"  defaulted: {len(defaulted):,}  paid-off: {len(paidoff):,}")
+
+    # Deal-weighted training: each pool votes equally in cell probability
+    # estimation regardless of loan count.  Without this, 2022 vintages
+    # (big pools) would dominate over 2020 vintages (small pools) even
+    # though each pool is equally informative about Carvana's underwriting.
+    # Weight per transition = 1 / n_loans_in_that_deal.
+    loans_per_deal = {}
+    for d in deals:
+        n = conn.execute("SELECT COUNT(DISTINCT asset_number) FROM loan_performance WHERE deal=?", (d,)).fetchone()[0]
+        loans_per_deal[d] = n if n else 1
+    logger.info(f"  loans per deal: {loans_per_deal}")
+
+    # Aggregates.  Both unweighted raw counts (for MIN_CELL_OBS fallback
+    # gate) and deal-weighted sums (for cell probability computation).
+    trans = defaultdict(lambda: defaultdict(float))      # weighted
+    trans_n = defaultdict(lambda: defaultdict(int))      # raw counts
+    paydown_perf = defaultdict(lambda: [0.0, 0])
+    paydown_mod  = defaultdict(lambda: [0.0, 0])
+    # LGD samples: [weighted_sum_co, weighted_sum_rec, raw_count]
+    lgd_samples = defaultdict(lambda: [0.0, 0.0, 0])
+
+    # Also record current snapshot per loan = latest state + balance + age,
+    # for the forecast pass.
+    latest_state = {}
+
+    cur = conn.execute(f"""
+        SELECT deal, asset_number, current_delinquency_status,
+               zero_balance_code, charged_off_amount, recoveries,
+               ending_balance, modification_indicator,
+               substr(reporting_period_end,7,4)||'-'||
+               substr(reporting_period_end,1,2)||'-'||
+               substr(reporting_period_end,4,2) AS iso_dt
+        FROM loan_performance WHERE deal IN ({qm})
+        ORDER BY deal, asset_number, {SORT_KEY}""", deals)
+
+    prev_key = None
+    prev_state = None
+    rows = 0
+    for deal, asset, cds, zbc, coa, rec, end_bal, mod_ind, iso_dt in cur:
+        rows += 1
+        key = (deal, asset)
+        cov = covariates.get(key)
+        if not cov or cov.get("orig_dt") is None:
+            continue
+        period_dt = None
+        if iso_dt:
+            try:
+                period_dt = datetime.strptime(iso_dt, "%Y-%m-%d")
+            except (ValueError, TypeError):
+                pass
+        if period_dt is None:
+            continue
+        age_months = max(0, int((period_dt - cov["orig_dt"]).days / 30.4))
+        age_b = _bucket(age_months, AGE_BUCKETS)
+        fico_b = _bucket(cov["fico"] or 0, FICO_BUCKETS)
+        ltv_b = _bucket(cov["ltv"] or 0, LTV_BUCKETS)
+        is_modified = _modified(mod_ind)
+
+        # Deal weight for this observation
+        w = 1.0 / loans_per_deal.get(deal, 1)
+
+        # Loan crossover: flush previous loan terminal
+        if key != prev_key:
+            if prev_key is not None and prev_state is not None:
+                t = "Default" if prev_key in defaulted else (
+                    "Payoff" if prev_key in paidoff else None)
+                if t:
+                    pcov = covariates.get(prev_key)
+                    if pcov:
+                        pcell = (pcov["tier"], prev_state, prev_age_b,
+                                 prev_fico_b, prev_ltv_b, prev_mod, pcov["orig_q"])
+                        prev_w = 1.0 / loans_per_deal.get(prev_key[0], 1)
+                        trans[pcell][t] += prev_w
+                        trans_n[pcell][t] += 1
+            prev_key = key
+            prev_state = None
+
+        # Skip rows that mark a terminal state for transition-counting purposes
+        is_terminal_row = (zbc is not None and str(zbc) in ("1", "2", "3", "4")) or \
+                          (coa is not None and coa > 0)
+
+        if is_terminal_row:
+            # If charged-off this row: record LGD sample (chargeoff value is in coa)
+            if (key in defaulted) and (coa is not None and coa > 0):
+                lgd_key = (cov["tier"], age_b, fico_b, ltv_b)
+                lgd_samples[lgd_key][0] += float(coa) * w
+                lgd_samples[lgd_key][1] += float(rec or 0) * w
+                lgd_samples[lgd_key][2] += 1
+            # don't advance state from this row
+            continue
+
+        cur_state = _state(cds)
+        if cur_state is None:
+            continue
+
+        # Paydown sample (only state 0, performing)
+        if cov["orig_amount"] and end_bal is not None and float(end_bal) > 0:
+            ratio = float(end_bal) / cov["orig_amount"]
+            if 0 < ratio < 1.5:  # filter wild outliers
+                pkey = (cov["tier"], cov["term_bucket"], age_months)
+                if cur_state == 0 and not is_modified:
+                    paydown_perf[pkey][0] += ratio
+                    paydown_perf[pkey][1] += 1
+                if is_modified:
+                    paydown_mod[pkey][0] += ratio
+                    paydown_mod[pkey][1] += 1
+
+        # Transition from prev_state to cur_state, attributed to prev cell
+        if prev_state is not None:
+            pcov = covariates.get(prev_key) or cov
+            pcell = (pcov["tier"], prev_state, prev_age_b, prev_fico_b,
+                     prev_ltv_b, prev_mod, pcov["orig_q"])
+            prev_w = 1.0 / loans_per_deal.get(prev_key[0], 1)
+            trans[pcell][cur_state] += prev_w
+            trans_n[pcell][cur_state] += 1
+
+        # Save last snapshot (used for the per-loan forecast pass).
+        # Keeping for ALL loans (active + terminated) — terminated loans
+        # contribute their lookback to the calibration overlay so we can
+        # compute model-predicted-to-date over the full original pool.
+        latest_state[key] = {
+            "state": cur_state,
+            "balance": float(end_bal) if end_bal is not None else 0.0,
+            "age_months": age_months,
+            "modified": is_modified,
+            "tier": cov["tier"],
+            "fico_b": fico_b,
+            "ltv_b": ltv_b,
+            "term_bucket": cov["term_bucket"],
+            "orig_amount": cov["orig_amount"],
+            "term": cov["term"],
+            "orig_q": cov["orig_q"],
+            "deal": deal,
+        }
+        prev_state = cur_state
+        prev_age_b = age_b
+        prev_fico_b = fico_b
+        prev_ltv_b = ltv_b
+        prev_mod = is_modified
+
+    # Final loan flush
+    if prev_key is not None and prev_state is not None:
+        t = "Default" if prev_key in defaulted else (
+            "Payoff" if prev_key in paidoff else None)
+        if t:
+            pcov = covariates.get(prev_key)
+            if pcov:
+                pcell = (pcov["tier"], prev_state, prev_age_b, prev_fico_b,
+                         prev_ltv_b, prev_mod, pcov["orig_q"])
+                prev_w = 1.0 / loans_per_deal.get(prev_key[0], 1)
+                trans[pcell][t] += prev_w
+                trans_n[pcell][t] += 1
+
+    # Tag each loan with its terminal status (used downstream).
+    for key, snap in latest_state.items():
+        if key in defaulted: snap["status"] = "defaulted"
+        elif key in paidoff: snap["status"] = "paidoff"
+        else: snap["status"] = "active"
+
+    n_active = sum(1 for s in latest_state.values() if s["status"] == "active")
+    n_def = sum(1 for s in latest_state.values() if s["status"] == "defaulted")
+    n_paid = sum(1 for s in latest_state.values() if s["status"] == "paidoff")
+    logger.info(f"  rows scanned: {rows:,}")
+    logger.info(f"  transition cells: {len(trans):,}  paydown cells (perf): "
+                f"{len(paydown_perf):,}  LGD cells: {len(lgd_samples):,}")
+    logger.info(f"  loans tracked: {len(latest_state):,} "
+                f"(active={n_active:,} defaulted={n_def:,} paidoff={n_paid:,})")
+    return trans, trans_n, paydown_perf, paydown_mod, lgd_samples, latest_state
+
+
+# ── Cell-level transition matrix with smoothing fallback ──────────────
+
+TRANS_N = None   # raw (unweighted) counts, set in run() — gates MIN_CELL_OBS
+
+
+def cell_transition_matrix(trans, tier, state, age_b, fico_b, ltv_b, mod, orig_q="any"):
+    """Try fully-stratified cell. Fall back to coarser strata if too sparse.
+
+    Baseline is vintage-blind — orig_q always collapsed to "any".  Cell
+    probabilities come from deal-weighted transition sums (`trans`); the
+    MIN_CELL_OBS sparsity gate uses raw counts (`TRANS_N`, module-global).
+    """
+    orig_q = "any"  # force vintage collapse at the cell lookup
+    def _make(cell):
+        d = trans.get(cell)
+        if not d:
+            return None, 0
+        # Gate on RAW observation count, not weighted sum
+        raw_n = sum((TRANS_N or {}).get(cell, {}).values()) if TRANS_N else sum(d.values())
+        if raw_n < MIN_CELL_OBS:
+            return None, raw_n
+        total = sum(d.values())
+        if total <= 0:
+            return None, raw_n
+        row = np.zeros(N_STATES + 2)  # 6 states + Default + Payoff
+        for k, v in d.items():
+            if isinstance(k, int):
+                row[k] = v
+            elif k == "Default":
+                row[N_STATES] = v
+            elif k == "Payoff":
+                row[N_STATES + 1] = v
+        return row / total, raw_n
+
+    # Order: try specific (with vintage), fall through credit dims while
+    # keeping age + vintage. Then drop vintage WHILE KEEPING AGE — never
+    # collapse age before vintage, otherwise newer vintages with only
+    # young-loan observations would get used to forecast late-life
+    # transitions where their data is empty (the bug that gave 2025-P3
+    # a 1.4% lifetime forecast).
+    ladder = [
+        (tier, state, age_b, fico_b, ltv_b, mod, orig_q),
+        (tier, state, age_b, fico_b, ltv_b, 0, orig_q),     # drop modified
+        (tier, state, age_b, fico_b, "any", mod, orig_q),   # drop LTV
+        (tier, state, age_b, "any", "any", mod, orig_q),    # drop FICO + LTV
+        (tier, state, age_b, "any", "any", 0, orig_q),
+        (tier, state, age_b, fico_b, ltv_b, mod, "any"),    # drop vintage, keep age+credit
+        (tier, state, age_b, fico_b, "any", mod, "any"),
+        (tier, state, age_b, "any", "any", mod, "any"),
+        (tier, state, age_b, "any", "any", 0, "any"),       # population avg at this age
+        (tier, state, "any", "any", "any", 0, "any"),       # tier+state only (last resort)
+    ]
+    return _resolve_ladder(trans, ladder, _make)
+
+
+_AGG_CACHE = {}
+
+
+def _resolve_ladder(trans, ladder, _make):
+    """Walk fallback ladder. For "any" wildcards, sum across that dimension."""
+    for cell in ladder:
+        if "any" not in cell:
+            row, n = _make(cell)
+            if row is not None:
+                return row, n
+        else:
+            if cell in _AGG_CACHE:
+                row, n = _AGG_CACHE[cell]
+                if row is not None and n >= MIN_CELL_OBS:
+                    return row, n
+                continue
+            agg_w = defaultdict(float)   # deal-weighted sums (for probs)
+            agg_n = defaultdict(int)     # raw counts (for MIN_CELL_OBS)
+            tier, state, age_b, fico_b, ltv_b, mod, orig_q = cell
+            for k, d in trans.items():
+                kt, ks, kab, kfb, klb, km, kq = k
+                if kt != tier or ks != state: continue
+                if age_b != "any" and kab != age_b: continue
+                if fico_b != "any" and kfb != fico_b: continue
+                if ltv_b != "any" and klb != ltv_b: continue
+                if mod != "any" and km != mod: continue
+                if orig_q != "any" and kq != orig_q: continue
+                for outk, v in d.items():
+                    agg_w[outk] += v
+                if TRANS_N:
+                    dn = TRANS_N.get(k, {})
+                    for outk, v in dn.items():
+                        agg_n[outk] += v
+            raw_total = sum(agg_n.values()) if TRANS_N else sum(int(v) for v in agg_w.values())
+            w_total = sum(agg_w.values())
+            if raw_total >= MIN_CELL_OBS and w_total > 0:
+                row = np.zeros(N_STATES + 2)
+                for k, v in agg_w.items():
+                    if isinstance(k, int): row[k] = v
+                    elif k == "Default": row[N_STATES] = v
+                    elif k == "Payoff": row[N_STATES + 1] = v
+                row = row / w_total
+                _AGG_CACHE[cell] = (row, raw_total)
+                return row, raw_total
+            _AGG_CACHE[cell] = (None, raw_total)
+    return None, 0
+
+
+# ── Paydown curve & LGD lookup ────────────────────────────────────────
+
+def build_paydown_curves(paydown_perf, paydown_mod):
+    """Returns (perf_curve, mod_curve) where curve[(tier, term_bucket)] is a
+    sorted list of (age, ratio) tuples. Smooth missing ages by linear
+    interpolation between observed points."""
+    def _curve(samples):
+        out = defaultdict(list)
+        for (tier, tb, age), (s, n) in samples.items():
+            if n < 5: continue  # need a few samples to trust the average
+            out[(tier, tb)].append((age, s / n))
+        # Sort by age
+        for k in out: out[k].sort()
+        return dict(out)
+    return _curve(paydown_perf), _curve(paydown_mod)
+
+
+def lookup_paydown(curve, tier, term_bucket, age):
+    """Linear interpolation in the paydown curve at (tier, term_bucket, age)."""
+    pts = curve.get((tier, term_bucket))
+    if not pts:
+        # Fallback: any term bucket for this tier
+        for tb in TERM_BUCKETS:
+            if (tier, tb) in curve:
+                pts = curve[(tier, tb)]
+                break
+    if not pts:
+        return 1.0  # no data → no amort (overstates)
+    # Find bracketing points
+    if age <= pts[0][0]: return pts[0][1]
+    if age >= pts[-1][0]: return pts[-1][1]
+    for i in range(len(pts) - 1):
+        a1, r1 = pts[i]
+        a2, r2 = pts[i + 1]
+        if a1 <= age <= a2:
+            if a2 == a1: return r1
+            return r1 + (r2 - r1) * (age - a1) / (a2 - a1)
+    return pts[-1][1]
+
+
+def build_lgd_lookup(lgd_samples):
+    """Returns lgd[(tier, age_b, fico_b, ltv_b)] = mean LGD with fallbacks."""
+    out = {}
+    for k, (sco, srec, n) in lgd_samples.items():
+        if n < 5 or sco <= 0: continue
+        out[k] = max(0.0, min(1.0, 1.0 - srec / sco))
+    return out
+
+
+def lookup_lgd(lgd, tier, age_b, fico_b, ltv_b):
+    """Try most-specific cell, then coarser fallbacks."""
+    for k in [
+        (tier, age_b, fico_b, ltv_b),
+        (tier, age_b, fico_b, "any"),
+        (tier, age_b, "any", "any"),
+        (tier, "any", "any", "any"),
+    ]:
+        if "any" not in k:
+            v = lgd.get(k)
+            if v is not None: return v
+        else:
+            # Aggregate across wildcards
+            if k in _LGD_AGG_CACHE: return _LGD_AGG_CACHE[k]
+            tier_, age_b_, fico_b_, ltv_b_ = k
+            sco = srec = n = 0
+            for kk, vv in lgd.items():
+                kt, ka, kf, kl = kk
+                if kt != tier_: continue
+                if age_b_ != "any" and ka != age_b_: continue
+                if fico_b_ != "any" and kf != fico_b_: continue
+                if ltv_b_ != "any" and kl != ltv_b_: continue
+                # vv is the LGD itself; we don't have raw counts here, so just average
+                n += 1; sco += vv
+            if n > 0:
+                _LGD_AGG_CACHE[k] = sco / n
+                return _LGD_AGG_CACHE[k]
+    return 0.55  # last-resort default
+
+
+_LGD_AGG_CACHE = {}
+
+
+# ── Per-loan forward simulation ───────────────────────────────────────
+
+def forecast_loan(loan, trans, perf_curve, mod_curve, lgd_lookup,
+                  start_state=None, start_age=None, end_age=None):
+    """Walk forward month-by-month from start_age (default = loan's current
+    age) to end_age (default = original_term).
+
+    Used in two modes:
+      • Forward forecast: defaults — start at current age & state, run to term
+      • Lookback for calibration: start_state=0, start_age=0, end_age=current
+        age — gives "what the model would have predicted for this loan from
+        origination through today."
+    """
+    tier = loan["tier"]
+    state = loan["state"] if start_state is None else start_state
+    age = loan["age_months"] if start_age is None else start_age
+    term = loan["term"] or 60
+    final_age = (term if end_age is None else end_age)
+    months_remaining = max(0, final_age - age)
+    fico_b = loan["fico_b"]
+    ltv_b = loan["ltv_b"]
+    mod = loan["modified"]
+    orig_q = loan.get("orig_q", "unknown")
+    orig = loan["orig_amount"] or loan["balance"]
+    tb = loan["term_bucket"]
+    curve = mod_curve if mod else perf_curve
+
+    # State vector (transient + 2 absorbing)
+    sv = np.zeros(N_STATES + 2)
+    sv[state] = 1.0
+
+    expected_loss = 0.0
+    variance = 0.0
+    cur_age = age
+    for step in range(months_remaining):
+        cur_age += 1
+        age_b = _bucket(cur_age, AGE_BUCKETS)
+        Q = np.zeros((N_STATES + 2, N_STATES + 2))
+        Q[N_STATES, N_STATES] = 1.0
+        Q[N_STATES + 1, N_STATES + 1] = 1.0
+        for s in STATES:
+            row, n = cell_transition_matrix(trans, tier, s, age_b, fico_b, ltv_b, mod, orig_q)
+            if row is None:
+                Q[s, s] = 1.0
+            else:
+                Q[s, :] = row
+        new_sv = sv @ Q
+        # Newly absorbed mass into Default this step
+        new_def_mass = new_sv[N_STATES] - sv[N_STATES]
+        if new_def_mass > 0:
+            # Look up balance fraction at this age
+            ratio = lookup_paydown(curve, tier, tb, cur_age)
+            balance_at_default = orig * ratio
+            lgd = lookup_lgd(lgd_lookup, tier, age_b, fico_b, ltv_b)
+            loss = new_def_mass * balance_at_default * lgd
+            expected_loss += loss
+            # Variance proxy (Bernoulli-ish): p*(1-p) * (balance*lgd)^2
+            variance += new_def_mass * (1 - new_def_mass) * (balance_at_default * lgd) ** 2
+        sv = new_sv
+    return expected_loss, variance
+
+
+# ── Main ──────────────────────────────────────────────────────────────
+
+def run(carvana_db=CARVANA_DB, dashboard_db=DASHBOARD_DB):
+    """Run the full pipeline and store results in dashboard_db."""
+    conn = sqlite3.connect(carvana_db)
+    deals = list(TIER_OF_DEAL.keys())
+    logger.info(f"Loading covariates for {len(deals)} deals...")
+    covariates = load_loan_covariates(conn, deals)
+    logger.info(f"  loaded {len(covariates):,} loan covariates")
+
+    logger.info("Building empirical aggregates (transitions, paydown, LGD)...")
+    trans, trans_n, paydown_perf, paydown_mod, lgd_samples, latest = build_aggregates(
+        conn, deals, covariates)
+    # Publish raw counts so cell_transition_matrix can gate on them.
+    global TRANS_N
+    TRANS_N = trans_n
+    perf_curve, mod_curve = build_paydown_curves(paydown_perf, paydown_mod)
+    lgd_lookup = build_lgd_lookup(lgd_samples)
+    logger.info(f"  perf paydown bins: {sum(len(v) for v in perf_curve.values()):,}  "
+                f"mod paydown bins: {sum(len(v) for v in mod_curve.values()):,}")
+    logger.info(f"  LGD cells: {len(lgd_lookup):,}")
+
+    logger.info("Running per-loan forecast...")
+    deal_totals = defaultdict(lambda: {"expected_loss": 0.0, "variance": 0.0,
+                                       "active_loans": 0, "active_balance": 0.0,
+                                       "dq_loss": 0.0, "perf_loss": 0.0,
+                                       "dq_balance": 0.0, "perf_balance": 0.0,
+                                       "lookback_predicted_loss": 0.0,
+                                       "n_loans_total": 0})
+    for (deal, asset), loan in latest.items():
+        d = deal_totals[deal]
+        d["n_loans_total"] += 1
+        # Lookback: what would the model have predicted for this loan from age 0
+        # through current age (or termination age for terminated loans)?
+        # Done for ALL loans — gives full-pool predicted-to-date for the deal.
+        lookback_el, _ = forecast_loan(
+            loan, trans, perf_curve, mod_curve, lgd_lookup,
+            start_state=0, start_age=0, end_age=loan["age_months"])
+        d["lookback_predicted_loss"] += lookback_el
+        # Forward forecast only for active loans
+        if loan["status"] != "active":
+            continue
+        el, var = forecast_loan(loan, trans, perf_curve, mod_curve, lgd_lookup)
+        d["expected_loss"] += el
+        d["variance"] += var
+        d["active_loans"] += 1
+        d["active_balance"] += loan["balance"]
+        if loan["state"] == 0:
+            d["perf_loss"] += el
+            d["perf_balance"] += loan["balance"]
+        else:
+            d["dq_loss"] += el
+            d["dq_balance"] += loan["balance"]
+
+    # Realized: pull from dashboard.db cert lookup
+    sys.path.insert(0, "/opt/abs-dashboard")
+    from carvana_abs.default_model import _cert_totals_lookup
+
+    # Per-deal original pool balance (cutoff). MAX(beginning_pool_balance)
+    # equals the cert's "(14) Original Pool Balance as of Cutoff Date" for any
+    # deal whose first 10-D we ingested; verified earlier in the audit.
+    deal_orig_bal = {}
+    for r in conn.execute(
+        f"SELECT deal, MAX(beginning_pool_balance) FROM pool_performance "
+        f"WHERE deal IN ({','.join(['?']*len(deals))}) GROUP BY deal", deals):
+        deal_orig_bal[r[0]] = float(r[1] or 0)
+
+    by_deal = {}
+    for deal in deals:
+        cert = _cert_totals_lookup(deal, carvana_db)
+        cum_net = cert.get("cum_net_losses") or 0
+        d = deal_totals.get(deal, {})
+        ev = d.get("expected_loss", 0)
+        var = d.get("variance", 0)
+        sigma = float(np.sqrt(var)) if var > 0 else 0
+
+        # Pool-level early-performance calibration overlay.
+        # Compare realized cum gross losses with what the model would have
+        # predicted for ALL the pool's loans from age 0 to now (lookback is
+        # now done over active + terminated loans, so no scaling needed).
+        # Apply the resulting multiplier to the forward forecast.
+        # Guardrails: need ≥6 months avg history; clamp factor to [0.5, 2.0].
+        lookback_full = d.get("lookback_predicted_loss", 0)
+        active_bal = d.get("active_balance", 0) or 0
+        cum_gross = cert.get("cum_gross_losses") or 0
+        orig_bal = deal_orig_bal.get(deal, 0)
+        ages = [latest[k]["age_months"] for k in latest if k[0] == deal]
+        avg_age = (sum(ages) / len(ages)) if ages else 0
+        n_loans_total = d.get("n_loans_total", 0)
+
+        # ── Bayesian calibration ──
+        # Prior: log(cal) ~ Normal(0, σ_prior²).  σ_prior = 0.30 gives a
+        # 68% prior CI on cal of ≈ [0.74, 1.35] — moderate trust in the
+        # population-average transition model.
+        # Likelihood at this observation window: log(realized/lookback) is
+        # a noisy estimate of log(cal).  Noise variance σ_obs² shrinks as
+        # more loss dollars have emerged; we approximate σ_obs² = 1/√N
+        # where N is the realized-to-predicted count-of-default-dollars
+        # proxy.  That gives ~0.5 σ_obs at $1M realized, ~0.1 at $100M.
+        # Posterior is the standard log-normal conjugate:
+        #   μ_post = (μ_prior/σ_prior² + log(r)/σ_obs²) / (1/σ_prior² + 1/σ_obs²)
+        #   σ_post² = 1 / (1/σ_prior² + 1/σ_obs²)
+        # cal_point = exp(μ_post); 68% band = exp(μ_post ± σ_post).
+        import math
+        SIGMA_PRIOR = 0.30
+        cal_factor = 1.0
+        cal_lo = cal_hi = 1.0
+        cal_status = "uncalibrated (no loss data yet)"
+        if lookback_full > 0 and cum_net > 0:
+            # Proxy for observation variance: falls off with realized $
+            # at an approximate 1/√N rate. The 1M divisor sets the scale
+            # (at $1M realized, σ_obs ≈ 1.0 → very uncertain observation;
+            # at $100M, σ_obs ≈ 0.1 → tight observation).
+            sigma_obs = max(0.05, 1.0 / math.sqrt(max(cum_net, 1e3) / 1e6))
+            inv_var_prior = 1.0 / (SIGMA_PRIOR ** 2)
+            inv_var_obs = 1.0 / (sigma_obs ** 2)
+            log_r = math.log(cum_net / lookback_full)
+            mu_post = (0.0 * inv_var_prior + log_r * inv_var_obs) / (inv_var_prior + inv_var_obs)
+            sigma_post = math.sqrt(1.0 / (inv_var_prior + inv_var_obs))
+            cal_factor = math.exp(mu_post)
+            cal_lo = math.exp(mu_post - sigma_post)
+            cal_hi = math.exp(mu_post + sigma_post)
+            z = inv_var_obs / (inv_var_prior + inv_var_obs)
+            cal_status = (f"{cal_factor:.2f}× (±1σ [{cal_lo:.2f}, {cal_hi:.2f}], "
+                          f"credibility z={z:.0%} — raw obs {math.exp(log_r):.2f}×)")
+
+        ev_calibrated = ev * cal_factor
+        # ±1σ band combines posterior uncertainty on cal with portfolio
+        # variance.  Dominant term is posterior cal uncertainty: bounds
+        # the forward forecast by [ev × cal_lo, ev × cal_hi].
+        sigma_calibrated = sigma * cal_factor
+        ev_lo = ev * cal_lo
+        ev_hi = ev * cal_hi
+
+        by_deal[deal] = {
+            "active_loans": d.get("active_loans", 0),
+            "n_loans_total": n_loans_total,
+            "active_balance": round(d.get("active_balance", 0), 2),
+            "avg_age_months": round(avg_age, 1),
+            "realized": round(cum_net, 2),
+            "realized_gross": round(cum_gross, 2),
+            "dq_pending": round(d.get("dq_loss", 0) * cal_factor, 2),
+            "performing_future": round(d.get("perf_loss", 0) * cal_factor, 2),
+            "total_expected": round(cum_net + ev_calibrated, 2),
+            "total_minus_1sd": round(cum_net + ev_lo, 2),
+            "total_plus_1sd": round(cum_net + ev_hi, 2),
+            "forecast_only": round(ev_calibrated, 2),
+            "forecast_lo": round(ev_lo, 2),
+            "forecast_hi": round(ev_hi, 2),
+            "forecast_sigma": round(sigma_calibrated, 2),
+            "lookback_predicted_loss": round(lookback_full, 2),
+            "calibration_factor": round(cal_factor, 4),
+            "calibration_lo": round(cal_lo, 4),
+            "calibration_hi": round(cal_hi, 4),
+            "calibration_status": cal_status,
+            "uncalibrated_forecast": round(ev, 2),
+        }
+        logger.info(f"  {deal}: realized=${cum_net/1e6:.1f}M  fcst=${ev_calibrated/1e6:.1f}M  "
+                    f"σ=${sigma_calibrated/1e6:.1f}M  total=${(cum_net+ev_calibrated)/1e6:.1f}M  "
+                    f"cal={cal_factor:.2f}×")
+
+    # Reference table: average P(default | state, age, FICO) for sanity check.
+    # Compute one-step Default probability from fully-stratified cells, then
+    # average across LTV / mod.
+    p_def_ref = {}
+    for tier in ["Prime", "NonPrime"]:
+        rows = []
+        for state_idx, state_lbl in enumerate(["Curr", "1pmt", "2pmt", "3pmt", "4pmt", "5+pmt"]):
+            for age_b in range(len(AGE_BUCKETS)):
+                age_lbl = f"{AGE_BUCKETS[age_b][0]}-{AGE_BUCKETS[age_b][1]}mo"
+                for fico_b in range(len(FICO_BUCKETS)):
+                    fico_lbl = (f"<{FICO_BUCKETS[fico_b][1]}" if fico_b == 0
+                                else f"{FICO_BUCKETS[fico_b][0]}+")
+                    row, n = cell_transition_matrix(trans, tier, state_idx, age_b, fico_b, "any", "any", "any")
+                    if row is not None and n > 0:
+                        rows.append({"state": state_lbl, "age": age_lbl,
+                                     "fico": fico_lbl, "n": int(n),
+                                     "p_default_1mo": round(float(row[N_STATES]), 6),
+                                     "p_payoff_1mo": round(float(row[N_STATES + 1]), 6)})
+        p_def_ref[tier] = rows[:200]   # cap to avoid bloating the JSON
+
+    out = {
+        "by_deal": by_deal,
+        "tier_of_deal": TIER_OF_DEAL,
+        "p_default_reference": p_def_ref,
+        "lgd_avg_by_tier": {
+            tier: round(np.mean([v for k, v in lgd_lookup.items() if k[0] == tier]), 4)
+                  if any(k[0] == tier for k in lgd_lookup) else 0.55
+            for tier in ["Prime", "NonPrime"]
+        },
+    }
+
+    # Persist into dashboard.db
+    dconn = sqlite3.connect(dashboard_db)
+    dconn.execute("CREATE TABLE IF NOT EXISTS model_results (key TEXT PRIMARY KEY, value TEXT)")
+    dconn.execute("INSERT OR REPLACE INTO model_results VALUES (?, ?)",
+                  ("conditional_markov", json.dumps(out)))
+    dconn.commit()
+    dconn.close()
+    logger.info("Saved 'conditional_markov' to dashboard.db model_results")
+    return out
+
+
+if __name__ == "__main__":
+    run()

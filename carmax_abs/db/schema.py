@@ -1,0 +1,315 @@
+"""SQLite database schema and initialization for Carvana ABS data (multi-deal)."""
+
+import sqlite3
+import os
+from carmax_abs.config import DB_PATH, DB_DIR
+
+
+def get_connection(db_path: str = DB_PATH) -> sqlite3.Connection:
+    """Get a SQLite connection with row factory enabled."""
+    os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA foreign_keys=ON")
+    return conn
+
+
+def migrate_dist_date_iso(conn: sqlite3.Connection) -> int:
+    """Add + backfill `pool_performance.dist_date_iso` (YYYY-MM-DD).
+
+    Idempotent. Root-cause fix for AUDIT_FINDINGS #5: `distribution_date`
+    is stored as `M/D/YYYY` text, so `ORDER BY distribution_date` gives
+    lex — not chronological — order. This adds a parallel ISO column that
+    is safe to sort and a covering index. Dashboard queries use this column;
+    raw `distribution_date` is preserved untouched so ingestion/parser code
+    and the (deal, distribution_date) primary key remain intact.
+    """
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(pool_performance)")}
+    if "dist_date_iso" not in cols:
+        conn.execute("ALTER TABLE pool_performance ADD COLUMN dist_date_iso TEXT")
+    n = conn.execute("""
+        UPDATE pool_performance
+           SET dist_date_iso = CASE
+               WHEN distribution_date IS NULL OR distribution_date = '' THEN NULL
+               WHEN substr(distribution_date,5,1) = '-' THEN substr(distribution_date,1,10)
+               WHEN instr(distribution_date,'/') > 0 THEN
+                   substr(distribution_date, instr(distribution_date,'/')
+                       + instr(substr(distribution_date, instr(distribution_date,'/')+1),'/') + 1, 4)
+                   || '-'
+                   || printf('%02d', CAST(substr(distribution_date, 1, instr(distribution_date,'/')-1) AS INTEGER))
+                   || '-'
+                   || printf('%02d', CAST(substr(
+                       distribution_date,
+                       instr(distribution_date,'/')+1,
+                       instr(substr(distribution_date, instr(distribution_date,'/')+1),'/')-1
+                     ) AS INTEGER))
+               ELSE NULL
+           END
+         WHERE dist_date_iso IS NULL OR dist_date_iso = ''
+    """).rowcount
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_pool_deal_iso "
+        "ON pool_performance(deal, dist_date_iso)"
+    )
+    conn.execute("DROP TRIGGER IF EXISTS trg_pool_dist_date_iso_ins")
+    conn.execute("""
+        CREATE TRIGGER trg_pool_dist_date_iso_ins
+        AFTER INSERT ON pool_performance
+        WHEN NEW.dist_date_iso IS NULL AND NEW.distribution_date IS NOT NULL
+        BEGIN
+            UPDATE pool_performance
+               SET dist_date_iso = CASE
+                   WHEN substr(NEW.distribution_date,5,1) = '-' THEN substr(NEW.distribution_date,1,10)
+                   WHEN instr(NEW.distribution_date,'/') > 0 THEN
+                       substr(NEW.distribution_date, instr(NEW.distribution_date,'/')
+                           + instr(substr(NEW.distribution_date, instr(NEW.distribution_date,'/')+1),'/') + 1, 4)
+                       || '-'
+                       || printf('%02d', CAST(substr(NEW.distribution_date, 1, instr(NEW.distribution_date,'/')-1) AS INTEGER))
+                       || '-'
+                       || printf('%02d', CAST(substr(
+                           NEW.distribution_date,
+                           instr(NEW.distribution_date,'/')+1,
+                           instr(substr(NEW.distribution_date, instr(NEW.distribution_date,'/')+1),'/')-1
+                         ) AS INTEGER))
+                   ELSE NULL
+               END
+             WHERE deal = NEW.deal AND distribution_date = NEW.distribution_date;
+        END
+    """)
+    conn.commit()
+    return n
+
+
+def init_db(db_path: str = DB_PATH) -> None:
+    """Create all tables if they don't exist."""
+    conn = get_connection(db_path)
+    cursor = conn.cursor()
+
+    cursor.executescript("""
+        -- Tracks each SEC filing discovered
+        CREATE TABLE IF NOT EXISTS filings (
+            accession_number TEXT PRIMARY KEY,
+            deal TEXT NOT NULL,                  -- deal slug, e.g. '2020-P1'
+            filing_type TEXT NOT NULL,           -- '10-D', '10-D/A', 'ABS-EE', 'ABS-EE/A'
+            filing_date TEXT,
+            reporting_period_start TEXT,
+            reporting_period_end TEXT,
+            distribution_date TEXT,
+            filing_url TEXT,
+            absee_url TEXT,                      -- URL to EX-102 XML data file
+            servicer_cert_url TEXT,              -- URL to Exhibit 99.1
+            ingested_loans INTEGER DEFAULT 0,
+            ingested_pool INTEGER DEFAULT 0
+        );
+
+        -- Pool-level performance data from Servicer Certificate (Exhibit 99.1)
+        CREATE TABLE IF NOT EXISTS pool_performance (
+            deal TEXT NOT NULL,                  -- deal slug
+            distribution_date TEXT NOT NULL,
+            accession_number TEXT REFERENCES filings(accession_number),
+            -- Pool balance rollforward
+            beginning_pool_balance REAL,
+            ending_pool_balance REAL,
+            initial_pool_balance REAL,           -- cutoff (Ln 7) - CARMX only
+            beginning_pool_count INTEGER,
+            ending_pool_count INTEGER,
+            -- Collections
+            principal_collections REAL,
+            interest_collections REAL,
+            recoveries REAL,
+            -- Losses
+            gross_charged_off_amount REAL,
+            liquidation_proceeds REAL,
+            net_charged_off_amount REAL,
+            cumulative_net_losses REAL,
+            cumulative_gross_losses REAL,
+            cumulative_liquidation_proceeds REAL,
+            -- Delinquency buckets (balance)
+            delinquent_31_60_balance REAL,
+            delinquent_61_90_balance REAL,
+            delinquent_91_120_balance REAL,
+            delinquent_121_plus_balance REAL,
+            total_delinquent_balance REAL,
+            -- Delinquency buckets (count)
+            delinquent_31_60_count INTEGER,
+            delinquent_61_90_count INTEGER,
+            delinquent_91_120_count INTEGER,
+            delinquent_121_plus_count INTEGER,
+            -- Delinquency trigger
+            delinquency_trigger_level REAL,
+            delinquency_trigger_actual REAL,
+            -- Note balances
+            note_balance_a1 REAL,
+            note_balance_a2 REAL,
+            note_balance_a3 REAL,
+            note_balance_a4 REAL,
+            note_balance_b REAL,
+            note_balance_c REAL,
+            note_balance_d REAL,
+            note_balance_n REAL,
+            aggregate_note_balance REAL,
+            -- Pool statistics
+            weighted_avg_apr REAL,
+            weighted_avg_remaining_term REAL,
+            weighted_avg_original_term REAL,
+            avg_principal_balance REAL,
+            -- Overcollateralization & reserves
+            overcollateralization_amount REAL,
+            reserve_account_balance REAL,
+            specified_reserve_amount REAL,
+            -- Extensions
+            extensions_count INTEGER,
+            extensions_balance REAL,
+            -- Waterfall items (from cash distribution section)
+            residual_cash REAL,
+            total_deposited REAL,
+            available_funds REAL,
+            actual_servicing_fee REAL,
+            total_note_interest REAL,
+            regular_pda REAL,
+            PRIMARY KEY (deal, distribution_date)
+        );
+
+        -- Static loan origination data (from EX-102 XML, one row per loan)
+        CREATE TABLE IF NOT EXISTS loans (
+            deal TEXT NOT NULL,                  -- deal slug
+            asset_number TEXT NOT NULL,
+            originator_name TEXT,
+            origination_date TEXT,
+            original_loan_amount REAL,
+            original_loan_term INTEGER,
+            original_interest_rate REAL,
+            loan_maturity_date TEXT,
+            original_ltv REAL,
+            vehicle_manufacturer TEXT,
+            vehicle_model TEXT,
+            vehicle_new_used TEXT,
+            vehicle_model_year INTEGER,
+            vehicle_type TEXT,
+            vehicle_value REAL,
+            obligor_credit_score INTEGER,
+            obligor_credit_score_type TEXT,
+            obligor_geographic_location TEXT,
+            co_obligor_indicator TEXT,
+            payment_to_income_ratio REAL,
+            income_verification_level TEXT,
+            payment_type TEXT,
+            subvention_indicator TEXT,
+            PRIMARY KEY (deal, asset_number)
+        );
+
+        -- Monthly loan performance snapshots (from EX-102 XML)
+        CREATE TABLE IF NOT EXISTS loan_performance (
+            deal TEXT NOT NULL,                  -- deal slug
+            asset_number TEXT NOT NULL,
+            reporting_period_end TEXT NOT NULL,
+            beginning_balance REAL,
+            ending_balance REAL,
+            scheduled_payment REAL,
+            actual_amount_paid REAL,
+            actual_interest_collected REAL,
+            actual_principal_collected REAL,
+            current_interest_rate REAL,
+            current_delinquency_status TEXT,
+            days_delinquent INTEGER,
+            remaining_term INTEGER,
+            paid_through_date TEXT,
+            zero_balance_code TEXT,
+            zero_balance_date TEXT,
+            charged_off_amount REAL,
+            recoveries REAL,
+            modification_indicator TEXT,
+            servicing_fee REAL,
+            PRIMARY KEY (deal, asset_number, reporting_period_end),
+            FOREIGN KEY (deal, asset_number) REFERENCES loans(deal, asset_number)
+        );
+
+        -- Indexes for common queries
+        CREATE INDEX IF NOT EXISTS idx_filings_deal
+            ON filings(deal);
+        CREATE INDEX IF NOT EXISTS idx_filings_date
+            ON filings(filing_date);
+        CREATE INDEX IF NOT EXISTS idx_filings_type
+            ON filings(filing_type);
+        CREATE INDEX IF NOT EXISTS idx_pool_deal
+            ON pool_performance(deal);
+        CREATE INDEX IF NOT EXISTS idx_loan_perf_deal_period
+            ON loan_performance(deal, reporting_period_end);
+        CREATE INDEX IF NOT EXISTS idx_loan_perf_delinquency
+            ON loan_performance(deal, reporting_period_end, current_delinquency_status);
+        CREATE INDEX IF NOT EXISTS idx_loan_perf_asset
+            ON loan_performance(deal, asset_number);
+        CREATE INDEX IF NOT EXISTS idx_loans_deal
+            ON loans(deal);
+        CREATE INDEX IF NOT EXISTS idx_loans_state
+            ON loans(deal, obligor_geographic_location);
+        CREATE INDEX IF NOT EXISTS idx_loans_score
+            ON loans(deal, obligor_credit_score);
+
+        -- Pre-computed monthly summary (populated during ingestion)
+        CREATE TABLE IF NOT EXISTS monthly_summary (
+            deal TEXT NOT NULL,
+            reporting_period_end TEXT NOT NULL,
+            active_loans INTEGER,
+            total_balance REAL,
+            total_dq_balance REAL,
+            dq_30_balance REAL,
+            dq_60_balance REAL,
+            dq_90_balance REAL,
+            dq_120_plus_balance REAL,
+            total_dq_count INTEGER,
+            dq_30_count INTEGER,
+            dq_60_count INTEGER,
+            dq_90_count INTEGER,
+            dq_120_plus_count INTEGER,
+            period_chargeoffs REAL,
+            period_recoveries REAL,
+            interest_collected REAL,
+            principal_collected REAL,
+            est_servicing_fee REAL,
+            weighted_avg_coupon REAL,
+            PRIMARY KEY (deal, reporting_period_end)
+        );
+
+        -- Pre-computed per-loan loss totals (populated during ingestion)
+        CREATE TABLE IF NOT EXISTS loan_loss_summary (
+            deal TEXT NOT NULL,
+            asset_number TEXT NOT NULL,
+            total_chargeoff REAL,
+            total_recovery REAL,
+            chargeoff_period TEXT,
+            first_recovery_period TEXT,
+            PRIMARY KEY (deal, asset_number)
+        );
+
+        -- Static note/tranche attributes (from prospectus)
+        CREATE TABLE IF NOT EXISTS notes (
+            deal TEXT NOT NULL,
+            class TEXT NOT NULL,            -- 'A1','A2','A3','A4','B','C','D','N'
+            original_balance REAL,
+            coupon_rate REAL,               -- annualized, decimal (0.045 = 4.5%)
+            rate_type TEXT,                 -- 'FIXED' or 'FLOATING'
+            spread REAL,                    -- spread over benchmark if floating (decimal)
+            benchmark TEXT,                 -- 'SOFR', 'PRIME', etc.
+            rating_moodys TEXT,
+            rating_sp TEXT,
+            rating_kbra TEXT,
+            expected_maturity TEXT,
+            legal_maturity TEXT,
+            PRIMARY KEY (deal, class)
+        );
+    """)
+
+    conn.commit()
+    # Migration for AUDIT_FINDINGS #5 (dist_date_iso)
+    try:
+        migrate_dist_date_iso(conn)
+    except sqlite3.OperationalError:
+        pass
+    conn.close()
+
+
+if __name__ == "__main__":
+    init_db()
+    print(f"Database initialized at {DB_PATH}")

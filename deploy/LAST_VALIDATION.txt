@@ -1,0 +1,22 @@
+==================================================
+Dashboard Validation Report
+==================================================
+  INFO: File size: 5525 KB
+  INFO: Charts: 1049
+  INFO: Deals: 71 — __economics__, __model__, __prime__, __nonprime__, __carmax_prime__, __cross__, 2020-P1, 2021-N1, 2021-N2, 2021-N3, 2021-N4, 2021-P1, 2021-P2, 2022-P1, 2022-P2, 2022-P3, 2024-P2, 2024-P3, 2024-P4, 2025-P2, 2025-P3, 2025-P4, cm_2014-1, cm_2014-2, cm_2014-3, cm_2014-4, cm_2015-1, cm_2015-2, cm_2015-3, cm_2015-4, cm_2016-1, cm_2016-2, cm_2016-3, cm_2016-4, cm_2017-1, cm_2017-2, cm_2017-3, cm_2017-4, cm_2018-1, cm_2018-2, cm_2018-3, cm_2018-4, cm_2019-1, cm_2019-2, cm_2019-3, cm_2019-4, cm_2020-1, cm_2020-2, cm_2020-3, cm_2020-4, cm_2021-1, cm_2021-2, cm_2021-3, cm_2021-4, cm_2022-1, cm_2022-2, cm_2022-3, cm_2022-4, cm_2023-1, cm_2023-2, cm_2023-3, cm_2023-4, cm_2024-1, cm_2024-2, cm_2024-3, cm_2024-4, cm_2025-1, cm_2025-2, cm_2025-3, cm_2025-4, cm_2026-1
+  INFO: Deal dropdown: YES
+  INFO: Tab buttons: 520
+  INFO: Tables: 420
+  INFO: Waterfall residual: YES
+  INFO: Rate charts: Consumer Rate=120, Trust CoD=20 (of 69 deals)
+  INFO: Prime comparison: YES
+  INFO: Non-Prime comparison: YES
+  INFO: Mobile responsive: YES
+  WARN: Found 425 NaN values in chart data — may cause empty charts
+  WARN: Chart 1 y-values look like indices (0-1) — data may not be rendering
+  WARN: Chart 2 y-values look like indices (0-1) — data may not be rendering
+  WARN: Chart 3 y-values look like indices (0-1) — data may not be rendering
+  WARN: Chart 4 y-values look like indices (0-0) — data may not be rendering
+  WARN: 49 deal(s) missing Trust Cost of Debt chart
+
+PASSED with 6 warning(s)

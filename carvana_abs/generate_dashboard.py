@@ -1,0 +1,5183 @@
+#!/usr/bin/env python3
+"""Generate static HTML dashboard using raw Plotly.js (no Python Plotly serialization)."""
+
+import os, re, sys, sqlite3, json, logging
+from datetime import datetime
+from urllib.parse import urlparse
+import pandas as pd
+
+# Ensure the repository root is on sys.path so sibling packages (carmax_abs,
+# carvana_abs) resolve when this file is invoked as a script.
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logger = logging.getLogger(__name__)
+
+DB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "db")
+DASH_DB = os.path.join(DB_DIR, "dashboard.db")
+FULL_DB = os.path.join(DB_DIR, "carvana_abs.db")
+ACTIVE_DB = DASH_DB if os.path.exists(DASH_DB) else FULL_DB
+
+# CarMax (CARMX) database paths. CarMax is Prime-only; when the dashboard DB
+# doesn't exist yet (e.g. CI without the export step), we fall back to the raw
+# ingestion DB. Both may be missing in a Carvana-only environment — every
+# CarMax code path guards on `os.path.exists(CARMAX_DB)` before running.
+CARMAX_DB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "carmax_abs", "db")
+CARMAX_DASH_DB = os.path.join(CARMAX_DB_DIR, "dashboard.db")
+CARMAX_FULL_DB = os.path.join(CARMAX_DB_DIR, "carmax_abs.db")
+CARMAX_DB = (CARMAX_DASH_DB if os.path.exists(CARMAX_DASH_DB)
+             else CARMAX_FULL_DB if os.path.exists(CARMAX_FULL_DB)
+             else None)
+
+OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static_site")
+os.makedirs(OUT_DIR, exist_ok=True)
+
+# Deals to include in the dashboard — all deals with ingested data
+DASHBOARD_DEALS = [
+    "2020-P1",
+    "2021-N1", "2021-N2", "2021-N3", "2021-N4", "2021-P1", "2021-P2",
+    "2022-P1", "2022-P2", "2022-P3",
+    "2024-P2", "2024-P3", "2024-P4",
+    "2025-P2", "2025-P3", "2025-P4",
+]
+PRIME_DEALS = [d for d in DASHBOARD_DEALS if "-P" in d]
+NONPRIME_DEALS = [d for d in DASHBOARD_DEALS if "-N" in d]
+
+# CarMax deals. Loaded dynamically from the CARMX DB so new vintages picked up
+# by the ingestion pipeline flow through without a code change. Falls back to
+# the config registry if the DB isn't available (e.g. during unit tests).
+def _load_carmax_deals():
+    if not CARMAX_DB:
+        return []
+    try:
+        conn = sqlite3.connect(CARMAX_DB)
+        rows = conn.execute(
+            "SELECT DISTINCT deal FROM pool_performance ORDER BY deal"
+        ).fetchall()
+        conn.close()
+        return [r[0] for r in rows]
+    except Exception:
+        return []
+
+CARMAX_DEALS = _load_carmax_deals()
+# CarMax sells sub-prime receivables rather than securitizing them, so every
+# CARMX trust is Prime. Keep a CARMAX_PRIME_DEALS alias for consistency with
+# the Carvana naming even though the filter is a no-op today.
+CARMAX_PRIME_DEALS = list(CARMAX_DEALS)
+
+COLORS = ["#1976D2","#D32F2F","#388E3C","#FF9800","#7B1FA2",
+          "#00BCD4","#795548","#E91E63","#607D8B","#CDDC39","#FF5722","#3F51B5"]
+
+# Carvana's chart colors already lean blue. For cross-issuer comparisons we
+# need a second visually-distinct family. CarMax's brand palette is orange
+# (#F47920) and yellow (#FFD200); we shade around those two hues so every
+# CarMax deal on a chart is a CarMax-branded color.
+CARMAX_COLORS = [
+    "#F47920",  # CarMax brand orange
+    "#FFD200",  # CarMax brand yellow
+    "#E65100",  # deep orange
+    "#F9A825",  # amber
+    "#FF6F00",  # orange 900
+    "#FBC02D",  # yellow 700
+    "#BF360C",  # orange darkest
+    "#FFB300",  # amber 600
+    "#F57F17",  # amber 900
+    "#FFEB3B",  # yellow
+    "#D84315",  # deep orange 800
+    "#FFCA28",  # amber 400
+]
+# Blue family for the Carvana leg of the cross-issuer tab — keeps every
+# Carvana deal clearly distinguishable from every CarMax deal on one chart.
+CARVANA_CROSS_COLORS = [
+    "#0D47A1",  # blue 900
+    "#1565C0",  # blue 800
+    "#1976D2",  # blue 700 (the Carvana anchor color used elsewhere)
+    "#1E88E5",  # blue 600
+    "#2196F3",  # blue 500
+    "#42A5F5",  # blue 400
+    "#64B5F6",  # blue 300
+    "#1A237E",  # indigo 900
+    "#283593",  # indigo 800
+    "#3949AB",  # indigo 600
+    "#5C6BC0",  # indigo 400
+    "#00838F",  # cyan/teal 700 (blue-adjacent)
+    "#0097A7",  # cyan 700
+    "#00ACC1",  # cyan 600
+    "#26C6DA",  # cyan 400
+    "#4FC3F7",  # light blue 300
+]
+
+_chart_id = 0
+
+
+def q(sql, params=(), db=None):
+    """Run a query and return a DataFrame.
+
+    By default reads from the Carvana dashboard/raw DB (ACTIVE_DB). Pass
+    db=CARMAX_DB to pull from the CarMax DB instead. All pre-existing call
+    sites use the default and remain Carvana-scoped.
+    """
+    target = db if db is not None else ACTIVE_DB
+    conn = sqlite3.connect(target)
+    df = pd.read_sql_query(sql, conn, params=params)
+    conn.close()
+    for col in df.select_dtypes(include=["object"]).columns:
+        try:
+            df[col] = pd.to_numeric(df[col])
+        except (ValueError, TypeError):
+            pass
+    return df
+
+
+def nd(d):
+    if not d: return d
+    d = str(d).strip()
+    for sep in ["-", "/"]:
+        p = d.split(sep)
+        if len(p) == 3 and len(p[0]) <= 2 and len(p[2]) == 4:
+            return f"{p[2]}{sep}{p[0].zfill(2)}{sep}{p[1].zfill(2)}"
+    return d
+
+
+def fm(v):
+    if v is None or (isinstance(v, float) and pd.isna(v)): return "-"
+    if abs(v) >= 1e9: return f"${v/1e9:.1f}B"
+    if abs(v) >= 1e6: return f"${v/1e6:.1f}M"
+    if abs(v) >= 1e3: return f"${v/1e3:.0f}K"
+    return f"${v:,.0f}"
+
+
+# Global Plotly config — applied to every chart in the dashboard. Leaves
+# `resetScale2d` (the reset-view / home button) in the modebar so users can
+# always recover after a zoom or pan. Removes lasso / box-select (not useful
+# on these charts) and the Plotly logo. Any new chart rendered via `chart()`
+# inherits this automatically; any future renderer should also use this dict.
+PLOTLY_CONFIG = {
+    "displayModeBar": True,
+    "displaylogo": False,
+    "responsive": True,
+    "modeBarButtonsToRemove": ["lasso2d", "select2d"],
+}
+_PLOTLY_CONFIG_JSON = json.dumps(PLOTLY_CONFIG)
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Multi-page static-site scaffolding.
+#
+# The dashboard is rendered as a tree of small HTML pages (Recent Trends,
+# Economics, Methodology, Deal index, + one page per deal) that all share a
+# single CSS file and a single JS file. That way the browser only downloads
+# the page the user is actually viewing (~200–800 KB each) instead of one
+# 5-6 MB bundle, and the URL IS the tab — reloading preserves position and
+# bookmarks work natively.
+# ─────────────────────────────────────────────────────────────────────────
+
+BASE_URL_PATH = "/CarvanaLoanDashBoard"  # nginx prefix — used for absolute asset refs.
+
+# Top-level navigation: (slug, display_name, relative_path_from_base).
+# The deal-index page is the entry point for all per-deal pages.
+NAV_LINKS = [
+    ("recent",       "Recent Trends",          "/"),
+    ("economics",    "Residual Economics",     "/economics/"),
+    ("methodology",  "Methodology & Findings", "/methodology/"),
+    ("deals",        "Deals",                  "/deals/"),
+]
+
+
+SHARED_CSS = """
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f5f5f5;color:#212121}
+header{background:#1976D2;color:white;padding:12px 16px;position:sticky;top:0;z-index:100;display:flex;align-items:center;justify-content:space-between}
+header h1{font-size:1.1rem;font-weight:600}
+/* Top nav bar — one link per top-level page, active state highlighted. */
+nav.topnav{display:flex;flex-wrap:wrap;gap:4px;padding:6px 12px;position:sticky;top:44px;z-index:99;background:#f5f5f5;border-bottom:1px solid #e0e0e0}
+nav.topnav a{padding:6px 12px;border:1px solid #ccc;border-radius:6px;background:white;color:#212121;text-decoration:none;font-size:.75rem;white-space:nowrap}
+nav.topnav a.active{background:#1976D2;color:white;border-color:#1976D2}
+.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:6px;padding:8px 12px}
+.metric{background:white;border-radius:8px;padding:8px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.1)}
+.mv{font-size:1.1rem;font-weight:700;color:#1976D2}.ml{font-size:.65rem;color:#666;margin-top:2px}
+.tabs{display:flex;flex-wrap:wrap;gap:4px;padding:6px 12px;position:sticky;top:84px;z-index:98;background:#f5f5f5}
+.tab{padding:5px 10px;border:1px solid #ccc;border-radius:6px;background:white;cursor:pointer;font-size:.75rem;color:#212121;text-decoration:none}
+.tab.active{background:#1976D2;color:white;border-color:#1976D2}
+.tc{padding:0 12px 12px}
+.tbl{overflow-x:auto;margin:8px 0}
+table{width:100%;border-collapse:collapse;font-size:.7rem;background:white;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.1)}
+th{background:#f5f5f5;padding:5px 6px;text-align:left;border-bottom:2px solid #ddd;white-space:nowrap}
+td{padding:4px 6px;border-bottom:1px solid #eee;white-space:nowrap}
+tr:last-child td{font-weight:700;border-top:2px solid #ddd}
+table.compare tr:last-child td{font-weight:normal;border-top:none}
+h3{font-size:.85rem;color:#333;margin:10px 0 4px;padding:0 4px}
+footer{text-align:center;padding:12px;color:#999;font-size:.65rem}
+.js-plotly-plot .plotly .modebar{opacity:1 !important}
+.js-plotly-plot .plotly .modebar-btn{opacity:.75}
+.js-plotly-plot .plotly .modebar-btn:hover{opacity:1}
+.page-wrap{max-width:1400px;margin:0 auto}
+.narrative{max-width:50em}
+.econ-controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:6px 4px 10px;font-size:.75rem}
+.econ-controls label{display:inline-flex;align-items:center;gap:6px;min-height:44px;padding:4px 10px;background:white;border:1px solid #ddd;border-radius:6px;cursor:pointer;user-select:none}
+.econ-controls input[type=checkbox]{width:20px;height:20px;cursor:pointer;margin:0}
+table.econ{font-size:.62rem}
+table.econ td.g-id,table.econ th.g-id{background:rgba(33,150,243,.05)}
+table.econ td.g-init,table.econ th.g-init{background:rgba(76,175,80,.05)}
+table.econ td.g-curr,table.econ th.g-curr{background:rgba(255,193,7,.06)}
+table.econ td.g-var,table.econ th.g-var{background:rgba(158,158,158,.06)}
+table.econ td.g-cap,table.econ th.g-cap{background:rgba(120,144,156,.06)}
+table.econ td.g-first,table.econ th.g-first{border-left:2px solid #b0bec5}
+table.econ tr.group-header th{text-align:center;font-weight:700;font-size:.6rem;letter-spacing:.05em;text-transform:uppercase;padding:6px 4px;border-bottom:2px solid #1976D2;background:#ECEFF1}
+.econ-table-wrap{overflow-x:auto;margin:8px 0}
+@media (min-width:900px){.econ-table-wrap{max-height:78vh;overflow:auto}}
+.econ-footer-note{padding:14px 16px;margin:32px 0 24px;background:#F5F9FF;border-left:3px solid #1976D2;border-radius:4px;max-width:900px}
+.econ-footer-note p{font-size:.78rem;color:#333;line-height:1.6;margin:0}
+/* Deal-index grid */
+.deal-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px;padding:12px}
+.deal-card{background:white;border-radius:8px;padding:12px;box-shadow:0 1px 3px rgba(0,0,0,.1);text-decoration:none;color:#212121;display:block;transition:transform .08s ease}
+.deal-card:hover{transform:translateY(-1px);box-shadow:0 2px 6px rgba(0,0,0,.15)}
+.deal-card .dc-name{font-weight:700;color:#1976D2;font-size:.95rem}
+.deal-card .dc-meta{color:#666;font-size:.72rem;margin-top:4px}
+.deal-card .dc-issuer{display:inline-block;padding:2px 6px;border-radius:4px;background:#ECEFF1;color:#455A64;font-size:.65rem;font-weight:600;letter-spacing:.02em;margin-top:6px}
+.deal-card.crvna .dc-issuer{background:#E3F2FD;color:#1565C0}
+.deal-card.carmx .dc-issuer{background:#FFF3E0;color:#E65100}
+@media(max-width:600px){.metrics{grid-template-columns:repeat(2,1fr)}.mv{font-size:.95rem}.tab{font-size:.65rem;padding:4px 6px}nav.topnav a{font-size:.7rem;padding:5px 8px}}
+@media(min-width:1280px){
+  .tab{font-size:.85rem;padding:7px 14px}
+  nav.topnav a{font-size:.85rem;padding:7px 14px}
+  header h1{font-size:1.3rem}
+  .metric{padding:10px}
+  .mv{font-size:1.25rem}.ml{font-size:.75rem}
+  table{font-size:.8rem}
+  table.econ{font-size:.72rem}
+}
+"""
+
+# Shared JS: URL-hash sub-tab routing on per-deal pages + a small helper the
+# page shell uses to highlight the active top-nav link. No external deps.
+SHARED_JS = """
+// Sub-tab (in-page) routing via URL hash. Every sub-tab button carries
+// data-subtab="slug"; every content pane carries data-subtab-pane="slug".
+// Clicking a button updates location.hash (no reload). On load and on
+// hashchange we show the matching pane and highlight the matching button.
+(function(){
+  function showSub(slug){
+    var btns = document.querySelectorAll('[data-subtab]');
+    var panes = document.querySelectorAll('[data-subtab-pane]');
+    if (!btns.length) return;
+    // If the requested slug doesn't match any pane, fall back to the first.
+    var valid = Array.prototype.some.call(btns, function(b){
+      return b.getAttribute('data-subtab') === slug;
+    });
+    if (!valid) slug = btns[0].getAttribute('data-subtab');
+    btns.forEach(function(b){
+      b.classList.toggle('active', b.getAttribute('data-subtab') === slug);
+    });
+    panes.forEach(function(p){
+      p.style.display = (p.getAttribute('data-subtab-pane') === slug) ? 'block' : 'none';
+    });
+    // Re-layout any Plotly charts now that their container is visible.
+    setTimeout(function(){ window.dispatchEvent(new Event('resize')); }, 80);
+  }
+  function currentSlug(){
+    var h = (window.location.hash || '').replace(/^#/, '');
+    return h || null;
+  }
+  document.addEventListener('click', function(e){
+    var t = e.target.closest('[data-subtab]');
+    if (!t) return;
+    e.preventDefault();
+    var slug = t.getAttribute('data-subtab');
+    // Update hash without adding a new history entry for every click.
+    history.replaceState(null, '', '#' + slug);
+    showSub(slug);
+  });
+  window.addEventListener('hashchange', function(){
+    var s = currentSlug();
+    if (s) showSub(s);
+  });
+  document.addEventListener('DOMContentLoaded', function(){
+    var btns = document.querySelectorAll('[data-subtab]');
+    if (!btns.length) return;
+    var slug = currentSlug() || btns[0].getAttribute('data-subtab');
+    showSub(slug);
+  });
+})();
+"""
+
+
+# Mapping from human-readable sub-tab label to URL-hash slug. The slug is
+# what appears in the browser bar (e.g. /deals/crvna-2021-P1/#losses).
+SUBTAB_SLUGS = {
+    "Pool Summary":  "pool",
+    "Delinquencies": "dq",
+    "Losses":        "losses",
+    "Notes & OC":    "notes",
+    "Cash Waterfall":"waterfall",
+    "Recovery":      "recovery",
+    "Documents":     "docs",
+}
+
+
+def _subtab_slug(label):
+    """Look up the URL-hash slug for a given sub-tab label. Falls back to a
+    lowercase-underscore form for any label not in the curated registry."""
+    if label in SUBTAB_SLUGS:
+        return SUBTAB_SLUGS[label]
+    return label.lower().replace(" & ", "-").replace(" ", "-").replace("&", "and")
+
+
+def _render_subtab_buttons(sections):
+    """Render the row of sub-tab buttons for a per-deal page. Buttons carry
+    `data-subtab="<slug>"` so shared.js handles activation via URL hash."""
+    out = []
+    for idx, name in enumerate(sections.keys()):
+        slug = _subtab_slug(name)
+        cls = "tab active" if idx == 0 else "tab"
+        # <a> with href="#<slug>" so bookmarkable + no-JS graceful fallback.
+        out.append(
+            f'<a class="{cls}" data-subtab="{slug}" '
+            f'href="#{slug}" role="tab">{name}</a>'
+        )
+    return "\n".join(out)
+
+
+def _render_subtab_panes(sections):
+    """Render the content divs for a per-deal page. Each pane carries
+    `data-subtab-pane="<slug>"`; shared.js shows/hides based on URL hash."""
+    out = []
+    for idx, (name, body) in enumerate(sections.items()):
+        slug = _subtab_slug(name)
+        disp = "block" if idx == 0 else "none"
+        out.append(
+            f'<div class="tc" data-subtab-pane="{slug}" '
+            f'style="display:{disp}">{body}</div>'
+        )
+    return "\n".join(out)
+
+
+def _slugify_deal(issuer_prefix, deal):
+    """Turn a deal id into a URL-safe slug.
+
+    Carvana deals: 2021-P1 → crvna-2021-P1
+    CarMax  deals: 2021-1  → carmx-2021-1
+    """
+    return f"{issuer_prefix}-{deal}".lower()
+
+
+def _nav_bar(active_slug, asset_prefix=BASE_URL_PATH):
+    """Render the persistent top-nav bar. Active link highlighted.
+
+    asset_prefix is the nginx-mounted base (e.g. /CarvanaLoanDashBoard) so
+    links work regardless of which nested page the user is on.
+    """
+    items = []
+    for slug, name, rel in NAV_LINKS:
+        cls = ' class="active"' if slug == active_slug else ""
+        items.append(f'<a href="{asset_prefix}{rel}"{cls}>{name}</a>')
+    return '<nav class="topnav">' + "".join(items) + "</nav>"
+
+
+def _page_shell(title, active_nav, body_html, asset_prefix=BASE_URL_PATH):
+    """Wrap a page body in the shared HTML shell.
+
+    Every page gets the same <head> (shared CSS, Plotly CDN, shared JS) and
+    the same persistent top-nav bar. Only the body differs.
+    """
+    css_href = f"{asset_prefix}/assets/shared.css"
+    js_src = f"{asset_prefix}/assets/shared.js"
+    return f"""<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>{title}</title>
+<link rel="stylesheet" href="{css_href}">
+<script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+<script defer src="{js_src}"></script>
+</head><body>
+<header><h1>Carvana ABS Dashboard</h1></header>
+{_nav_bar(active_nav, asset_prefix)}
+<div class="page-wrap">
+<main>
+{body_html}
+</main>
+<footer>Data from SEC EDGAR | Generated {datetime.now().strftime('%Y-%m-%d %H:%M UTC')}</footer>
+</div>
+</body></html>"""
+
+
+def chart(traces, layout, height=350):
+    """Generate a Plotly.js chart div using raw JSON data."""
+    global _chart_id
+    _chart_id += 1
+    cid = f"c{_chart_id}"
+    traces_json = json.dumps(traces)
+    layout["margin"] = {"l": 70, "r": 15, "t": 40, "b": 50}
+    layout["height"] = height
+    layout["template"] = "plotly_white"
+    layout["font"] = {"size": 11}
+    layout.setdefault("xaxis", {})["tickangle"] = -45
+    layout["xaxis"]["automargin"] = True
+    layout.setdefault("yaxis", {})["automargin"] = True
+    layout_json = json.dumps(layout)
+    return f'<div id="{cid}" style="width:100%;height:{height}px;background:white;border-radius:8px;margin:8px 0;box-shadow:0 1px 3px rgba(0,0,0,.1)"></div>\n<script>Plotly.newPlot("{cid}",{traces_json},{layout_json},{_PLOTLY_CONFIG_JSON});</script>\n'
+
+
+def _restatement_overlay(x_list, y_list):
+    """Build a monotone envelope + restatement-marker overlay for a cumulative
+    loss series (audit finding #7). A restatement is any period where the raw
+    cumulative value decreases from the prior period (servicers sometimes
+    correct chargeoff/recovery allocations in a later cert).
+
+    Returns (envelope_list, markers_x, markers_y). If no restatements are
+    found, returns (None, [], []) so callers can omit the overlay entirely.
+    """
+    env = []
+    markers_x, markers_y = [], []
+    running_max = None
+    restated = False
+    for xv, yv in zip(x_list, y_list):
+        if yv is None or (isinstance(yv, float) and pd.isna(yv)):
+            env.append(running_max)
+            continue
+        yv_f = float(yv)
+        if running_max is None:
+            running_max = yv_f
+        elif yv_f < running_max - 0.5:  # tolerance: sub-dollar noise is not a restatement
+            markers_x.append(xv)
+            markers_y.append(yv_f)
+            restated = True
+            # envelope stays at running_max
+        else:
+            running_max = max(running_max, yv_f)
+        env.append(running_max)
+    if not restated:
+        return None, [], []
+    return env, markers_x, markers_y
+
+
+def table_html(df, cls=""):
+    cls_attr = f' class="{cls}"' if cls else ""
+    rows = "".join(f"<th>{c}</th>" for c in df.columns)
+    header = f"<tr>{rows}</tr>"
+    body = ""
+    for _, row in df.iterrows():
+        cells = "".join(f"<td>{row[c]}</td>" for c in df.columns)
+        body += f"<tr>{cells}</tr>"
+    return f'<div class="tbl"><table{cls_attr}><thead>{header}</thead><tbody>{body}</tbody></table></div>'
+
+
+_CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "filing_cache")
+_CERT_CACHE = {}
+
+
+def _cert_totals(deal):
+    """Parse authoritative cumulative totals from the deal's latest cached 10-D
+    servicer certificate. Line-number references shift by vintage, so the regex
+    keys off the label text, not the (NN) marker.
+
+    Returns dict (may have None values) with:
+      orig_pool_balance, cum_gross_losses, cum_liquidation_proceeds,
+      cum_net_losses, ending_pool_balance.
+    """
+    if deal in _CERT_CACHE:
+        return _CERT_CACHE[deal]
+    result = {}
+    row = q("SELECT servicer_cert_url FROM filings WHERE deal=? "
+            "AND servicer_cert_url IS NOT NULL ORDER BY filing_date DESC LIMIT 1", (deal,))
+    if row.empty:
+        _CERT_CACHE[deal] = result
+        return result
+    url = row.iloc[0]["servicer_cert_url"]
+    p = urlparse(url)
+    path = os.path.join(_CACHE_DIR, p.path.strip("/").replace("/", "_"))
+    if not os.path.exists(path):
+        _CERT_CACHE[deal] = result
+        return result
+    try:
+        with open(path, "r", errors="replace") as f:
+            txt = f.read()
+    except OSError:
+        _CERT_CACHE[deal] = result
+        return result
+    body = re.sub(r"<[^>]+>", " ", re.sub(r"&nbsp;", " ", txt))
+    body = re.sub(r"\s+", " ", body)
+
+    def grab(label):
+        pat = rf"{re.escape(label)}\s*\(?\s*\d+\s*\)?[^0-9]{{0,30}}([\d,]+(?:\.\d+)?)"
+        m = re.search(pat, body)
+        return float(m.group(1).replace(",", "")) if m else None
+
+    result["orig_pool_balance"] = grab("Original Pool Balance as of Cutoff Date")
+    result["cum_gross_losses"] = grab(
+        "Aggregate Gross Charged-Off Receivables losses as of the last day of the current Collection Period")
+    result["cum_liquidation_proceeds"] = grab(
+        "Liquidation Proceeds as of the last day of the current Collection Period")
+    result["cum_net_losses"] = (
+        grab("aggregate amount of Net Charged-Off Receivables losses as of the last day of the current Collection Period")
+        or grab("Aggregate amount of Net Charged-Off Receivables losses as of the last day of the current Collection Period"))
+    m = re.search(r"Ending Pool Balance\s*\(?\s*\d+\s*\)?\s*[\d,]+\s+([\d,]+(?:\.\d+)?)", body)
+    result["ending_pool_balance"] = float(m.group(1).replace(",", "")) if m else None
+    _CERT_CACHE[deal] = result
+    return result
+
+
+def get_orig_bal(deal):
+    """Return the deal's original cutoff pool balance.
+
+    Priority:
+      1. Servicer cert line item "Original Pool Balance as of Cutoff Date"
+         — the authoritative source. Works for every deal whose cert we've
+         cached, regardless of when we started ingesting 10-Ds for it.
+      2. MAX(beginning_pool_balance) from pool_performance — for deals where
+         cert parse fails. This equals cutoff only if our earliest 10-D was
+         the first 10-D for the deal; understates for any deal where we
+         started ingesting mid-life (e.g. 2021-P1: $399M vs true $415M).
+      3. SUM(original_loan_amount) from the loan tape — last resort; over-
+         states by a few % since it sums each loan's origination amount.
+    """
+    totals = _cert_totals(deal)
+    if totals.get("orig_pool_balance"):
+        return float(totals["orig_pool_balance"])
+    fp = q("SELECT MAX(beginning_pool_balance) AS m FROM pool_performance "
+           "WHERE deal=? AND beginning_pool_balance > 0", (deal,))
+    if not fp.empty and fp.iloc[0]["m"] and fp.iloc[0]["m"] > 0:
+        return float(fp.iloc[0]["m"])
+    t = q("SELECT SUM(original_loan_amount) as s FROM loans WHERE deal=?", (deal,))
+    if not t.empty and t.iloc[0]["s"] and t.iloc[0]["s"] > 0:
+        return float(t.iloc[0]["s"])
+    return 405_000_000
+
+
+def _cert_dq_series(deal):
+    """Return a list of (distribution_date, dq_31_120_balance, ending_pool_balance)
+    parsed from every cached servicer cert for this deal.
+
+    dq_31_120 = sum of 31-60 + 61-90 + 91-120 balances as reported in the cert's
+    "Delinquency Data" block. The cert does NOT have a 120+ bucket (those loans
+    are charged off by day 120-150 under Carvana's servicing policy), so this is
+    a narrower definition than monthly_summary's 30+ DQ rate, which carries
+    pre-charge-off loans in dq_120_plus_balance.
+    """
+    filings = q("SELECT servicer_cert_url, filing_date FROM filings "
+                "WHERE deal=? AND servicer_cert_url IS NOT NULL", (deal,))
+    if filings.empty:
+        return []
+    from datetime import datetime as _dt
+    def _parse(s):
+        for fmt in ("%m/%d/%Y", "%Y-%m-%d", "%m-%d-%Y"):
+            try: return _dt.strptime(str(s).strip()[:10], fmt)
+            except (ValueError, TypeError): pass
+        return None
+    points = []
+    for _, row in filings.iterrows():
+        url = row["servicer_cert_url"]
+        p = urlparse(url)
+        path = os.path.join(_CACHE_DIR, p.path.strip("/").replace("/", "_"))
+        if not os.path.exists(path):
+            continue
+        try:
+            with open(path, "r", errors="replace") as f:
+                txt = f.read()
+        except OSError:
+            continue
+        body = re.sub(r"<[^>]+>", " ", re.sub(r"&nbsp;", " ", txt))
+        body = re.sub(r"\s+", " ", body)
+
+        # Delinquency rows look like: "31-60 187 991,951.44"  (bucket, count, balance)
+        # The count can be comma-formatted once it exceeds 999 (e.g. "1,482"), so
+        # use [\d,]+ for count, not \d+.
+        buckets = {}
+        for m in re.finditer(r"(31-60|61-90|91-120)\s+[\d,]+\s+([\d,]+\.\d+)", body):
+            buckets[m.group(1)] = float(m.group(2).replace(",", ""))
+        if len(buckets) < 3:
+            continue
+        dq_total = buckets["31-60"] + buckets["61-90"] + buckets["91-120"]
+
+        # Ending pool balance from same cert
+        m = re.search(r"Ending Pool Balance\s*\(?\s*\d+\s*\)?\s*[\d,]+\s+([\d,]+(?:\.\d+)?)", body)
+        if not m:
+            continue
+        epb = float(m.group(1).replace(",", ""))
+
+        # Distribution date
+        m = re.search(r"Distribution Date[:\s]+(\d{1,2}/\d{1,2}/\d{4})", body)
+        if not m:
+            continue
+        dt = _parse(m.group(1))
+        if dt is None:
+            continue
+        points.append((dt, dq_total, epb))
+    # Dedupe by date
+    by_date = {}
+    for dt, dq, epb in points:
+        by_date[dt] = (dq, epb)
+    return [(dt, dq, epb) for dt, (dq, epb) in sorted(by_date.items())]
+
+
+def _cum_net_loss_series(deal):
+    """Return a list of (distribution_date, cum_net_loss_dollars) from every
+    cached servicer cert for this deal, sorted chronologically. Used for the
+    Cumulative Net Loss by Deal Age chart so the series reflects cert-
+    authoritative totals rather than monthly_summary flow sums (which
+    undercount deals with gaps in ABS-EE ingestion).
+    """
+    filings = q("SELECT servicer_cert_url, filing_date, accession_number FROM filings "
+                "WHERE deal=? AND servicer_cert_url IS NOT NULL", (deal,))
+    if filings.empty:
+        return []
+    from datetime import datetime as _dt
+    def _parse(s):
+        for fmt in ("%m/%d/%Y", "%Y-%m-%d", "%m-%d-%Y"):
+            try: return _dt.strptime(str(s).strip()[:10], fmt)
+            except (ValueError, TypeError): pass
+        return None
+    points = []
+    for _, row in filings.iterrows():
+        url = row["servicer_cert_url"]
+        p = urlparse(url)
+        path = os.path.join(_CACHE_DIR, p.path.strip("/").replace("/", "_"))
+        if not os.path.exists(path):
+            continue
+        try:
+            with open(path, "r", errors="replace") as f:
+                txt = f.read()
+        except OSError:
+            continue
+        body = re.sub(r"<[^>]+>", " ", re.sub(r"&nbsp;", " ", txt))
+        body = re.sub(r"\s+", " ", body)
+
+        def _grab(label):
+            pat = rf"{re.escape(label)}\s*\(?\s*\d+\s*\)?[^0-9]{{0,30}}([\d,]+(?:\.\d+)?)"
+            m = re.search(pat, body)
+            return float(m.group(1).replace(",", "")) if m else None
+
+        cn = (_grab("aggregate amount of Net Charged-Off Receivables losses as of the last day of the current Collection Period")
+              or _grab("Aggregate amount of Net Charged-Off Receivables losses as of the last day of the current Collection Period"))
+        if cn is None:
+            g = _grab("Aggregate Gross Charged-Off Receivables losses as of the last day of the current Collection Period")
+            l = _grab("Liquidation Proceeds as of the last day of the current Collection Period")
+            if g is not None and l is not None:
+                cn = g - l
+        if cn is None:
+            continue
+        # Extract the distribution date from the cert to anchor chronology
+        m = re.search(r"Distribution Date[:\s]+(\d{1,2}/\d{1,2}/\d{4})", body)
+        if not m:
+            # Fall back to filing_date
+            dt = _parse(row["filing_date"])
+        else:
+            dt = _parse(m.group(1))
+        if dt is None:
+            continue
+        points.append((dt, cn))
+    # Chronological, dedupe on date (keep max if multiple)
+    by_date = {}
+    for dt, cn in points:
+        by_date[dt] = max(by_date.get(dt, cn), cn)
+    return sorted(by_date.items())
+
+
+def get_cum_net_loss_rate(deal, orig_bal):
+    """Return the deal's cumulative net-loss rate as of the latest servicer cert.
+
+    Prefer the cert's "(98) aggregate amount of Net Charged-Off Receivables
+    losses as of the last day of the current Collection Period" — or, if that
+    specific line is missing from the cert, gross − liquidation proceeds from
+    the same cert. Fall back to summing monthly_summary flow data only when
+    no cert values can be parsed; that fallback is known to undercount any
+    deal with gaps in our ABS-EE ingestion (2020-P1, 2021-P1, 2021-P2 and a
+    handful of others are missing 1–4 early months).
+    """
+    if not orig_bal or orig_bal <= 0:
+        return None
+    t = _cert_totals(deal)
+    cn = t.get("cum_net_losses")
+    if cn is None:
+        cg = t.get("cum_gross_losses")
+        cl = t.get("cum_liquidation_proceeds")
+        if cg is not None and cl is not None:
+            cn = cg - cl
+    if cn is not None:
+        return cn / orig_bal
+    # Last-resort fallback: monthly_summary sums
+    loss = q("SELECT SUM(period_chargeoffs) as co, SUM(period_recoveries) as rec "
+             "FROM monthly_summary WHERE deal=?", (deal,))
+    if loss.empty:
+        return None
+    net = (loss.iloc[0]["co"] or 0) - (loss.iloc[0]["rec"] or 0)
+    return net / orig_bal
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# CarMax (CARMX) helpers
+#
+# CarMax pool_performance has the same schema as Carvana's, but distribution
+# dates are stored in M/D/YYYY string form — which does not string-sort in
+# chronological order. All CarMax helpers normalize via `nd()` (→ YYYY/MM/DD)
+# before sorting. Loan-level tables (loans, monthly_summary, loan_loss_summary)
+# exist in the schema but are empty today; anything that depends on them
+# degrades to a "loan-level data not yet ingested" message.
+# ────────────────────────────────────────────────────────────────────────────
+
+def carmax_available():
+    """True if the CarMax dashboard DB exists and has pool data."""
+    return CARMAX_DB is not None and bool(CARMAX_DEALS)
+
+
+def _carmax_pool(deal):
+    """Return CarMax pool_performance for a deal, normalized and chrono-sorted."""
+    if not carmax_available():
+        return pd.DataFrame()
+    pool = q("SELECT * FROM pool_performance WHERE deal=?", (deal,), db=CARMAX_DB)
+    if pool.empty:
+        return pool
+    pool["period"] = pool["distribution_date"].apply(nd)
+    pool = pool.sort_values("period").reset_index(drop=True)
+    # Derive cum_net_losses when the reporting cert populated only period flows.
+    # CarMax ingestion fills cumulative_net_losses for some deals and leaves it
+    # NULL for others; net_charged_off_amount is similarly sparse. We compute a
+    # derived column `cum_net_loss_derived` that falls back to cumsum of
+    # period net charge-offs so every deal has *something* to plot.
+    if "cumulative_net_losses" in pool.columns and pool["cumulative_net_losses"].notna().any():
+        pool["cum_net_loss_derived"] = pool["cumulative_net_losses"].ffill()
+    elif "net_charged_off_amount" in pool.columns and pool["net_charged_off_amount"].notna().any():
+        pool["cum_net_loss_derived"] = pool["net_charged_off_amount"].fillna(0).cumsum()
+    else:
+        pool["cum_net_loss_derived"] = pd.NA
+    return pool
+
+
+def get_carmax_orig_bal(deal):
+    """Return the deal's original cutoff pool balance for CarMax.
+
+    CarMax ingestion populates `initial_pool_balance` on every pool row for the
+    deals where the servicer cert reports it; we also fall back to the first
+    beginning_pool_balance we have on file. (We don't have servicer-cert HTML
+    cached for CarMax the way we do for Carvana, so the cert-parse fallback
+    used in get_orig_bal() doesn't apply here.)
+    """
+    if not carmax_available():
+        return None
+    df = q(
+        "SELECT initial_pool_balance FROM pool_performance "
+        "WHERE deal=? AND initial_pool_balance IS NOT NULL LIMIT 1",
+        (deal,), db=CARMAX_DB,
+    )
+    if not df.empty and df.iloc[0]["initial_pool_balance"]:
+        return float(df.iloc[0]["initial_pool_balance"])
+    df = q(
+        "SELECT MAX(beginning_pool_balance) AS m FROM pool_performance "
+        "WHERE deal=? AND beginning_pool_balance > 0",
+        (deal,), db=CARMAX_DB,
+    )
+    if not df.empty and df.iloc[0]["m"]:
+        return float(df.iloc[0]["m"])
+    return None
+
+
+def generate_carmax_deal_content(deal):
+    """Per-deal CarMax tab content. Mirrors generate_deal_content() layout
+    (Pool Summary / Delinquencies / Losses / Documents) but reads from the
+    CarMax DB and degrades gracefully where loan-level data is absent.
+
+    Returns (metrics_html, tabs_content) or None.
+    """
+    pool = _carmax_pool(deal)
+    if pool.empty:
+        logger.warning(f"[CARMX {deal}] No pool_performance, skipping")
+        return None
+
+    ORIG_BAL = get_carmax_orig_bal(deal)
+    x = pool["period"].tolist()
+    last = pool.iloc[-1]
+
+    # Last row may have stale/NULL values for some columns (e.g. cum_net_loss
+    # isn't reported on every cert). Pick the last non-null value instead.
+    def _last_nn(col):
+        if col not in pool.columns:
+            return None
+        s = pool[col].dropna()
+        return s.iloc[-1] if not s.empty else None
+
+    last_bal = _last_nn("ending_pool_balance")
+    last_count = _last_nn("ending_pool_count")
+    last_cum_loss = _last_nn("cum_net_loss_derived")
+    last_dq_bal = _last_nn("total_delinquent_balance")
+
+    sections = {}
+
+    # ── POOL SUMMARY ──
+    h = ""
+    bal = pool["ending_pool_balance"].ffill()
+    if bal.notna().any():
+        bal_m = [round(v / 1e6, 1) if pd.notna(v) else None for v in bal.tolist()]
+        h += chart(
+            [{"x": x, "y": bal_m, "type": "scatter", "fill": "tozeroy",
+              "line": {"color": "#F47920"}, "name": "Balance"}],
+            {"title": "Remaining Pool Balance ($M)",
+             "yaxis": {"ticksuffix": "M", "tickprefix": "$"},
+             "hovermode": "x unified"},
+        )
+    if "ending_pool_count" in pool.columns and pool["ending_pool_count"].notna().any():
+        h += chart(
+            [{"x": x, "y": [int(v) if pd.notna(v) else None for v in pool["ending_pool_count"].tolist()],
+              "type": "scatter", "line": {"color": "#FFD200"}, "name": "Loans"}],
+            {"title": "Active Loan Count", "hovermode": "x unified"},
+        )
+    if "weighted_avg_apr" in pool.columns and pool["weighted_avg_apr"].notna().any():
+        h += chart(
+            [{"x": x, "y": pool["weighted_avg_apr"].tolist(), "type": "scatter",
+              "line": {"color": "#F47920"}, "name": "Avg Consumer Rate"}],
+            {"title": "Avg Consumer Rate (Weighted APR)",
+             "yaxis": {"tickformat": ".2%"}, "hovermode": "x unified"},
+        )
+    if not h:
+        h = "<p>No pool performance data available.</p>"
+    sections["Pool Summary"] = h
+
+    # ── DELINQUENCIES ──
+    # CarMax reports dollar balances and counts by bucket on the servicer
+    # certificate. We plot the rate (balance / ending_pool_balance) as a
+    # stacked area, matching the Carvana layout.
+    h = ""
+    dq_cols = [
+        ("delinquent_31_60_balance", "31-60d", "#FFC107"),
+        ("delinquent_61_90_balance", "61-90d", "#FF9800"),
+        ("delinquent_91_120_balance", "91-120d", "#FF5722"),
+        ("delinquent_121_plus_balance", "121+d", "#D32F2F"),
+    ]
+    # Tail-amortization mask (audit #9). Rate denominator becomes noisy once
+    # the pool runs below 10% of its original balance; mask rates there and
+    # render raw dollar balances as a companion chart.
+    _tail_mask = [
+        (float(e) / ORIG_BAL) < 0.10 if (pd.notna(e) and e and ORIG_BAL) else False
+        for e in pool["ending_pool_balance"].tolist()
+    ]
+    traces = []
+    bal_traces = []
+    have_any_dq = False
+    for col, label, color in dq_cols:
+        if col in pool.columns and pool[col].notna().any():
+            rates = [
+                (float(b) / float(e)) if (pd.notna(b) and pd.notna(e) and e and not m)
+                else None
+                for b, e, m in zip(pool[col].tolist(),
+                                   pool["ending_pool_balance"].tolist(),
+                                   _tail_mask)
+            ]
+            traces.append({
+                "x": x, "y": rates, "name": label,
+                "stackgroup": "dq", "line": {"color": color},
+            })
+            bal_traces.append({
+                "x": x, "y": pool[col].tolist(), "name": label,
+                "stackgroup": "dq", "line": {"color": color},
+            })
+            have_any_dq = True
+    if have_any_dq:
+        h += chart(traces, {
+            "title": "Delinquency Rates (% of Pool)",
+            "yaxis": {"tickformat": ".2%"}, "hovermode": "x unified",
+        })
+        if any(_tail_mask) and bal_traces:
+            h += chart(bal_traces, {
+                "title": "Delinquency Balances ($) — pool &lt; 10% of original",
+                "yaxis": {"tickformat": "$,.0f"}, "hovermode": "x unified",
+            })
+            h += ('<p style="font-size:.75rem;color:#666;margin-top:-4px;">'
+                  "Rate trace is suppressed once the pool amortizes below 10% "
+                  "of its original balance — the denominator becomes too small "
+                  "to be meaningful. Raw dollar balances remain visible."
+                  "</p>")
+    # Trigger vs actual (CarMax reports delinquency_trigger_actual; trigger
+    # level may be absent on many certs)
+    if "delinquency_trigger_actual" in pool.columns and pool["delinquency_trigger_actual"].notna().any():
+        trig = pool.dropna(subset=["delinquency_trigger_actual"])
+        t_traces = [{
+            "x": trig["period"].tolist(),
+            "y": trig["delinquency_trigger_actual"].tolist(),
+            "name": "Actual", "line": {"color": "#F47920"},
+        }]
+        if "delinquency_trigger_level" in pool.columns and pool["delinquency_trigger_level"].notna().any():
+            tg = pool.dropna(subset=["delinquency_trigger_level"])
+            t_traces.append({
+                "x": tg["period"].tolist(),
+                "y": tg["delinquency_trigger_level"].tolist(),
+                "name": "Trigger", "line": {"dash": "dash", "color": "red"},
+            })
+        h += chart(t_traces, {
+            "title": "Delinquency Trigger vs Actual",
+            "yaxis": {"tickformat": ".2%"}, "hovermode": "x unified",
+        })
+    # Latest-period DQ table
+    if last_bal:
+        dq_tbl_rows = []
+        for col, label, _ in dq_cols:
+            cnt_col = col.replace("_balance", "_count")
+            b = last.get(col)
+            c = last.get(cnt_col) if cnt_col in pool.columns else None
+            if pd.notna(b):
+                pct = f"{float(b) / float(last_bal):.2%}" if last_bal else "-"
+                dq_tbl_rows.append({
+                    "Bucket": label,
+                    "Count": f"{int(c):,}" if pd.notna(c) else "-",
+                    "Balance": fm(float(b)),
+                    "% Pool": pct,
+                })
+        total_b = last.get("total_delinquent_balance")
+        if pd.notna(total_b):
+            dq_tbl_rows.append({
+                "Bucket": "Total",
+                "Count": f"{int(last.get('delinquent_31_60_count') or 0) + int(last.get('delinquent_61_90_count') or 0) + int(last.get('delinquent_91_120_count') or 0) + int(last.get('delinquent_121_plus_count') or 0):,}",
+                "Balance": fm(float(total_b)),
+                "% Pool": f"{float(total_b) / float(last_bal):.2%}" if last_bal else "-",
+            })
+        if dq_tbl_rows:
+            h += "<h3>Latest Period</h3>" + table_html(pd.DataFrame(dq_tbl_rows))
+
+    if not h:
+        h = "<p>No delinquency data available.</p>"
+    sections["Delinquencies"] = h
+
+    # ── LOSSES ──
+    h = ""
+    if ORIG_BAL and pool["cum_net_loss_derived"].notna().any():
+        loss_rate = [
+            (float(v) / ORIG_BAL) if pd.notna(v) else None
+            for v in pool["cum_net_loss_derived"].tolist()
+        ]
+        h += chart(
+            [{"x": x, "y": loss_rate, "type": "scatter", "fill": "tozeroy",
+              "line": {"color": "#D32F2F"}}],
+            {"title": f"Cumulative Net Loss Rate (% of {fm(ORIG_BAL)})",
+             "yaxis": {"tickformat": ".2%"}, "hovermode": "x unified"},
+        )
+    # Gross / net / recoveries (cumulative) — use cumulative_gross_losses and
+    # cumulative_liquidation_proceeds where reported, cumsum of period flows
+    # otherwise.
+    cum_gross = pool.get("cumulative_gross_losses")
+    cum_rec = pool.get("cumulative_liquidation_proceeds")
+    if cum_gross is None or not cum_gross.notna().any():
+        if "gross_charged_off_amount" in pool.columns and pool["gross_charged_off_amount"].notna().any():
+            cum_gross = pool["gross_charged_off_amount"].fillna(0).cumsum()
+    if cum_rec is None or not cum_rec.notna().any():
+        if "recoveries" in pool.columns and pool["recoveries"].notna().any():
+            cum_rec = pool["recoveries"].fillna(0).cumsum()
+
+    gross_vals = cum_gross.tolist() if cum_gross is not None and cum_gross.notna().any() else None
+    rec_vals = cum_rec.tolist() if cum_rec is not None and cum_rec.notna().any() else None
+    net_vals = pool["cum_net_loss_derived"].tolist() if pool["cum_net_loss_derived"].notna().any() else None
+    if any([gross_vals, rec_vals, net_vals]):
+        traces = []
+        if gross_vals:
+            traces.append({"x": x, "y": gross_vals, "name": "Gross Chargeoffs",
+                           "line": {"color": "#D32F2F"}})
+        if rec_vals:
+            traces.append({"x": x, "y": rec_vals, "name": "Liquidation Proceeds",
+                           "line": {"color": "#4CAF50"}})
+        if net_vals:
+            traces.append({"x": x, "y": net_vals, "name": "Net Losses",
+                           "line": {"color": "#FF9800", "dash": "dash"}})
+            # Restatement envelope + markers (audit finding #7). Servicers
+            # sometimes restate cumulative_net_losses downward in a later
+            # period. Overlay the running max (monotone envelope) and drop
+            # a subtle marker where the raw series ticks down.
+            envelope, markers_x, markers_y = _restatement_overlay(x, net_vals)
+            if envelope is not None:
+                traces.append({"x": x, "y": envelope, "name": "Net Losses (monotone envelope)",
+                               "line": {"color": "#FF9800", "dash": "dot", "width": 1},
+                               "opacity": 0.5})
+            if markers_x:
+                traces.append({
+                    "x": markers_x, "y": markers_y, "name": "Restatement",
+                    "mode": "markers", "type": "scatter",
+                    "marker": {"symbol": "triangle-down", "size": 9, "color": "#607D8B"},
+                    "hovertemplate": "Servicer restated cumulative loss on %{x}<extra></extra>",
+                })
+        h += chart(traces, {
+            "title": "Cumulative Gross Losses vs Recoveries",
+            "yaxis": {"tickformat": "$,.0f"}, "hovermode": "x unified",
+        })
+    # Monthly flows
+    co_flow = pool.get("gross_charged_off_amount")
+    rec_flow = pool.get("recoveries")
+    if ((co_flow is not None and co_flow.notna().any())
+            or (rec_flow is not None and rec_flow.notna().any())):
+        traces = []
+        if co_flow is not None and co_flow.notna().any():
+            traces.append({"x": x, "y": co_flow.tolist(), "name": "Chargeoffs",
+                           "type": "bar", "marker": {"color": "#D32F2F"}})
+        if rec_flow is not None and rec_flow.notna().any():
+            traces.append({"x": x, "y": rec_flow.tolist(), "name": "Recoveries",
+                           "type": "bar", "marker": {"color": "#4CAF50"}})
+        h += chart(traces, {
+            "title": "Monthly Chargeoffs vs Recoveries", "barmode": "group",
+            "yaxis": {"tickformat": "$,.0f"}, "hovermode": "x unified",
+        })
+
+    h += ('<p style="font-size:.75rem;color:#666;margin-top:8px;">'
+          "Loan-level loss breakdowns (by credit score, interest rate) require "
+          "ABS-EE loan tape ingestion which is not yet complete for CarMax. "
+          "Pool-level losses above are parsed from the servicer certificate.</p>")
+    sections["Losses"] = h
+
+    # ── CASH WATERFALL ──
+    # Mirrors the Carvana servicer-certificate waterfall.  CarMax pool_performance
+    # has: interest_collections, principal_collections, liquidation_proceeds,
+    # actual_servicing_fee, regular_pda, residual_cash, total_deposited.
+    h = ""
+    wf_avail = (not pool.empty
+                and any(c in pool.columns and pool[c].notna().any()
+                        for c in ["total_deposited", "interest_collections",
+                                  "principal_collections", "residual_cash"]))
+    if wf_avail:
+        # ── Stacked bar: collections breakdown ──
+        bar_traces = []
+        bar_cols = [
+            ("interest_collections", "Interest Collections", "#1976D2"),
+            ("principal_collections", "Principal Collections", "#388E3C"),
+            ("liquidation_proceeds", "Liquidation Proceeds", "#FF9800"),
+        ]
+        for col, name, color in bar_cols:
+            if col in pool.columns and pool[col].notna().any():
+                bar_traces.append({
+                    "x": x, "y": pool[col].fillna(0).tolist(),
+                    "name": name, "type": "bar",
+                    "marker": {"color": color},
+                })
+        # Line overlay: servicing fee, principal distributable, residual
+        line_cols = [
+            ("actual_servicing_fee", "Servicing Fee", "#9C27B0", "dot"),
+            ("regular_pda", "Principal Distributable", "#607D8B", "dash"),
+            ("residual_cash", "Residual (to Equity)", "#F47920", "solid"),
+        ]
+        for col, name, color, dash in line_cols:
+            if col in pool.columns and pool[col].notna().any():
+                bar_traces.append({
+                    "x": x, "y": pool[col].fillna(0).tolist(),
+                    "name": name, "type": "scatter",
+                    "line": {"color": color, "dash": dash},
+                })
+        if bar_traces:
+            h += chart(bar_traces, {
+                "title": "Monthly Cash Waterfall",
+                "barmode": "stack",
+                "yaxis": {"tickformat": "$,.0f"},
+                "hovermode": "x unified",
+            })
+
+        # ── Waterfall table ──
+        wf_cols = ["period"]
+        wf_names = ["Period"]
+        for col, name in [("total_deposited", "Total Deposited"),
+                          ("interest_collections", "Interest Collections"),
+                          ("principal_collections", "Principal Collections"),
+                          ("liquidation_proceeds", "Liquidation Proceeds"),
+                          ("actual_servicing_fee", "Servicing Fee"),
+                          ("regular_pda", "Principal Dist"),
+                          ("residual_cash", "Residual (to Equity)")]:
+            if col in pool.columns and pool[col].notna().any():
+                wf_cols.append(col)
+                wf_names.append(name)
+        if len(wf_cols) > 1:
+            wf_pool = pool[wf_cols].copy()
+            wf_pool.columns = wf_names
+            sums_wf = wf_pool.select_dtypes(include="number").sum()
+            sr_wf = pd.DataFrame([["TOTAL"] + sums_wf.tolist()], columns=wf_pool.columns)
+            wf_pool_all = pd.concat([wf_pool, sr_wf], ignore_index=True)
+            wf_pool_fmt = wf_pool_all.copy()
+            for c in wf_pool_fmt.columns[1:]:
+                wf_pool_fmt[c] = wf_pool_all[c].apply(lambda v: fm(v) if pd.notna(v) and v != 0 else "-")
+            h += table_html(wf_pool_fmt)
+
+        # ── Cumulative residual cash chart ──
+        if "residual_cash" in pool.columns and pool["residual_cash"].notna().any():
+            res_data = pool[pool["residual_cash"].notna()]
+            if not res_data.empty and ORIG_BAL and ORIG_BAL > 0:
+                cum_res = res_data["residual_cash"].cumsum()
+                cum_res_pct = cum_res / ORIG_BAL
+                h += chart([{"x": res_data["period"].tolist(), "y": cum_res_pct.tolist(),
+                             "type": "scatter", "fill": "tozeroy", "line": {"color": "#388E3C"}}],
+                           {"title": "Cumulative Cash to Residual (% of Original Balance)",
+                            "yaxis": {"tickformat": ".2%"}, "hovermode": "x unified"})
+
+    if not h:
+        h = "<p>No cash waterfall data available for this deal.</p>"
+    sections["Cash Waterfall"] = h
+
+    # ── RECOVERY ──
+    # Pool-level recovery analysis from pool_performance columns.
+    # CarMax doesn't have loan-level loan_loss_summary, so we use aggregate
+    # monthly flows: recoveries, gross_charged_off_amount, net_charged_off_amount,
+    # and cumulative counterparts.
+    h = ""
+    has_recovery_data = (not pool.empty
+                         and "recoveries" in pool.columns
+                         and pool["recoveries"].notna().any())
+    has_gross_co = (not pool.empty
+                    and "gross_charged_off_amount" in pool.columns
+                    and pool["gross_charged_off_amount"].notna().any())
+
+    if has_recovery_data or has_gross_co:
+        # ── Monthly flows: gross charge-offs vs recoveries vs net losses ──
+        flow_traces = []
+        if has_gross_co:
+            flow_traces.append({
+                "x": x, "y": pool["gross_charged_off_amount"].fillna(0).tolist(),
+                "name": "Gross Charge-Offs", "type": "bar",
+                "marker": {"color": "#D32F2F"},
+            })
+        if has_recovery_data:
+            flow_traces.append({
+                "x": x, "y": pool["recoveries"].fillna(0).tolist(),
+                "name": "Recoveries", "type": "bar",
+                "marker": {"color": "#4CAF50"},
+            })
+        net_co_col = None
+        if "net_charged_off_amount" in pool.columns and pool["net_charged_off_amount"].notna().any():
+            net_co_col = "net_charged_off_amount"
+        if net_co_col:
+            flow_traces.append({
+                "x": x, "y": pool[net_co_col].fillna(0).tolist(),
+                "name": "Net Losses", "type": "scatter",
+                "line": {"color": "#FF9800", "dash": "dash"},
+            })
+        if flow_traces:
+            h += chart(flow_traces, {
+                "title": "Monthly Gross Charge-Offs vs Recoveries",
+                "barmode": "group",
+                "yaxis": {"tickformat": "$,.0f"},
+                "hovermode": "x unified",
+            })
+
+        # ── Recovery rate over time ──
+        if has_gross_co and has_recovery_data:
+            # Trailing-12 recovery rate (smoothed) — ratio of sum(recoveries) / sum(gross_co) over rolling 12 periods
+            gross_s = pool["gross_charged_off_amount"].fillna(0)
+            rec_s = pool["recoveries"].fillna(0)
+            roll_gross = gross_s.rolling(12, min_periods=3).sum()
+            roll_rec = rec_s.rolling(12, min_periods=3).sum()
+            roll_rate = (roll_rec / roll_gross.replace(0, float("nan")))
+            if roll_rate.notna().any():
+                h += chart([{
+                    "x": x, "y": [round(v, 4) if pd.notna(v) else None for v in roll_rate.tolist()],
+                    "type": "scatter", "line": {"color": "#1976D2"},
+                }], {
+                    "title": "Trailing-12 Recovery Rate (Recoveries / Gross Charge-Offs)",
+                    "yaxis": {"tickformat": ".1%"},
+                    "hovermode": "x unified",
+                })
+
+        # ── Cumulative view ──
+        cum_traces = []
+        # Use reported cumulative columns if available, else cumsum
+        _cum_gross = pool.get("cumulative_gross_losses")
+        if _cum_gross is None or not _cum_gross.notna().any():
+            if has_gross_co:
+                _cum_gross = pool["gross_charged_off_amount"].fillna(0).cumsum()
+        _cum_rec = pool.get("cumulative_liquidation_proceeds")
+        if _cum_rec is None or not _cum_rec.notna().any():
+            if has_recovery_data:
+                _cum_rec = pool["recoveries"].fillna(0).cumsum()
+        _cum_net = pool.get("cumulative_net_losses")
+        if _cum_net is None or not _cum_net.notna().any():
+            if "cum_net_loss_derived" in pool.columns and pool["cum_net_loss_derived"].notna().any():
+                _cum_net = pool["cum_net_loss_derived"]
+
+        if _cum_gross is not None and _cum_gross.notna().any():
+            cum_traces.append({"x": x, "y": _cum_gross.tolist(),
+                               "name": "Cum Gross Losses", "line": {"color": "#D32F2F"}})
+        if _cum_rec is not None and _cum_rec.notna().any():
+            cum_traces.append({"x": x, "y": _cum_rec.tolist(),
+                               "name": "Cum Recoveries", "line": {"color": "#4CAF50"}})
+        if _cum_net is not None and _cum_net.notna().any():
+            cum_traces.append({"x": x, "y": _cum_net.tolist(),
+                               "name": "Cum Net Losses",
+                               "line": {"color": "#FF9800", "dash": "dash"}})
+        if cum_traces:
+            h += chart(cum_traces, {
+                "title": "Cumulative Gross Losses, Recoveries & Net Losses",
+                "yaxis": {"tickformat": "$,.0f"},
+                "hovermode": "x unified",
+            })
+
+        # ── Recovery data table ──
+        rec_tbl_cols = ["period"]
+        rec_tbl_names = ["Period"]
+        for col, name in [("gross_charged_off_amount", "Gross Charge-Offs"),
+                          ("recoveries", "Recoveries"),
+                          ("net_charged_off_amount", "Net Losses")]:
+            if col in pool.columns and pool[col].notna().any():
+                rec_tbl_cols.append(col)
+                rec_tbl_names.append(name)
+        if len(rec_tbl_cols) > 1:
+            rec_tbl = pool[rec_tbl_cols].copy()
+            rec_tbl.columns = rec_tbl_names
+            sums_r = rec_tbl.select_dtypes(include="number").sum()
+            sr_r = pd.DataFrame([["TOTAL"] + sums_r.tolist()], columns=rec_tbl.columns)
+            rec_tbl_all = pd.concat([rec_tbl, sr_r], ignore_index=True)
+            rec_tbl_fmt = rec_tbl_all.copy()
+            for c in rec_tbl_fmt.columns[1:]:
+                rec_tbl_fmt[c] = rec_tbl_all[c].apply(lambda v: fm(v) if pd.notna(v) and v != 0 else "-")
+            h += table_html(rec_tbl_fmt)
+
+        # ── Summary metrics ──
+        total_gross = pool["gross_charged_off_amount"].fillna(0).sum() if has_gross_co else 0
+        total_rec = pool["recoveries"].fillna(0).sum() if has_recovery_data else 0
+        overall_rate = total_rec / total_gross if total_gross > 0 else 0
+        h = (f'<div class="metrics">'
+             f'<div class="metric"><div class="mv">{fm(total_gross)}</div><div class="ml">Total Gross Charge-Offs</div></div>'
+             f'<div class="metric"><div class="mv">{fm(total_rec)}</div><div class="ml">Total Recoveries</div></div>'
+             f'<div class="metric"><div class="mv">{overall_rate:.1%}</div><div class="ml">Overall Recovery Rate</div></div>'
+             f'</div>') + h
+
+    if not h:
+        h = "<p>No recovery data available for this deal.</p>"
+    sections["Recovery"] = h
+
+    # ── NOTES & OC ──
+    # Mirrors the Carvana Notes & OC block (generate_deal_content). CarMax
+    # ingestion now populates note_balance_a1..a4/b/c/d, aggregate_note_balance,
+    # reserve_account_balance and overcollateralization_amount on every deal
+    # (commit 84a7ebb). `dist_date_iso` orders chronologically. Carvana's
+    # `notes` table isn't populated for CarMax, so we don't attempt a
+    # subordination-ratio view.
+    h = ""
+    if not pool.empty:
+        nc = [c for c in ["note_balance_a1","note_balance_a2","note_balance_a3","note_balance_a4",
+                           "note_balance_b","note_balance_c","note_balance_d"]
+              if c in pool.columns and pool[c].notna().any()
+              and (pool[c].fillna(0) > 0).any()]  # omit class that is always 0
+        if nc:
+            traces = []
+            for c in nc:
+                traces.append({"x": pool["period"].tolist(), "y": pool[c].fillna(0).tolist(),
+                               "name": c.replace("note_balance_","").upper(),
+                               "stackgroup": "notes"})
+            h += chart(traces, {"title": "Note Balances by Class",
+                                "yaxis": {"tickformat": "$,.0f"}, "hovermode": "x unified"})
+        # Reserve account + OC lines (separate chart — different magnitudes)
+        oc_traces = []
+        if "overcollateralization_amount" in pool.columns and pool["overcollateralization_amount"].notna().any():
+            oc_nn = pool.dropna(subset=["overcollateralization_amount"])
+            oc_traces.append({"x": oc_nn["period"].tolist(),
+                              "y": oc_nn["overcollateralization_amount"].tolist(),
+                              "name": "Overcollateralization",
+                              "line": {"color": "#F47920"}})
+        if "reserve_account_balance" in pool.columns and pool["reserve_account_balance"].notna().any():
+            rb_nn = pool.dropna(subset=["reserve_account_balance"])
+            oc_traces.append({"x": rb_nn["period"].tolist(),
+                              "y": rb_nn["reserve_account_balance"].tolist(),
+                              "name": "Reserve Account",
+                              "line": {"color": "#FFD200"}})
+        if oc_traces:
+            h += chart(oc_traces, {"title": "Overcollateralization & Reserve Account",
+                                   "yaxis": {"tickformat": "$,.0f"},
+                                   "hovermode": "x unified"})
+    if not h:
+        h = "<p>No note-balance or credit-enhancement data available.</p>"
+    sections["Notes & OC"] = h
+
+    # ── DOCUMENTS ──
+    h = ""
+    try:
+        certs = q(
+            "SELECT filing_date, servicer_cert_url, accession_number FROM filings "
+            "WHERE deal=? AND servicer_cert_url IS NOT NULL ORDER BY filing_date DESC",
+            (deal,), db=CARMAX_DB,
+        )
+        if not certs.empty:
+            h += "<h3>Servicer Certificates</h3>"
+            cert_rows = []
+            for _, row in certs.iterrows():
+                fd = row["filing_date"]
+                try:
+                    dt_obj = datetime.strptime(str(fd).strip()[:10], "%Y-%m-%d")
+                    date_display = dt_obj.strftime("%b %Y")
+                except (ValueError, TypeError):
+                    date_display = str(fd)[:10] if fd else "Unknown"
+                link = f'<a href="{row["servicer_cert_url"]}" target="_blank" rel="noopener">SEC&nbsp;Filing</a>'
+                cert_rows.append({"Date": date_display, "Download": link})
+            h += table_html(pd.DataFrame(cert_rows), cls="compare")
+    except Exception as e:
+        logger.warning(f"[CARMX {deal}] Error building servicer cert links: {e}")
+
+    try:
+        from carmax_abs.config import DEALS as CARMAX_DEAL_REGISTRY
+        deal_info = CARMAX_DEAL_REGISTRY.get(deal, {})
+        cik = deal_info.get("cik", "")
+        entity = deal_info.get("entity_name", f"CarMax Auto Owner Trust {deal}")
+        if cik:
+            h += "<h3>Prospectus &amp; Other Filings</h3>"
+            edgar_base = f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK={cik}"
+            filing_links = [
+                {"Document": "All SEC Filings",
+                 "Description": f"Complete filing history for {entity}",
+                 "Link": f'<a href="{edgar_base}&type=&dateb=&owner=include&count=40" target="_blank" rel="noopener">EDGAR</a>'},
+                {"Document": "Prospectus (424B)",
+                 "Description": "Offering prospectus and supplements",
+                 "Link": f'<a href="{edgar_base}&type=424B&dateb=&owner=include&count=10" target="_blank" rel="noopener">EDGAR</a>'},
+                {"Document": "Annual Reports (10-K)",
+                 "Description": "Annual reports filed with SEC",
+                 "Link": f'<a href="{edgar_base}&type=10-K&dateb=&owner=include&count=10" target="_blank" rel="noopener">EDGAR</a>'},
+                {"Document": "Current Reports (8-K)",
+                 "Description": "Material event disclosures",
+                 "Link": f'<a href="{edgar_base}&type=8-K&dateb=&owner=include&count=10" target="_blank" rel="noopener">EDGAR</a>'},
+            ]
+            h += table_html(pd.DataFrame(filing_links), cls="compare")
+    except Exception as e:
+        logger.warning(f"[CARMX {deal}] Error building prospectus links: {e}")
+
+    if not h:
+        h = "<p>No documents available for this deal.</p>"
+    sections["Documents"] = h
+
+    # ── Metric strip ──
+    pool_factor_display = (f"{float(last_bal) / ORIG_BAL:.1%}"
+                           if (last_bal and ORIG_BAL and ORIG_BAL > 0) else "-")
+    cum_loss_display = (f"{float(last_cum_loss) / ORIG_BAL:.2%}"
+                        if (last_cum_loss is not None and ORIG_BAL and ORIG_BAL > 0) else "-")
+    dq_display = (f"{float(last_dq_bal) / float(last_bal):.2%}"
+                  if (last_dq_bal is not None and last_bal) else "-")
+
+    loan_count_display = f"{int(last_count):,}" if (last_count is not None and pd.notna(last_count)) else "-"
+    metrics_html = f"""<div class="metrics">
+<div class="metric"><div class="mv">{fm(ORIG_BAL) if ORIG_BAL else '-'}</div><div class="ml">Original Balance</div></div>
+<div class="metric"><div class="mv">{fm(last_bal) if last_bal else '-'}</div><div class="ml">Current Balance</div></div>
+<div class="metric"><div class="mv">{pool_factor_display}</div><div class="ml">Pool Factor</div></div>
+<div class="metric"><div class="mv">{loan_count_display}</div><div class="ml">Active Loans</div></div>
+<div class="metric"><div class="mv">{cum_loss_display}</div><div class="ml">Cum Loss Rate</div></div>
+<div class="metric"><div class="mv">{dq_display}</div><div class="ml">Total DQ Rate</div></div>
+</div>"""
+
+    # CarMax sub-tab buttons — hash-routed by shared.js (no inline onclick).
+    # Sub-tab slugs mirror Carvana per-deal pages for consistency.
+    tabs_html = _render_subtab_buttons(sections)
+    content_html = _render_subtab_panes(sections)
+    return metrics_html, f'<div class="tabs">{tabs_html}</div>\n{content_html}'
+
+
+def _carmax_pool_time_series(deal):
+    """Return normalized pool_performance for a CarMax deal with derived columns
+    needed by the comparison tabs. Returns an empty frame if no data."""
+    return _carmax_pool(deal)
+
+
+def _carmax_traces(deals, color_map=None):
+    """Compute comparison traces (pool factor by age, cum net loss by age,
+    loss vs pool factor, excess spread (stub), 30+ DQ by age, annualized CO
+    rate by age) for a list of CarMax deals. Returns a dict with keys:
+
+        pf, pf_loss, cum_loss_age, dq, co, spread
+
+    each a list of Plotly trace dicts. color_map is {deal: hex}; if None, the
+    CARMAX_COLORS palette is cycled.
+    """
+    out = {"pf": [], "pf_loss": [], "cum_loss_age": [], "dq": [], "co": [], "spread": []}
+    if not carmax_available():
+        return out
+    for i, deal in enumerate(deals):
+        color = color_map[deal] if color_map else CARMAX_COLORS[i % len(CARMAX_COLORS)]
+        pool = _carmax_pool(deal)
+        if pool.empty:
+            continue
+        orig_bal = get_carmax_orig_bal(deal)
+        if not orig_bal or orig_bal <= 0:
+            continue
+        age = list(range(1, len(pool) + 1))
+
+        # Pool factor by age — ending balance / initial pool balance
+        if "ending_pool_balance" in pool.columns and pool["ending_pool_balance"].notna().any():
+            pf = [(float(v) / orig_bal) if pd.notna(v) else None
+                  for v in pool["ending_pool_balance"].tolist()]
+            out["pf"].append({
+                "x": age, "y": pf, "type": "scatter", "mode": "lines",
+                "name": f"CARMX {deal}", "line": {"color": color},
+            })
+
+        # Cum net loss rate by age
+        if pool["cum_net_loss_derived"].notna().any():
+            cr = [(float(v) / orig_bal) if pd.notna(v) else None
+                  for v in pool["cum_net_loss_derived"].tolist()]
+            out["cum_loss_age"].append({
+                "x": age, "y": cr, "type": "scatter", "mode": "lines",
+                "name": f"CARMX {deal}", "line": {"color": color},
+            })
+
+            # Loss vs pool factor — x=pool factor, y=cum net loss rate
+            if "ending_pool_balance" in pool.columns and pool["ending_pool_balance"].notna().any():
+                xs, ys = [], []
+                for epb, cn in zip(pool["ending_pool_balance"].tolist(),
+                                   pool["cum_net_loss_derived"].tolist()):
+                    if pd.notna(epb) and pd.notna(cn) and epb > 0:
+                        xs.append(float(epb) / orig_bal)
+                        ys.append(float(cn) / orig_bal)
+                if xs:
+                    out["pf_loss"].append({
+                        "x": xs, "y": ys, "type": "scatter",
+                        "mode": "lines+markers", "name": f"CARMX {deal}",
+                        "line": {"color": color}, "marker": {"size": 4},
+                    })
+
+        # 30+ DQ rate by age
+        if (
+            "total_delinquent_balance" in pool.columns
+            and pool["total_delinquent_balance"].notna().any()
+            and "ending_pool_balance" in pool.columns
+        ):
+            dq = []
+            for tdq, epb in zip(pool["total_delinquent_balance"].tolist(),
+                                pool["ending_pool_balance"].tolist()):
+                if pd.notna(tdq) and pd.notna(epb) and epb > 0:
+                    dq.append(float(tdq) / float(epb))
+                else:
+                    dq.append(None)
+            out["dq"].append({
+                "x": age, "y": dq, "type": "scatter", "mode": "lines",
+                "name": f"CARMX {deal}", "line": {"color": color},
+            })
+
+        # Annualized net charge-off rate by age — uses net_charged_off_amount
+        # where populated; requires a prior-period balance as the denominator.
+        if (
+            "net_charged_off_amount" in pool.columns
+            and pool["net_charged_off_amount"].notna().any()
+            and "beginning_pool_balance" in pool.columns
+        ):
+            co_x, co_y = [], []
+            for j, row in pool.iterrows():
+                nco = row.get("net_charged_off_amount")
+                pb = row.get("beginning_pool_balance")
+                if pd.notna(nco) and pd.notna(pb) and float(pb) > 0:
+                    co_x.append(j + 1)
+                    co_y.append((float(nco) * 12.0) / float(pb))
+            if co_x:
+                out["co"].append({
+                    "x": co_x, "y": co_y, "type": "scatter", "mode": "lines",
+                    "name": f"CARMX {deal}", "line": {"color": color},
+                })
+
+        # Excess spread — WAC minus cost-of-debt. CarMax pool has
+        # weighted_avg_apr and total_note_interest + aggregate_note_balance
+        # on (some) rows, matching the Carvana definition.
+        wac_col = pool.get("weighted_avg_apr")
+        ni_col = pool.get("total_note_interest")
+        nb_col = pool.get("aggregate_note_balance")
+        if (
+            wac_col is not None and wac_col.notna().any()
+            and ni_col is not None and ni_col.notna().any()
+            and nb_col is not None and nb_col.notna().any()
+        ):
+            xs, ys = [], []
+            for j, row in pool.iterrows():
+                w = row.get("weighted_avg_apr")
+                ni = row.get("total_note_interest")
+                nb = row.get("aggregate_note_balance")
+                if pd.notna(w) and pd.notna(ni) and pd.notna(nb) and float(nb) > 0 and float(ni) > 0:
+                    cod = float(ni) / float(nb) * 12.0
+                    if 0 < cod < 0.25:
+                        xs.append(j + 1)
+                        ys.append(float(w) - cod)
+            # Drop first point (partial-accrual artifact) to match Carvana chart
+            if len(xs) > 1:
+                xs, ys = xs[1:], ys[1:]
+            if xs:
+                out["spread"].append({
+                    "x": xs, "y": ys, "type": "scatter", "mode": "lines",
+                    "name": f"CARMX {deal}", "line": {"color": color},
+                })
+    return out
+
+
+def generate_carmax_comparison_content(deals, title):
+    """CarMax Prime comparison tab. Mirrors generate_comparison_content() but
+    pulls from the CarMax DB and uses the CARMAX_COLORS palette. Where CarMax
+    lacks data (loan tapes, cert text), sections degrade gracefully."""
+    if not carmax_available() or not deals:
+        return "<p>CarMax data not available.</p>"
+    h = ""
+
+    # Summary table — minimal, pool-level only
+    rows = []
+    for deal in deals:
+        orig = get_carmax_orig_bal(deal)
+        pool = _carmax_pool(deal)
+        last_bal = None
+        if "ending_pool_balance" in pool.columns and pool["ending_pool_balance"].notna().any():
+            last_bal = float(pool["ending_pool_balance"].dropna().iloc[-1])
+        pf = (last_bal / orig) if (last_bal and orig) else None
+        last_cn = None
+        if pool["cum_net_loss_derived"].notna().any():
+            last_cn = float(pool["cum_net_loss_derived"].dropna().iloc[-1])
+        cum_loss = (last_cn / orig) if (last_cn is not None and orig) else None
+        init_wac = curr_wac = None
+        if "weighted_avg_apr" in pool.columns and pool["weighted_avg_apr"].notna().any():
+            nonnull = pool["weighted_avg_apr"].dropna()
+            init_wac = float(nonnull.iloc[0])
+            curr_wac = float(nonnull.iloc[-1])
+        rows.append({
+            "Deal": f"CARMX {deal}",
+            "Initial Avg Consumer Rate": f"{init_wac:.2%}" if init_wac is not None else "-",
+            "Current Avg Consumer Rate": f"{curr_wac:.2%}" if curr_wac is not None else "-",
+            "Init Balance": fm(orig) if orig else "-",
+            "Pool Factor": f"{pf:.1%}" if pf is not None else "-",
+            "Cum Loss": f"{cum_loss:.2%}" if cum_loss is not None else "-",
+        })
+    if rows:
+        h += f"<h3>{title} — Summary</h3>" + table_html(pd.DataFrame(rows), cls="compare")
+
+    t = _carmax_traces(deals)
+
+    def _plot(bucket, layout):
+        if t.get(bucket):
+            return chart(t[bucket], layout, height=450)
+        return ""
+
+    h += _plot("pf", {
+        "title": f"{title} — Pool Factor by Deal Age",
+        "xaxis": {"title": "Deal Age (Months)"},
+        "yaxis": {"tickformat": ".0%", "title": "Pool Factor (Remaining / Original)"},
+        "hovermode": "x unified", "legend": {"orientation": "h", "y": -0.3},
+    })
+    h += _plot("cum_loss_age", {
+        "title": f"{title} — Cumulative Net Loss Rate by Deal Age",
+        "xaxis": {"title": "Deal Age (Months)"},
+        "yaxis": {"tickformat": ".2%", "title": "Cum Net Loss (% of Orig Bal)"},
+        "hovermode": "x unified", "legend": {"orientation": "h", "y": -0.3},
+    })
+    h += _plot("pf_loss", {
+        "title": f"{title} — Cumulative Net Loss vs Pool Factor",
+        "xaxis": {"title": "Pool Factor (Remaining / Original)",
+                  "tickformat": ".0%", "autorange": "reversed"},
+        "yaxis": {"tickformat": ".2%", "title": "Cum Net Loss (% of Orig Bal)"},
+        "hovermode": "closest", "legend": {"orientation": "h", "y": -0.3},
+    })
+    h += _plot("dq", {
+        "title": f"{title} — Total Delinquency Rate by Deal Age",
+        "xaxis": {"title": "Deal Age (Months)"},
+        "yaxis": {"tickformat": ".2%", "title": "Total DQ Balance / Pool Balance"},
+        "hovermode": "x unified", "legend": {"orientation": "h", "y": -0.3},
+    })
+    h += _plot("co", {
+        "title": f"{title} — Annualized Net Charge-Off Rate by Deal Age",
+        "xaxis": {"title": "Deal Age (Months)"},
+        "yaxis": {"tickformat": ".2%",
+                  "title": "Net Charge-Offs × 12 / Prior Month Balance"},
+        "hovermode": "x unified", "legend": {"orientation": "h", "y": -0.3},
+    })
+    h += _plot("spread", {
+        "title": f"{title} — Excess Spread by Deal Age (Consumer Rate − Trust Cost of Debt)",
+        "xaxis": {"title": "Deal Age (Months)"},
+        "yaxis": {"tickformat": ".2%", "title": "Excess Spread"},
+        "hovermode": "x unified", "legend": {"orientation": "h", "y": -0.3},
+    })
+
+    return h or "<p>No comparison data available.</p>"
+
+
+def _carvana_prime_traces(deals, color_map):
+    """Re-derive the Carvana Prime comparison traces using an explicit per-deal
+    color map so the cross-issuer tab can put every Carvana deal in the blue
+    family. Returns dict with same keys as _carmax_traces().
+
+    This duplicates the trace-building logic from generate_comparison_content()
+    — we can't reuse that function directly because it assembles a full HTML
+    block with headings and a summary table, and because the color assignment
+    there is positional via the COLORS palette.
+    """
+    out = {"pf": [], "pf_loss": [], "cum_loss_age": [], "dq": [], "co": [], "spread": []}
+    note_bal_cols = {"A1": "note_balance_a1", "A2": "note_balance_a2", "A3": "note_balance_a3",
+                     "A4": "note_balance_a4", "B": "note_balance_b", "C": "note_balance_c",
+                     "D": "note_balance_d", "N": "note_balance_n"}
+
+    for deal in deals:
+        color = color_map.get(deal, "#1976D2")
+        orig_bal = get_orig_bal(deal)
+        if not orig_bal or orig_bal <= 0:
+            continue
+
+        # Cum net loss rate by age (cert-authoritative)
+        series = _cum_net_loss_series(deal)
+        if series:
+            months = list(range(1, len(series) + 1))
+            rates = [round(cn / orig_bal, 6) for _, cn in series]
+            out["cum_loss_age"].append({
+                "x": months, "y": rates, "type": "scatter", "mode": "lines",
+                "name": f"Carvana {deal}", "line": {"color": color},
+            })
+
+        # Pool factor by age — from monthly_summary
+        ms = q("SELECT reporting_period_end, total_balance, period_chargeoffs, period_recoveries "
+               "FROM monthly_summary WHERE deal=? ORDER BY reporting_period_end", (deal,))
+        if not ms.empty:
+            ms["period"] = ms["reporting_period_end"].apply(nd)
+            ms = ms.sort_values("period").reset_index(drop=True)
+            ms["pool_factor"] = ms["total_balance"].astype(float) / orig_bal
+            out["pf"].append({
+                "x": list(range(1, len(ms) + 1)),
+                "y": [round(v, 6) for v in ms["pool_factor"].tolist()],
+                "type": "scatter", "mode": "lines", "name": f"Carvana {deal}",
+                "line": {"color": color},
+            })
+
+            # Loss vs Pool Factor
+            loss_series = _cum_net_loss_series(deal)
+            if loss_series:
+                pool_bal = q("SELECT distribution_date, ending_pool_balance FROM pool_performance "
+                             "WHERE deal=?", (deal,))
+                bal_by_dt = {}
+                for _, r in pool_bal.iterrows():
+                    if r["ending_pool_balance"]:
+                        for fmt in ("%m/%d/%Y", "%Y-%m-%d"):
+                            try:
+                                bal_by_dt[datetime.strptime(str(r["distribution_date"]).strip()[:10], fmt)] = float(r["ending_pool_balance"])
+                                break
+                            except (ValueError, TypeError):
+                                pass
+                pf_x, pf_y = [], []
+                for dt, cn in loss_series:
+                    bal = bal_by_dt.get(dt)
+                    if bal is None:
+                        continue
+                    pf_x.append(round(bal / orig_bal, 6))
+                    pf_y.append(round(cn / orig_bal, 6))
+                if pf_x:
+                    out["pf_loss"].append({
+                        "x": pf_x, "y": pf_y, "type": "scatter",
+                        "mode": "lines+markers", "name": f"Carvana {deal}",
+                        "line": {"color": color}, "marker": {"size": 4},
+                    })
+
+            # 30+ DQ from cert series
+            dq_series = _cert_dq_series(deal)
+            if dq_series:
+                out["dq"].append({
+                    "x": list(range(1, len(dq_series) + 1)),
+                    "y": [round(dq / epb, 6) if epb else 0 for _, dq, epb in dq_series],
+                    "type": "scatter", "mode": "lines", "name": f"Carvana {deal}",
+                    "line": {"color": color},
+                })
+
+            # Annualized net CO rate
+            bal = ms["total_balance"].astype(float)
+            prev_bal = bal.shift(1)
+            net_co = (ms["period_chargeoffs"].fillna(0) - ms["period_recoveries"].fillna(0)).astype(float)
+            co_rate = (net_co * 12.0) / prev_bal.where(prev_bal > 0)
+            co_x, co_y = [], []
+            for idx, v in enumerate(co_rate.tolist()):
+                if idx == 0 or v is None or pd.isna(v):
+                    continue
+                co_x.append(idx + 1)
+                co_y.append(round(float(v), 6))
+            if co_x:
+                out["co"].append({
+                    "x": co_x, "y": co_y, "type": "scatter", "mode": "lines",
+                    "name": f"Carvana {deal}", "line": {"color": color},
+                })
+
+        # Excess spread — replicate the shifted collection-month alignment
+        pool = q("SELECT * FROM pool_performance WHERE deal=? ORDER BY dist_date_iso", (deal,))
+        if pool.empty:
+            continue
+        pool["period"] = pool["distribution_date"].apply(nd)
+        pool = pool.sort_values("period").reset_index(drop=True)
+
+        def _ym(s):
+            s = str(s).strip()
+            if len(s) >= 7 and s[4] in "-/":
+                try:
+                    return (int(s[:4]), int(s[5:7]))
+                except ValueError:
+                    return None
+            return None
+
+        wac_by_col = {}
+        if "weighted_avg_apr" in pool.columns and pool["weighted_avg_apr"].notna().any():
+            for _, row in pool.iterrows():
+                ym = _ym(row["period"])
+                w = row["weighted_avg_apr"]
+                if ym and pd.notna(w):
+                    col_ym = (ym[0], ym[1] - 1) if ym[1] > 1 else (ym[0] - 1, 12)
+                    wac_by_col[col_ym] = float(w)
+        else:
+            wac_ms = q("SELECT reporting_period_end, weighted_avg_coupon FROM monthly_summary "
+                       "WHERE deal=? AND weighted_avg_coupon IS NOT NULL ORDER BY reporting_period_end", (deal,))
+            for _, row in wac_ms.iterrows():
+                ym = _ym(nd(row["reporting_period_end"]))
+                if ym:
+                    wac_by_col[ym] = float(row["weighted_avg_coupon"])
+
+        try:
+            notes_df = q("SELECT class, coupon_rate FROM notes WHERE deal=? AND coupon_rate IS NOT NULL", (deal,))
+        except Exception:
+            notes_df = pd.DataFrame()
+        norm_rate_lookup = {}
+        if not notes_df.empty:
+            for cls, rate in zip(notes_df["class"], notes_df["coupon_rate"]):
+                norm = cls.upper().replace("-", "").replace(" ", "").replace("CLASS", "")
+                norm_rate_lookup[norm] = rate
+        for col in note_bal_cols.values():
+            if col in pool.columns:
+                pool[col] = pool[col].ffill()
+
+        cod_by_col = {}
+        has_ni = "total_note_interest" in pool.columns
+        has_nb = "aggregate_note_balance" in pool.columns
+        for _, row in pool.iterrows():
+            ym = _ym(row["period"])
+            if not ym:
+                continue
+            col_ym = (ym[0], ym[1] - 1) if ym[1] > 1 else (ym[0] - 1, 12)
+            cod_val = None
+            if has_ni and has_nb:
+                ni = row.get("total_note_interest")
+                nb = row.get("aggregate_note_balance")
+                if pd.notna(ni) and pd.notna(nb) and float(nb) > 0 and float(ni) > 0:
+                    v = float(ni) / float(nb) * 12
+                    if 0 < v < 0.25:
+                        cod_val = v
+            if cod_val is None and norm_rate_lookup:
+                w_sum, t_bal = 0.0, 0.0
+                for cls, col in note_bal_cols.items():
+                    if col in pool.columns and cls in norm_rate_lookup:
+                        bal = row.get(col)
+                        if pd.notna(bal) and float(bal) > 0:
+                            w_sum += norm_rate_lookup[cls] * float(bal)
+                            t_bal += float(bal)
+                if t_bal > 0:
+                    cod_val = w_sum / t_bal
+            if cod_val is not None:
+                cod_by_col[col_ym] = cod_val
+
+        keys = sorted(set(wac_by_col) & set(cod_by_col))
+        if len(keys) > 1:
+            keys = keys[1:]
+        if keys:
+            out["spread"].append({
+                "x": list(range(1, len(keys) + 1)),
+                "y": [round(wac_by_col[k] - cod_by_col[k], 6) for k in keys],
+                "type": "scatter", "mode": "lines", "name": f"Carvana {deal}",
+                "line": {"color": color},
+            })
+
+    return out
+
+
+def generate_cross_issuer_comparison():
+    """Carvana Prime + CarMax Prime on the same axes. Blue family for Carvana,
+    orange/yellow family for CarMax. Every deal on the same five/six charts,
+    indexed to deal age. Plotly's default legend-click-to-toggle lets users
+    show/hide individual deals.
+    """
+    if not carmax_available():
+        return "<p>CarMax data not available — cross-issuer tab disabled.</p>"
+
+    carvana_prime = [d for d in PRIME_DEALS]
+    carmax_prime = list(CARMAX_DEALS)
+
+    # Color assignment: per-deal map so _carvana_prime_traces and _carmax_traces
+    # pick the right color for each series.
+    cv_map = {d: CARVANA_CROSS_COLORS[i % len(CARVANA_CROSS_COLORS)]
+              for i, d in enumerate(carvana_prime)}
+    cm_map = {d: CARMAX_COLORS[i % len(CARMAX_COLORS)]
+              for i, d in enumerate(carmax_prime)}
+
+    cv = _carvana_prime_traces(carvana_prime, cv_map)
+    cm = _carmax_traces(carmax_prime, cm_map)
+
+    # Merge each bucket — Carvana first so they render under CarMax
+    merged = {k: cv.get(k, []) + cm.get(k, []) for k in ("pf", "cum_loss_age", "pf_loss", "spread", "dq", "co")}
+
+    h = ('<p style="font-size:.75rem;color:#666;margin:8px 12px;">'
+         "Every Carvana Prime deal (blue family) and every CarMax CARMX deal "
+         "(orange/yellow family) on the same axes, indexed to deal age. "
+         "Click a legend entry to hide/show that deal; double-click to isolate.</p>")
+
+    def _plot(bucket, layout):
+        if merged.get(bucket):
+            return chart(merged[bucket], layout, height=500)
+        return ""
+
+    h += _plot("pf", {
+        "title": "Carvana vs CarMax (Prime) — Pool Factor by Deal Age",
+        "xaxis": {"title": "Deal Age (Months)"},
+        "yaxis": {"tickformat": ".0%", "title": "Pool Factor (Remaining / Original)"},
+        "hovermode": "closest", "legend": {"orientation": "h", "y": -0.4},
+    })
+    h += _plot("cum_loss_age", {
+        "title": "Carvana vs CarMax (Prime) — Cumulative Net Loss Rate by Deal Age",
+        "xaxis": {"title": "Deal Age (Months)"},
+        "yaxis": {"tickformat": ".2%", "title": "Cum Net Loss (% of Orig Bal)"},
+        "hovermode": "closest", "legend": {"orientation": "h", "y": -0.4},
+    })
+    h += _plot("pf_loss", {
+        "title": "Carvana vs CarMax (Prime) — Cumulative Net Loss vs Pool Factor",
+        "xaxis": {"title": "Pool Factor (Remaining / Original)",
+                  "tickformat": ".0%", "autorange": "reversed"},
+        "yaxis": {"tickformat": ".2%", "title": "Cum Net Loss (% of Orig Bal)"},
+        "hovermode": "closest", "legend": {"orientation": "h", "y": -0.4},
+    })
+    h += _plot("dq", {
+        "title": "Carvana vs CarMax (Prime) — Delinquency Rate by Deal Age",
+        "xaxis": {"title": "Deal Age (Months)"},
+        "yaxis": {"tickformat": ".2%", "title": "DQ Balance / Pool Balance"},
+        "hovermode": "closest", "legend": {"orientation": "h", "y": -0.4},
+    })
+    h += _plot("co", {
+        "title": "Carvana vs CarMax (Prime) — Annualized Net Charge-Off Rate by Deal Age",
+        "xaxis": {"title": "Deal Age (Months)"},
+        "yaxis": {"tickformat": ".2%",
+                  "title": "Net Charge-Offs × 12 / Prior Month Balance"},
+        "hovermode": "closest", "legend": {"orientation": "h", "y": -0.4},
+    })
+    h += _plot("spread", {
+        "title": "Carvana vs CarMax (Prime) — Excess Spread by Deal Age",
+        "xaxis": {"title": "Deal Age (Months)"},
+        "yaxis": {"tickformat": ".2%", "title": "Consumer Rate − Trust Cost of Debt"},
+        "hovermode": "closest", "legend": {"orientation": "h", "y": -0.4},
+    })
+    h += ('<p style="font-size:.7rem;color:#888;margin-top:12px;">'
+          "Carvana DQ series here is cert-parsed 31–120 day buckets divided by ending pool balance. "
+          "CarMax DQ series is total delinquent balance (31+ days) divided by ending pool balance. "
+          "The two are slightly different definitions — CarMax includes a 121+ bucket; Carvana charges "
+          "those loans off. Treat cross-issuer DQ comparisons with that caveat in mind.</p>")
+    return h
+
+
+def generate_deal_content(deal):
+    """Generate all HTML content (metrics + tabs) for a single deal. Returns (metrics_html, tabs_content) or None."""
+    global _chart_id
+
+    ORIG_BAL = get_orig_bal(deal)
+    lp = q("SELECT * FROM monthly_summary WHERE deal=? ORDER BY reporting_period_end", (deal,))
+    if lp.empty:
+        logger.warning(f"No monthly_summary data for {deal}, skipping.")
+        return None
+    lp["period"] = lp["reporting_period_end"].apply(nd)
+    lp = lp.sort_values("period").reset_index(drop=True)
+
+    pool = q("SELECT * FROM pool_performance WHERE deal=? ORDER BY dist_date_iso", (deal,))
+    # Log data availability for debugging
+    has_pool = not pool.empty
+    has_wac_pp = has_pool and "weighted_avg_apr" in pool.columns and pool["weighted_avg_apr"].notna().any()
+    has_wac_ms = "weighted_avg_coupon" in lp.columns and lp["weighted_avg_coupon"].notna().any()
+    has_note_int = has_pool and "total_note_interest" in pool.columns and pool["total_note_interest"].notna().any()
+    has_note_bal = has_pool and "aggregate_note_balance" in pool.columns and (pool["aggregate_note_balance"].fillna(0) > 0).any()
+    logger.info(f"[{deal}] Data: pool_perf={has_pool}, wac_pp={has_wac_pp}, wac_ms={has_wac_ms}, "
+                f"note_interest={has_note_int}, note_balance={has_note_bal}")
+    if not pool.empty:
+        pool["period"] = pool["distribution_date"].apply(nd)
+        pool = pool.sort_values("period").reset_index(drop=True)
+
+    # Cumulative columns
+    lp["cum_co"] = lp["period_chargeoffs"].cumsum()
+    lp["cum_rec"] = lp["period_recoveries"].cumsum()
+    lp["cum_net"] = lp["cum_co"] - lp["cum_rec"]
+    lp["loss_rate"] = lp["cum_net"] / ORIG_BAL
+    lp["dq_rate"] = lp["total_dq_balance"] / lp["total_balance"]
+    lp["dq30r"] = lp["dq_30_balance"] / lp["total_balance"]
+    lp["dq60r"] = lp["dq_60_balance"] / lp["total_balance"]
+    lp["dq90r"] = lp["dq_90_balance"] / lp["total_balance"]
+    lp["dq120r"] = lp["dq_120_plus_balance"] / lp["total_balance"]
+    lp["net_loss"] = lp["period_chargeoffs"] - lp["period_recoveries"]
+
+    # For cash waterfall, we need pool_performance data to compute note paydowns
+    # and estimate note interest. Without it, we can only show collections/losses.
+    note_cols = ["note_balance_a1","note_balance_a2","note_balance_a3","note_balance_a4",
+                 "note_balance_b","note_balance_c","note_balance_d","note_balance_n"]
+    if not pool.empty:
+        avail_notes = [c for c in note_cols if c in pool.columns]
+        if avail_notes:
+            pool["total_notes"] = pool[avail_notes].fillna(0).sum(axis=1)
+            pool["note_principal_paid"] = -pool["total_notes"].diff().fillna(0)
+            pool["note_principal_paid"] = pool["note_principal_paid"].clip(lower=0)
+            # Estimate note interest: WAC of pool is ~8%, note WAC is roughly 1-2% for investment grade
+            # Use a conservative estimate: total_notes * 0.02 / 12 (2% annual blended coupon)
+            pool["est_note_interest"] = pool["total_notes"] * 0.02 / 12
+
+    lp["cum_rec_rate"] = lp["cum_rec"] / lp["cum_co"].replace(0, float("nan"))
+
+    x = lp["period"].tolist()
+    last = lp.iloc[-1]
+    sections = {}
+
+    # ── POOL SUMMARY ──
+    # Use compact y-axis labels ($100M instead of $100,000,000) and same x-axis for all 3 charts
+    bal_in_millions = [round(v / 1e6, 1) for v in lp["total_balance"].tolist()]
+    h = chart([{"x": x, "y": bal_in_millions, "type": "scatter", "fill": "tozeroy", "name": "Balance"}],
+              {"title": "Remaining Pool Balance ($M)", "yaxis": {"ticksuffix": "M", "tickprefix": "$"}, "hovermode": "x unified"})
+    h += chart([{"x": x, "y": [int(v) for v in lp["active_loans"].tolist()], "type": "scatter", "name": "Loans"}],
+               {"title": "Active Loan Count", "hovermode": "x unified"})
+    # ── Rate Curves: Collateral WAC and Cost of Debt ──
+    # 1) Collateral WAC: prefer pool_performance, fall back to monthly_summary pre-computed WAC
+    wac = pd.DataFrame()
+    if not pool.empty and "weighted_avg_apr" in pool.columns:
+        wac = pool.dropna(subset=["weighted_avg_apr"])[["period", "weighted_avg_apr"]].copy()
+    if wac.empty and "weighted_avg_coupon" in lp.columns:
+        wac_ms = lp.dropna(subset=["weighted_avg_coupon"])[["period", "weighted_avg_coupon"]].copy()
+        if not wac_ms.empty:
+            wac_ms = wac_ms.rename(columns={"weighted_avg_coupon": "weighted_avg_apr"})
+            wac = wac_ms
+    # Fallback: flat line from avg loan interest rate
+    if wac.empty:
+        avg_rate = q("SELECT AVG(original_interest_rate) as r FROM loans WHERE deal=? AND original_interest_rate IS NOT NULL", (deal,))
+        if not avg_rate.empty and avg_rate.iloc[0]["r"]:
+            flat_wac = float(avg_rate.iloc[0]["r"])
+            wac = pd.DataFrame({"period": lp["period"], "weighted_avg_apr": flat_wac})
+            logger.info(f"[{deal}] Using flat-line WAC from loan avg: {flat_wac:.4%}")
+    # 2) Cost of Debt: weighted avg of note coupon rates × note balances
+    cod = pd.DataFrame()
+    try:
+        notes_df = q("SELECT class, coupon_rate, original_balance FROM notes WHERE deal=? AND coupon_rate IS NOT NULL", (deal,))
+    except Exception:
+        try:
+            notes_df = q("SELECT class, coupon_rate FROM notes WHERE deal=? AND coupon_rate IS NOT NULL", (deal,))
+        except Exception:
+            notes_df = pd.DataFrame()
+
+    # Merged Method 1+2: use actual interest data when available, weighted coupon fallback per period
+    m1_count = 0
+    m2_count = 0
+    if not pool.empty:
+        # Build normalized rate lookup from notes for Method 2 fallback
+        norm_rate_lookup = {}
+        if not notes_df.empty:
+            for cls, rate in zip(notes_df["class"], notes_df["coupon_rate"]):
+                norm = cls.upper().replace("-", "").replace(" ", "").replace("CLASS", "")
+                norm_rate_lookup[norm] = rate
+        bal_cols = {"A1": "note_balance_a1", "A2": "note_balance_a2", "A3": "note_balance_a3",
+                    "A4": "note_balance_a4", "B": "note_balance_b", "C": "note_balance_c",
+                    "D": "note_balance_d", "N": "note_balance_n"}
+        # Forward-fill note balance columns
+        for col in bal_cols.values():
+            if col in pool.columns:
+                pool[col] = pool[col].ffill()
+
+        has_ni_col = "total_note_interest" in pool.columns
+        has_nb_col = "aggregate_note_balance" in pool.columns
+        cod_rows = []
+        filtered_count = 0
+        for _, row in pool.iterrows():
+            # Method 1: actual interest / actual balance (best)
+            used_m1 = False
+            if has_ni_col and has_nb_col:
+                ni = row.get("total_note_interest")
+                nb = row.get("aggregate_note_balance")
+                if pd.notna(ni) and pd.notna(nb) and nb > 0 and ni > 0:
+                    val = float(ni) / float(nb) * 12
+                    if 0 < val < 0.25:
+                        cod_rows.append({"period": row["period"], "cost_of_debt": val})
+                        m1_count += 1
+                        used_m1 = True
+                    else:
+                        logger.debug(f"  [{deal}] Period {row.get('period')}: CoD value {val:.4%} filtered (outside 0-25% range), ni={ni}, nb={nb}")
+                        filtered_count += 1
+
+            # Method 2 fallback: weighted coupon rates × note balances
+            if not used_m1 and norm_rate_lookup:
+                weighted_sum = 0.0
+                total_bal = 0.0
+                for cls, col in bal_cols.items():
+                    if col in pool.columns and cls in norm_rate_lookup:
+                        bal = row.get(col)
+                        if pd.notna(bal) and float(bal) > 0:
+                            weighted_sum += norm_rate_lookup[cls] * float(bal)
+                            total_bal += float(bal)
+                if total_bal > 0:
+                    cod_rows.append({"period": row["period"], "cost_of_debt": weighted_sum / total_bal})
+                    m2_count += 1
+
+        if filtered_count > 0:
+            logger.warning(f"[{deal}] Filtered {filtered_count} CoD values outside (0, 25%) range")
+        if cod_rows:
+            cod = pd.DataFrame(cod_rows)
+            logger.info(f"[{deal}] Merged CoD: {m1_count} periods from actual interest, {m2_count} from weighted coupons")
+
+    # Method 3: flat line from notes table — works even if pool_performance is empty
+    if len(cod) < 3 and not notes_df.empty:
+        flat_rate = None
+        if "original_balance" in notes_df.columns and notes_df["original_balance"].notna().any():
+            ob = notes_df["original_balance"].fillna(0)
+            if ob.sum() > 0:
+                flat_rate = float((notes_df["coupon_rate"] * ob).sum() / ob.sum())
+        if flat_rate is None:
+            flat_rate = float(notes_df["coupon_rate"].mean())
+        if flat_rate and flat_rate > 0:
+            # Use monthly_summary periods if pool_performance is empty
+            periods = pool["period"] if not pool.empty else lp["period"]
+            cod = pd.DataFrame({"period": periods, "cost_of_debt": flat_rate})
+            logger.info(f"[{deal}] Using flat-line CoD from notes: {flat_rate:.4%}")
+
+    # Method 4 (rough estimate): derive from avg loan interest rate if nothing else works
+    if len(cod) < 3:
+        avg_rate_q = q("SELECT AVG(original_interest_rate) as r FROM loans WHERE deal=? AND original_interest_rate IS NOT NULL", (deal,))
+        if not avg_rate_q.empty and avg_rate_q.iloc[0]["r"]:
+            avg_loan_rate = float(avg_rate_q.iloc[0]["r"])
+            rough_cod = avg_loan_rate * 0.4  # rough proxy: funding cost ~ 40% of loan yield
+            periods = pool["period"] if not pool.empty else lp["period"]
+            cod = pd.DataFrame({"period": periods, "cost_of_debt": rough_cod})
+            logger.info(f"[{deal}] Using rough CoD estimate from loan avg rate ({avg_loan_rate:.4%} * 0.4 = {rough_cod:.4%})")
+
+    # 3) Render separate charts for consumer rate and cost of debt
+    if not wac.empty:
+        h += chart([{"x": wac["period"].tolist(), "y": wac["weighted_avg_apr"].tolist(),
+                     "type": "scatter", "line": {"color": "#1976D2"}}],
+                   {"title": "Avg Consumer Rate", "yaxis": {"tickformat": ".2%"}, "hovermode": "x unified",
+                    "xaxis": {"range": [x[0], x[-1]], "tickangle": -45, "automargin": True}})
+    else:
+        logger.warning(f"[{deal}] No consumer rate (WAC) data available")
+    if not cod.empty:
+        cod_min, cod_max = cod["cost_of_debt"].min(), cod["cost_of_debt"].max()
+        logger.info(f"[{deal}] CoD range: {cod_min:.4%} - {cod_max:.4%} (n={len(cod)})")
+        h += chart([{"x": cod["period"].tolist(), "y": cod["cost_of_debt"].tolist(),
+                     "type": "scatter", "line": {"color": "#D32F2F"}}],
+                   {"title": "Avg Trust Cost of Debt", "yaxis": {"tickformat": ".2%"}, "hovermode": "x unified",
+                    "xaxis": {"range": [x[0], x[-1]], "tickangle": -45, "automargin": True}})
+    else:
+        logger.warning(f"[{deal}] No cost of debt data available")
+    sections["Pool Summary"] = h
+
+    # ── DELINQUENCIES ──
+    # Tail-amortization mask (audit #9): once pool drops below 10% of original
+    # balance, remaining-balance denominator becomes noisy and the rate is
+    # meaningless. Mask rate traces there; keep raw dollar balances visible.
+    _tail_mask = [(b / ORIG_BAL) < 0.10 if (b and ORIG_BAL) else False
+                  for b in lp["total_balance"].tolist()]
+    def _mask_tail(series):
+        return [None if m else v for v, m in zip(series, _tail_mask)]
+    h = chart([
+        {"x": x, "y": _mask_tail(lp["dq30r"].tolist()), "name": "30d", "stackgroup": "dq", "line": {"color": "#FFC107"}},
+        {"x": x, "y": _mask_tail(lp["dq60r"].tolist()), "name": "60d", "stackgroup": "dq", "line": {"color": "#FF9800"}},
+        {"x": x, "y": _mask_tail(lp["dq90r"].tolist()), "name": "90d", "stackgroup": "dq", "line": {"color": "#FF5722"}},
+        {"x": x, "y": _mask_tail(lp["dq120r"].tolist()), "name": "120+d", "stackgroup": "dq", "line": {"color": "#D32F2F"}},
+    ], {"title": "Delinquency Rates (% of Pool)", "yaxis": {"tickformat": ".2%"}, "hovermode": "x unified"})
+    if any(_tail_mask):
+        # Raw dollar-balance stacked area stays visible for the tail.
+        h += chart([
+            {"x": x, "y": lp["dq_30_balance"].tolist(), "name": "30d", "stackgroup": "dq", "line": {"color": "#FFC107"}},
+            {"x": x, "y": lp["dq_60_balance"].tolist(), "name": "60d", "stackgroup": "dq", "line": {"color": "#FF9800"}},
+            {"x": x, "y": lp["dq_90_balance"].tolist(), "name": "90d", "stackgroup": "dq", "line": {"color": "#FF5722"}},
+            {"x": x, "y": lp["dq_120_plus_balance"].tolist(), "name": "120+d", "stackgroup": "dq", "line": {"color": "#D32F2F"}},
+        ], {"title": "Delinquency Balances ($) — pool &lt; 10% of original",
+            "yaxis": {"tickformat": "$,.0f"}, "hovermode": "x unified"})
+        h += ('<p style="font-size:.75rem;color:#666;margin-top:-4px;">'
+              "Rate trace is suppressed once the pool amortizes below 10% of "
+              "its original balance — at that point the rate denominator is "
+              "too small to be meaningful. Raw dollar balances remain visible."
+              "</p>")
+    if not pool.empty and "delinquency_trigger_level" in pool.columns:
+        trig = pool.dropna(subset=["delinquency_trigger_level", "delinquency_trigger_actual"])
+        if not trig.empty:
+            h += chart([
+                {"x": trig["period"].tolist(), "y": trig["delinquency_trigger_level"].tolist(), "name": "Trigger", "line": {"dash": "dash", "color": "red"}},
+                {"x": trig["period"].tolist(), "y": trig["delinquency_trigger_actual"].tolist(), "name": "Actual", "line": {"color": "blue"}},
+            ], {"title": "60+ DQ vs Trigger Level", "yaxis": {"tickformat": ".2%"}, "hovermode": "x unified"})
+    dq_tbl = pd.DataFrame({
+        "Bucket": ["30d","60d","90d","120+d","Total"],
+        "Count": [int(last["dq_30_count"]),int(last["dq_60_count"]),int(last["dq_90_count"]),int(last["dq_120_plus_count"]),int(last["total_dq_count"])],
+        "Balance": [fm(last["dq_30_balance"]),fm(last["dq_60_balance"]),fm(last["dq_90_balance"]),fm(last["dq_120_plus_balance"]),fm(last["total_dq_balance"])],
+        "% Pool": [f"{last['dq30r']:.2%}",f"{last['dq60r']:.2%}",f"{last['dq90r']:.2%}",f"{last['dq120r']:.2%}",f"{last['dq_rate']:.2%}"],
+    })
+    h += "<h3>Latest Period</h3>" + table_html(dq_tbl)
+    sections["Delinquencies"] = h
+
+    # ── LOSSES ──
+    h = chart([{"x": x, "y": lp["loss_rate"].tolist(), "type": "scatter", "fill": "tozeroy", "line": {"color": "#D32F2F"}}],
+              {"title": f"Cumulative Net Loss Rate (% of {fm(ORIG_BAL)})", "yaxis": {"tickformat": ".2%"}, "hovermode": "x unified"})
+    # Restatement overlay (audit #7) — applies to cum_net (derived from cumsum
+    # of period chargeoffs/recoveries for Carvana). Restatements show up when
+    # the servicer adjusts period flows downward in a later cert.
+    _net_traces = [
+        {"x": x, "y": lp["cum_co"].tolist(), "name": "Gross Chargeoffs", "line": {"color": "#D32F2F"}},
+        {"x": x, "y": lp["cum_rec"].tolist(), "name": "Recoveries", "line": {"color": "#4CAF50"}},
+        {"x": x, "y": lp["cum_net"].tolist(), "name": "Net Losses", "line": {"color": "#FF9800", "dash": "dash"}},
+    ]
+    _env, _mx, _my = _restatement_overlay(x, lp["cum_net"].tolist())
+    if _env is not None:
+        _net_traces.append({"x": x, "y": _env, "name": "Net Losses (monotone envelope)",
+                            "line": {"color": "#FF9800", "dash": "dot", "width": 1},
+                            "opacity": 0.5})
+    if _mx:
+        _net_traces.append({
+            "x": _mx, "y": _my, "name": "Restatement",
+            "mode": "markers", "type": "scatter",
+            "marker": {"symbol": "triangle-down", "size": 9, "color": "#607D8B"},
+            "hovertemplate": "Servicer restated cumulative loss on %{x}<extra></extra>",
+        })
+    h += chart(_net_traces, {"title": "Cumulative Gross Losses vs Recoveries", "yaxis": {"tickformat": "$,.0f"}, "hovermode": "x unified"})
+    rr = lp.dropna(subset=["cum_rec_rate"])
+    if not rr.empty:
+        h += chart([{"x": rr["period"].tolist(), "y": rr["cum_rec_rate"].tolist(), "line": {"color": "#4CAF50"}}],
+                   {"title": "Cumulative Recovery Rate", "yaxis": {"tickformat": ".1%"}, "hovermode": "x unified"})
+    h += chart([
+        {"x": x, "y": lp["period_chargeoffs"].tolist(), "name": "Chargeoffs", "type": "bar", "marker": {"color": "#D32F2F"}},
+        {"x": x, "y": lp["period_recoveries"].tolist(), "name": "Recoveries", "type": "bar", "marker": {"color": "#4CAF50"}},
+    ], {"title": "Monthly Chargeoffs vs Recoveries", "barmode": "group", "yaxis": {"tickformat": "$,.0f"}, "hovermode": "x unified"})
+
+    # Loss by credit score
+    lbs = q("""SELECT l.obligor_credit_score as segment, COUNT(*) as lc, SUM(l.original_loan_amount) as ob,
+               SUM(COALESCE(s.total_chargeoff,0)) as co, SUM(COALESCE(s.total_recovery,0)) as rec
+            FROM loans l LEFT JOIN loan_loss_summary s ON l.deal=s.deal AND l.asset_number=s.asset_number
+            WHERE l.deal=? AND l.obligor_credit_score IS NOT NULL GROUP BY l.obligor_credit_score""", (deal,))
+    if not lbs.empty:
+        lbs["bkt"] = pd.cut(lbs["segment"], bins=[0,580,620,660,700,740,780,820,900],
+                            labels=["<580","580-619","620-659","660-699","700-739","740-779","780-819","820+"], right=False)
+        b = lbs.groupby("bkt",observed=True).agg({"lc":"sum","ob":"sum","co":"sum","rec":"sum"}).reset_index()
+        b["net"] = b["co"] - b["rec"]; b["rate"] = b["net"] / b["ob"]
+        d = pd.DataFrame({"Score":b["bkt"],"Loans":b["lc"].apply(lambda x:f"{x:,}"),
+            "Orig Bal":b["ob"].apply(fm),"Net Loss":b["net"].apply(fm),"Loss Rate":b["rate"].apply(lambda x:f"{x:.2%}")})
+        h += "<h3>Losses by Credit Score</h3>" + table_html(d)
+
+    # Loss by rate
+    lbr = q("""SELECT l.original_interest_rate as segment, COUNT(*) as lc, SUM(l.original_loan_amount) as ob,
+               SUM(COALESCE(s.total_chargeoff,0)) as co, SUM(COALESCE(s.total_recovery,0)) as rec
+            FROM loans l LEFT JOIN loan_loss_summary s ON l.deal=s.deal AND l.asset_number=s.asset_number
+            WHERE l.deal=? AND l.original_interest_rate IS NOT NULL GROUP BY l.original_interest_rate""", (deal,))
+    if not lbr.empty:
+        lbr["bkt"] = pd.cut(lbr["segment"], bins=[0,0.04,0.06,0.08,0.10,0.12,0.15,0.20,1.0],
+                            labels=["<4%","4-5.99%","6-7.99%","8-9.99%","10-11.99%","12-14.99%","15-19.99%","20%+"], right=False)
+        b = lbr.groupby("bkt",observed=True).agg({"lc":"sum","ob":"sum","co":"sum","rec":"sum"}).reset_index()
+        b["net"] = b["co"] - b["rec"]; b["rate"] = b["net"] / b["ob"]
+        d = pd.DataFrame({"Rate":b["bkt"],"Loans":b["lc"].apply(lambda x:f"{x:,}"),
+            "Orig Bal":b["ob"].apply(fm),"Net Loss":b["net"].apply(fm),"Loss Rate":b["rate"].apply(lambda x:f"{x:.2%}")})
+        h += "<h3>Losses by Interest Rate</h3>" + table_html(d)
+    sections["Losses"] = h
+
+    # ── CASH WATERFALL ──
+    h = ""
+
+    # Collections table from loan-level data
+    wf = lp[["period","interest_collected","principal_collected","period_recoveries",
+             "est_servicing_fee","period_chargeoffs","net_loss"]].copy()
+    wf.columns = ["Period","Interest","Principal","Recoveries","Svc Fee","Chargeoffs","Net Loss"]
+    sums = wf.select_dtypes(include="number").sum()
+    sr = pd.DataFrame([["TOTAL"]+sums.tolist()], columns=wf.columns)
+    wf_all = pd.concat([wf, sr], ignore_index=True)
+    wf_fmt = wf_all.copy()
+    for c in wf_fmt.columns[1:]:
+        wf_fmt[c] = wf_all[c].apply(lambda x: fm(x) if pd.notna(x) else "")
+    h += "<h3>Monthly Collections & Losses</h3>" + table_html(wf_fmt)
+
+    # Cumulative cash flow chart
+    cum_int = lp["interest_collected"].cumsum()
+    cum_prin = lp["principal_collected"].cumsum()
+    cum_svc = lp["est_servicing_fee"].cumsum()
+    h += chart([
+        {"x": x, "y": cum_int.tolist(), "name": "Cum Interest", "line": {"color": "#1976D2"}},
+        {"x": x, "y": cum_prin.tolist(), "name": "Cum Principal", "line": {"color": "#388E3C"}},
+        {"x": x, "y": lp["cum_co"].tolist(), "name": "Cum Chargeoffs", "line": {"color": "#D32F2F"}},
+        {"x": x, "y": lp["cum_rec"].tolist(), "name": "Cum Recoveries", "line": {"color": "#4CAF50"}},
+        {"x": x, "y": cum_svc.tolist(), "name": "Cum Servicing Fee", "line": {"color": "#FF9800", "dash": "dash"}},
+    ], {"title": "Cumulative Cash Flows", "yaxis": {"tickformat": "$,.0f"}, "hovermode": "x unified"})
+
+    # Actual waterfall from servicer certificate (where available)
+    if not pool.empty and "residual_cash" in pool.columns and pool["residual_cash"].notna().any():
+        pool_x = pool["period"].tolist()
+        h += "<h3>Cash Waterfall (from Servicer Certificate)</h3>"
+
+        # Build waterfall table with actual filing data
+        wf_cols = ["period"]
+        wf_names = ["Period"]
+        for col, name in [("total_deposited", "Total Deposited"), ("available_funds", "Available Funds"),
+                          ("actual_servicing_fee", "Servicing Fee"), ("total_note_interest", "Note Interest"),
+                          ("regular_pda", "Principal Dist"), ("residual_cash", "Residual (to Equity)")]:
+            if col in pool.columns and pool[col].notna().any():
+                wf_cols.append(col)
+                wf_names.append(name)
+        if len(wf_cols) > 1:
+            wf_pool = pool[wf_cols].copy()
+            wf_pool.columns = wf_names
+            # Add totals row
+            sums_p = wf_pool.select_dtypes(include="number").sum()
+            sr_p = pd.DataFrame([["TOTAL"] + sums_p.tolist()], columns=wf_pool.columns)
+            wf_pool_all = pd.concat([wf_pool, sr_p], ignore_index=True)
+            wf_pool_fmt = wf_pool_all.copy()
+            for c in wf_pool_fmt.columns[1:]:
+                wf_pool_fmt[c] = wf_pool_all[c].apply(lambda x: fm(x) if pd.notna(x) and x != 0 else "-")
+            h += table_html(wf_pool_fmt)
+
+        # Residual cash chart
+        res_data = pool[pool["residual_cash"].notna()]
+        if not res_data.empty:
+            cum_res = res_data["residual_cash"].cumsum()
+            cum_res_pct = cum_res / ORIG_BAL
+            h += chart([{"x": res_data["period"].tolist(), "y": cum_res_pct.tolist(),
+                         "type": "scatter", "fill": "tozeroy", "line": {"color": "#388E3C"}}],
+                       {"title": "Cumulative Cash to Residual (% of Original Balance)",
+                        "yaxis": {"tickformat": ".2%"}, "hovermode": "x unified"})
+
+    # Debt table from pool_performance (where available)
+    if not pool.empty and "total_notes" in pool.columns:
+        pool_x = pool["period"].tolist()
+        h += "<h3>Debt & Equity (from Servicer Certificate)</h3>"
+
+        # Build debt paydown table
+        debt_cols = ["period"]
+        debt_names = ["Period"]
+        for nc in note_cols:
+            if nc in pool.columns and pool[nc].notna().any():
+                debt_cols.append(nc)
+                debt_names.append(nc.replace("note_balance_","").upper())
+        if "total_notes" in pool.columns:
+            debt_cols.append("total_notes")
+            debt_names.append("Total Debt")
+        if "overcollateralization_amount" in pool.columns:
+            debt_cols.append("overcollateralization_amount")
+            debt_names.append("OC")
+        if "reserve_account_balance" in pool.columns:
+            debt_cols.append("reserve_account_balance")
+            debt_names.append("Reserve")
+        dt = pool[debt_cols].copy()
+        dt.columns = debt_names
+        dt_fmt = dt.copy()
+        for c in dt_fmt.columns[1:]:
+            dt_fmt[c] = dt[c].apply(lambda x: fm(x) if pd.notna(x) and x != 0 else "-")
+        h += table_html(dt_fmt)
+
+        # Debt paydown chart
+        h += chart([
+            {"x": pool_x, "y": pool["total_notes"].tolist(), "name": "Total Debt", "fill": "tozeroy", "line": {"color": "#7B1FA2"}},
+        ], {"title": "Outstanding Debt Over Time", "yaxis": {"tickformat": "$,.0f"}, "hovermode": "x unified"})
+
+    sections["Cash Waterfall"] = h
+
+    # ── RECOVERY ──
+    rec = q("""SELECT s.asset_number, s.chargeoff_period, s.total_chargeoff,
+               s.first_recovery_period, s.total_recovery, l.obligor_credit_score
+            FROM loan_loss_summary s LEFT JOIN loans l ON s.deal=l.deal AND s.asset_number=l.asset_number
+            WHERE s.deal=? AND s.total_chargeoff > 0""", (deal,))
+    h = ""
+    if not rec.empty:
+        from datetime import datetime as dt
+        def pd_dt(d):
+            if not d: return None
+            for f in ["%m-%d-%Y","%m/%d/%Y","%Y-%m-%d"]:
+                try: return dt.strptime(str(d).strip(),f)
+                except: continue
+            return None
+        rec["co_dt"] = rec["chargeoff_period"].apply(pd_dt)
+        rec["rec_dt"] = rec["first_recovery_period"].apply(pd_dt)
+        rec["has_rec"] = rec["total_recovery"].notna() & (rec["total_recovery"] > 0)
+        rec["months"] = rec.apply(lambda r: ((r["rec_dt"].year-r["co_dt"].year)*12+r["rec_dt"].month-r["co_dt"].month) if pd.notna(r["rec_dt"]) and pd.notna(r["co_dt"]) else None, axis=1)
+        tc=len(rec); wr=int(rec["has_rec"].sum())
+        ar=rec.loc[rec["has_rec"],"total_recovery"].sum()/rec["total_chargeoff"].sum() if rec["total_chargeoff"].sum()>0 else 0
+        mm=rec.loc[rec["has_rec"],"months"].median()
+        tca=rec["total_chargeoff"].sum(); tra=rec.loc[rec["has_rec"],"total_recovery"].sum()
+        h += f'<div class="metrics"><div class="metric"><div class="mv">{tc:,}</div><div class="ml">Charged-Off Loans</div></div>'
+        h += f'<div class="metric"><div class="mv">{wr:,} ({wr/tc:.0%})</div><div class="ml">With Recovery</div></div>'
+        h += f'<div class="metric"><div class="mv">{ar:.1%}</div><div class="ml">Recovery Rate</div></div>'
+        h += f'<div class="metric"><div class="mv">{mm:.0f}mo</div><div class="ml">Median Time</div></div>'
+        h += f'<div class="metric"><div class="mv">{fm(tca)}</div><div class="ml">Total Chargeoffs</div></div>'
+        h += f'<div class="metric"><div class="mv">{fm(tra)}</div><div class="ml">Total Recovered</div></div></div>'
+        rw = rec[rec["has_rec"] & rec["months"].notna()]
+        if not rw.empty:
+            import numpy as np
+            counts, edges = np.histogram(rw["months"].values, bins=30)
+            centers = [(edges[i]+edges[i+1])/2 for i in range(len(counts))]
+            h += chart([{"x": centers, "y": counts.tolist(), "type": "bar", "marker": {"color": "#1976D2"}}],
+                       {"title": "Months to First Recovery", "hovermode": "x unified"})
+
+        # Recovery rate by credit score
+        rec_fico = rec[rec["obligor_credit_score"].notna()].copy()
+        if not rec_fico.empty:
+            rec_fico["bkt"] = pd.cut(rec_fico["obligor_credit_score"],
+                bins=[0,580,620,660,700,740,780,820,900],
+                labels=["<580","580-619","620-659","660-699","700-739","740-779","780-819","820+"], right=False)
+            b = rec_fico.groupby("bkt", observed=True).agg(
+                loans=("asset_number","count"),
+                chargeoffs=("total_chargeoff","sum"),
+                recoveries=("total_recovery", lambda x: x.fillna(0).sum()),
+            ).reset_index()
+            b["rec_rate"] = b["recoveries"] / b["chargeoffs"].replace(0, float("nan"))
+            # Bar chart
+            h += chart([
+                {"x": b["bkt"].tolist(), "y": [round(v,4) if pd.notna(v) else 0 for v in b["rec_rate"]], "type": "bar", "marker": {"color": "#4CAF50"}},
+            ], {"title": "Recovery Rate by Credit Score", "yaxis": {"tickformat": ".1%"}, "hovermode": "x unified"})
+            # Table
+            tbl = pd.DataFrame({
+                "Score": b["bkt"],
+                "Charged-Off Loans": b["loans"].apply(lambda x: f"{x:,}"),
+                "Total Chargeoffs": b["chargeoffs"].apply(fm),
+                "Total Recovered": b["recoveries"].apply(fm),
+                "Recovery Rate": b["rec_rate"].apply(lambda x: f"{x:.1%}" if pd.notna(x) else "-"),
+            })
+            h += table_html(tbl)
+
+        # Recovery rate by interest rate
+        rec_rate_data = q("""SELECT s.asset_number, s.total_chargeoff, s.total_recovery,
+                             l.original_interest_rate
+                          FROM loan_loss_summary s
+                          LEFT JOIN loans l ON s.deal=l.deal AND s.asset_number=l.asset_number
+                          WHERE s.deal=? AND s.total_chargeoff > 0
+                          AND l.original_interest_rate IS NOT NULL""", (deal,))
+        if not rec_rate_data.empty:
+            rec_rate_data["bkt"] = pd.cut(rec_rate_data["original_interest_rate"],
+                bins=[0,0.04,0.06,0.08,0.10,0.12,0.15,0.20,1.0],
+                labels=["<4%","4-5.99%","6-7.99%","8-9.99%","10-11.99%","12-14.99%","15-19.99%","20%+"], right=False)
+            b = rec_rate_data.groupby("bkt", observed=True).agg(
+                loans=("asset_number","count"),
+                chargeoffs=("total_chargeoff","sum"),
+                recoveries=("total_recovery", lambda x: x.fillna(0).sum()),
+            ).reset_index()
+            b["rec_rate"] = b["recoveries"] / b["chargeoffs"].replace(0, float("nan"))
+            h += chart([
+                {"x": b["bkt"].tolist(), "y": [round(v,4) if pd.notna(v) else 0 for v in b["rec_rate"]], "type": "bar", "marker": {"color": "#388E3C"}},
+            ], {"title": "Recovery Rate by Interest Rate", "yaxis": {"tickformat": ".1%"}, "hovermode": "x unified"})
+            tbl = pd.DataFrame({
+                "Rate": b["bkt"],
+                "Charged-Off Loans": b["loans"].apply(lambda x: f"{x:,}"),
+                "Total Chargeoffs": b["chargeoffs"].apply(fm),
+                "Total Recovered": b["recoveries"].apply(fm),
+                "Recovery Rate": b["rec_rate"].apply(lambda x: f"{x:.1%}" if pd.notna(x) else "-"),
+            })
+            h += table_html(tbl)
+    sections["Recovery"] = h
+
+    # ── NOTES & OC ──
+    h = ""
+    if not pool.empty:
+        nc = [c for c in ["note_balance_a1","note_balance_a2","note_balance_a3","note_balance_a4",
+                           "note_balance_b","note_balance_c","note_balance_d","note_balance_n"]
+              if c in pool.columns and pool[c].notna().any()]
+        if nc:
+            traces = []
+            for c in nc:
+                traces.append({"x": pool["period"].tolist(), "y": pool[c].fillna(0).tolist(),
+                               "name": c.replace("note_balance_","").upper(), "stackgroup": "notes"})
+            h += chart(traces, {"title": "Note Balances", "yaxis": {"tickformat": "$,.0f"}, "hovermode": "x unified"})
+        oc = pool.dropna(subset=["overcollateralization_amount"], how="all")
+        if not oc.empty:
+            traces = []
+            if "overcollateralization_amount" in oc.columns and oc["overcollateralization_amount"].notna().any():
+                traces.append({"x": oc["period"].tolist(), "y": oc["overcollateralization_amount"].tolist(), "name": "OC"})
+            if "reserve_account_balance" in oc.columns and oc["reserve_account_balance"].notna().any():
+                traces.append({"x": oc["period"].tolist(), "y": oc["reserve_account_balance"].tolist(), "name": "Reserve"})
+            if traces:
+                h += chart(traces, {"title": "OC & Reserve Account", "yaxis": {"tickformat": "$,.0f"}, "hovermode": "x unified"})
+    sections["Notes & OC"] = h
+
+    # ── DOCUMENTS ──
+    h = ""
+    try:
+        # Query servicer certificates from filings table
+        certs = q("SELECT filing_date, servicer_cert_url, accession_number FROM filings "
+                  "WHERE deal=? AND servicer_cert_url IS NOT NULL ORDER BY filing_date DESC", (deal,))
+        if not certs.empty:
+            h += "<h3>Servicer Certificates</h3>"
+            cert_rows = []
+            for _, cert_row in certs.iterrows():
+                fd = cert_row["filing_date"]
+                cert_url = cert_row["servicer_cert_url"]
+                try:
+                    dt_obj = datetime.strptime(str(fd).strip()[:10], "%Y-%m-%d")
+                    date_display = dt_obj.strftime("%b %Y")
+                    date_slug = dt_obj.strftime("%Y-%m")
+                except (ValueError, TypeError):
+                    date_display = str(fd)[:10] if fd else "Unknown"
+                    date_slug = str(fd)[:7] if fd else "unknown"
+                # Link directly to SEC EDGAR. We used to try serving locally
+                # generated PDFs (docs/<deal>/<file>.pdf), but EDGAR servicer
+                # certificates are image-based — the body is a set of JPG page
+                # scans referenced by relative URL with a hidden OCR text layer.
+                # Rendering that HTML with weasyprint produced a PDF containing
+                # only the hidden text + document header (looked like a bare
+                # exhibit reference with no real content). SEC serves the JPGs
+                # in place, so the canonical EDGAR URL renders correctly.
+                link = f'<a href="{cert_url}" target="_blank" rel="noopener">SEC&nbsp;Filing</a>'
+                cert_rows.append({"Date": date_display, "Download": link})
+            cert_df = pd.DataFrame(cert_rows)
+            h += table_html(cert_df, cls="compare")
+    except Exception as e:
+        logger.warning(f"[{deal}] Error building servicer cert links: {e}")
+
+    # Prospectus & Annual Reports — link to SEC EDGAR search for the deal's CIK
+    try:
+        from carvana_abs.config import DEALS as DEAL_REGISTRY
+        deal_info = DEAL_REGISTRY.get(deal, {})
+        cik = deal_info.get("cik", "")
+        entity = deal_info.get("entity_name", f"Carvana Auto Receivables Trust {deal}")
+        if cik:
+            h += "<h3>Prospectus &amp; Other Filings</h3>"
+            edgar_base = f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK={cik}"
+            filing_links = [
+                {"Document": "All SEC Filings",
+                 "Description": f"Complete filing history for {entity}",
+                 "Link": f'<a href="{edgar_base}&type=&dateb=&owner=include&count=40" target="_blank" rel="noopener">EDGAR</a>'},
+                {"Document": "Prospectus (424B)",
+                 "Description": "Offering prospectus and supplements",
+                 "Link": f'<a href="{edgar_base}&type=424B&dateb=&owner=include&count=10" target="_blank" rel="noopener">EDGAR</a>'},
+                {"Document": "Annual Reports (10-K)",
+                 "Description": "Annual reports filed with SEC",
+                 "Link": f'<a href="{edgar_base}&type=10-K&dateb=&owner=include&count=10" target="_blank" rel="noopener">EDGAR</a>'},
+                {"Document": "Current Reports (8-K)",
+                 "Description": "Material event disclosures",
+                 "Link": f'<a href="{edgar_base}&type=8-K&dateb=&owner=include&count=10" target="_blank" rel="noopener">EDGAR</a>'},
+            ]
+            h += table_html(pd.DataFrame(filing_links), cls="compare")
+    except Exception as e:
+        logger.warning(f"[{deal}] Error building prospectus links: {e}")
+
+    if not h:
+        h = "<p>No documents available for this deal.</p>"
+    sections["Documents"] = h
+
+    # Build metrics + tabs HTML for this deal.
+    # Prefer the latest servicer cert for cum net loss rate (authoritative).
+    # 30+ DQ rate uses the cert's 31-60 + 61-90 + 91-120 bucket sum / pool
+    # balance, not monthly_summary which carries pre-charge-off loans in a
+    # dq_120_plus bucket that the cert doesn't report.
+    cert_cum_loss = get_cum_net_loss_rate(deal, ORIG_BAL)
+    cum_loss_display = (f"{cert_cum_loss:.2%}" if cert_cum_loss is not None
+                        else f"{last['loss_rate']:.2%}")
+    dq_series = _cert_dq_series(deal)
+    if dq_series:
+        _, dq_last, epb_last = dq_series[-1]
+        dq_display = f"{dq_last / epb_last:.2%}" if epb_last else f"{last['dq_rate']:.2%}"
+    else:
+        dq_display = f"{last['dq_rate']:.2%}"
+    metrics_html = f"""<div class="metrics">
+<div class="metric"><div class="mv">{fm(ORIG_BAL)}</div><div class="ml">Original Balance</div></div>
+<div class="metric"><div class="mv">{fm(last['total_balance'])}</div><div class="ml">Current Balance</div></div>
+<div class="metric"><div class="mv">{last['total_balance']/ORIG_BAL:.1%}</div><div class="ml">Pool Factor</div></div>
+<div class="metric"><div class="mv">{int(last['active_loans']):,}</div><div class="ml">Active Loans</div></div>
+<div class="metric"><div class="mv">{cum_loss_display}</div><div class="ml">Cum Loss Rate</div></div>
+<div class="metric"><div class="mv">{dq_display}</div><div class="ml">30+ DQ Rate</div></div>
+</div>"""
+
+    # Carvana sub-tab buttons — hash-routed by shared.js (no inline onclick).
+    tabs_html = _render_subtab_buttons(sections)
+    content_html = _render_subtab_panes(sections)
+    return metrics_html, f'<div class="tabs">{tabs_html}</div>\n{content_html}'
+
+
+def generate_comparison_content(deals, title):
+    """Generate comparison HTML (summary table + loss curve) for a group of deals."""
+    h = ""
+
+    # ── Summary Table ──
+    rows = []
+    for deal in deals:
+        loan_stats = q("SELECT AVG(original_interest_rate) as avg_yield, AVG(obligor_credit_score) as avg_fico FROM loans WHERE deal=?", (deal,))
+        avg_fico = loan_stats.iloc[0]["avg_fico"] if not loan_stats.empty and loan_stats.iloc[0]["avg_fico"] else None
+        init_bal = get_orig_bal(deal)
+
+        # ── Collateral WAC (init + current) ──
+        # Prefer pool_performance.weighted_avg_apr, fall back to monthly_summary.weighted_avg_coupon
+        init_wac = None
+        curr_wac = None
+        # Use dist_date_iso (YYYY-MM-DD) — distribution_date is M/D/YYYY text
+        # and sorts lexicographically, not chronologically (audit finding #5).
+        first_wac = q("SELECT weighted_avg_apr FROM pool_performance WHERE deal=? AND weighted_avg_apr IS NOT NULL ORDER BY dist_date_iso LIMIT 1", (deal,))
+        last_wac = q("SELECT weighted_avg_apr FROM pool_performance WHERE deal=? AND weighted_avg_apr IS NOT NULL ORDER BY dist_date_iso DESC LIMIT 1", (deal,))
+        if not first_wac.empty and first_wac.iloc[0]["weighted_avg_apr"]:
+            init_wac = first_wac.iloc[0]["weighted_avg_apr"]
+        if not last_wac.empty and last_wac.iloc[0]["weighted_avg_apr"]:
+            curr_wac = last_wac.iloc[0]["weighted_avg_apr"]
+        # monthly_summary fallback (pre-computed from loan-level data)
+        if init_wac is None or curr_wac is None:
+            wac_ms = q("SELECT weighted_avg_coupon FROM monthly_summary WHERE deal=? AND weighted_avg_coupon IS NOT NULL ORDER BY reporting_period_end", (deal,))
+            if not wac_ms.empty:
+                if init_wac is None and wac_ms.iloc[0]["weighted_avg_coupon"]:
+                    init_wac = wac_ms.iloc[0]["weighted_avg_coupon"]
+                if curr_wac is None and wac_ms.iloc[-1]["weighted_avg_coupon"]:
+                    curr_wac = wac_ms.iloc[-1]["weighted_avg_coupon"]
+        # Last resort: avg loan interest rate
+        if init_wac is None or curr_wac is None:
+            avg_rate = q("SELECT AVG(original_interest_rate) as r FROM loans WHERE deal=? AND original_interest_rate IS NOT NULL", (deal,))
+            if not avg_rate.empty and avg_rate.iloc[0]["r"]:
+                flat = float(avg_rate.iloc[0]["r"])
+                if init_wac is None:
+                    init_wac = flat
+                if curr_wac is None:
+                    curr_wac = flat
+
+        # ── Cost of Debt: compute full time series, take first/last ──
+        init_cod = None
+        curr_cod = None
+        try:
+            notes_df = q("SELECT class, coupon_rate FROM notes WHERE deal=? AND coupon_rate IS NOT NULL", (deal,))
+        except Exception:
+            notes_df = pd.DataFrame()
+
+        # Build full CoD time series (same merged Method 1+2 as per-deal chart)
+        pool_all = q("SELECT * FROM pool_performance WHERE deal=? ORDER BY dist_date_iso", (deal,))
+        if not pool_all.empty:
+            norm_rate_lookup = {}
+            if not notes_df.empty:
+                for cls, rate in zip(notes_df["class"], notes_df["coupon_rate"]):
+                    norm = cls.upper().replace("-", "").replace(" ", "").replace("CLASS", "")
+                    norm_rate_lookup[norm] = rate
+            bal_cols = {"A1": "note_balance_a1", "A2": "note_balance_a2", "A3": "note_balance_a3",
+                        "A4": "note_balance_a4", "B": "note_balance_b", "C": "note_balance_c",
+                        "D": "note_balance_d", "N": "note_balance_n"}
+            for col in bal_cols.values():
+                if col in pool_all.columns:
+                    pool_all[col] = pool_all[col].ffill()
+            has_ni = "total_note_interest" in pool_all.columns
+            has_nb = "aggregate_note_balance" in pool_all.columns
+            cod_series = []
+            for _, row in pool_all.iterrows():
+                # Method 1: actual interest ratio
+                if has_ni and has_nb:
+                    ni = row.get("total_note_interest")
+                    nb = row.get("aggregate_note_balance")
+                    if pd.notna(ni) and pd.notna(nb) and float(nb) > 0 and float(ni) > 0:
+                        val = float(ni) / float(nb) * 12
+                        if 0 < val < 0.25:
+                            cod_series.append(val)
+                            continue
+                # Method 2: weighted coupon × balance
+                if norm_rate_lookup:
+                    w_sum, t_bal = 0.0, 0.0
+                    for cls, col in bal_cols.items():
+                        if col in pool_all.columns and cls in norm_rate_lookup:
+                            bal = row.get(col)
+                            if pd.notna(bal) and float(bal) > 0:
+                                w_sum += norm_rate_lookup[cls] * float(bal)
+                                t_bal += float(bal)
+                    if t_bal > 0:
+                        cod_series.append(w_sum / t_bal)
+                        continue
+                cod_series.append(None)
+
+            # Take first and last non-None values
+            valid = [(i, v) for i, v in enumerate(cod_series) if v is not None]
+            if valid:
+                init_cod = valid[0][1]
+                curr_cod = valid[-1][1]
+                logger.info(f"  [{deal}] Summary CoD from time series: init={init_cod:.4%}, curr={curr_cod:.4%} ({len(valid)} points)")
+
+        # Fallback: flat rate from notes table
+        if init_cod is None or curr_cod is None:
+            if not notes_df.empty:
+                try:
+                    notes_ob = q("SELECT class, coupon_rate, original_balance FROM notes WHERE deal=? AND coupon_rate IS NOT NULL", (deal,))
+                except Exception:
+                    notes_ob = notes_df
+                flat = None
+                if "original_balance" in notes_ob.columns and notes_ob["original_balance"].notna().any():
+                    ob = notes_ob["original_balance"].fillna(0)
+                    if ob.sum() > 0:
+                        flat = float((notes_ob["coupon_rate"] * ob).sum() / ob.sum())
+                if flat is None:
+                    flat = float(notes_df["coupon_rate"].mean())
+                if flat and flat > 0:
+                    if init_cod is None:
+                        init_cod = flat
+                    if curr_cod is None:
+                        curr_cod = flat
+
+        # Fallback: rough estimate from avg loan interest rate
+        if init_cod is None or curr_cod is None:
+            avg_rate_fb = q("SELECT AVG(original_interest_rate) as r FROM loans WHERE deal=? AND original_interest_rate IS NOT NULL", (deal,))
+            if not avg_rate_fb.empty and avg_rate_fb.iloc[0]["r"]:
+                rough = float(avg_rate_fb.iloc[0]["r"]) * 0.4
+                if init_cod is None:
+                    init_cod = rough
+                if curr_cod is None:
+                    curr_cod = rough
+
+        # Latest pool balance — pull from the servicer cert's "Ending Pool Balance"
+        # (authoritative) with a fall-back to the latest monthly_summary row.
+        cert_totals = _cert_totals(deal)
+        latest_bal = cert_totals.get("ending_pool_balance")
+        if latest_bal is None:
+            # date-sorted pick (reporting_period_end is "MM-DD-YYYY" which sorts
+            # wrong as a string; sort in Python via the normalized date)
+            ms_rows = q("SELECT reporting_period_end, total_balance FROM monthly_summary "
+                        "WHERE deal=? AND total_balance IS NOT NULL", (deal,))
+            if not ms_rows.empty:
+                ms_rows["period"] = ms_rows["reporting_period_end"].apply(nd)
+                ms_rows = ms_rows.sort_values("period")
+                latest_bal = float(ms_rows.iloc[-1]["total_balance"])
+        pool_factor = latest_bal / init_bal if (latest_bal and init_bal and init_bal > 0) else None
+
+        equity = q("SELECT SUM(residual_cash) as total_residual FROM pool_performance WHERE deal=? AND residual_cash IS NOT NULL", (deal,))
+        total_residual = equity.iloc[0]["total_residual"] if not equity.empty and equity.iloc[0]["total_residual"] else 0
+        equity_pct = total_residual / init_bal if (init_bal and init_bal > 0) else None
+
+        # Cumulative loss rate — authoritative from latest cert
+        cum_loss_rate = get_cum_net_loss_rate(deal, init_bal)
+
+        rows.append({
+            "Deal": deal,
+            "Avg FICO": f"{avg_fico:.0f}" if avg_fico else "-",
+            "Initial Avg Consumer Rate": f"{init_wac:.2%}" if init_wac is not None else None,
+            "Current Avg Consumer Rate": f"{curr_wac:.2%}" if curr_wac is not None else None,
+            "Initial Avg Trust Cost of Debt": f"{init_cod:.2%}" if init_cod is not None else None,
+            "Current Avg Trust Cost of Debt": f"{curr_cod:.2%}" if curr_cod is not None else None,
+            "Init Balance": fm(init_bal),
+            "Pool Factor": f"{pool_factor:.1%}" if pool_factor is not None else "-",
+            "Cum Loss": f"{cum_loss_rate:.2%}" if cum_loss_rate is not None else "-",
+            "Equity Dist": f"{equity_pct:.2%}" if equity_pct is not None else "-",
+        })
+
+    if rows:
+        summary_df = pd.DataFrame(rows)
+        # Drop columns where ALL values are None (no deal has data for that metric)
+        for col in ["Initial Avg Consumer Rate", "Current Avg Consumer Rate",
+                     "Initial Avg Trust Cost of Debt", "Current Avg Trust Cost of Debt"]:
+            if col in summary_df.columns and summary_df[col].isna().all():
+                summary_df = summary_df.drop(columns=[col])
+                logger.warning(f"[{title}] Dropped column '{col}' — no data for any deal")
+            elif col in summary_df.columns:
+                summary_df[col] = summary_df[col].fillna("-")
+        h += f"<h3>{title} — Summary</h3>" + table_html(summary_df, cls="compare")
+
+    # ── Cumulative Loss Curve (by deal age in months) ──
+    # Uses cert-authoritative cum-net-loss values (parsed from every cached
+    # servicer cert) rather than cumsum'ing monthly_summary period flows,
+    # which undercount any deal with gaps in ABS-EE ingestion.
+    traces = []
+    for i, deal in enumerate(deals):
+        orig_bal = get_orig_bal(deal)
+        if not orig_bal or orig_bal <= 0:
+            continue
+        series = _cum_net_loss_series(deal)
+        if not series:
+            continue
+        months = list(range(1, len(series) + 1))
+        rates = [round(cn / orig_bal, 6) for _, cn in series]
+        traces.append({
+            "x": months,
+            "y": rates,
+            "type": "scatter",
+            "mode": "lines",
+            "name": deal,
+            "line": {"color": COLORS[i % len(COLORS)]},
+        })
+
+    if traces:
+        h += chart(traces, {
+            "title": f"{title} — Cumulative Net Loss Rate by Deal Age",
+            "xaxis": {"title": "Deal Age (Months)"},
+            "yaxis": {"tickformat": ".2%", "title": "Cum Net Loss (% of Orig Bal)"},
+            "hovermode": "x unified",
+            "legend": {"orientation": "h", "y": -0.3},
+        }, height=450)
+
+    # ── Pool Factor vs Month, Cum Loss vs Pool Factor, Excess Spread,
+    #    30+ DQ Rate, Annualized Net Charge-Off Rate ──
+    pf_traces = []       # x=calendar period, y=pool_factor
+    pf_loss_traces = []  # x=pool_factor, y=cum net loss rate (chronological line)
+    spread_traces = []   # x=calendar period, y=WAC - CoD
+    dq_traces = []       # x=deal age, y=30+ DQ balance / total balance
+    co_traces = []       # x=deal age, y=annualized net charge-off rate
+    note_bal_cols = {"A1": "note_balance_a1", "A2": "note_balance_a2", "A3": "note_balance_a3",
+                     "A4": "note_balance_a4", "B": "note_balance_b", "C": "note_balance_c",
+                     "D": "note_balance_d", "N": "note_balance_n"}
+
+    for i, deal in enumerate(deals):
+        color = COLORS[i % len(COLORS)]
+        orig_bal = get_orig_bal(deal)
+        if not orig_bal or orig_bal <= 0:
+            continue
+
+        # Pool factor + cum loss + roll rates from monthly_summary
+        ms = q("SELECT reporting_period_end, total_balance, period_chargeoffs, period_recoveries, "
+               "dq_30_balance, dq_60_balance, dq_90_balance, dq_120_plus_balance "
+               "FROM monthly_summary WHERE deal=? ORDER BY reporting_period_end", (deal,))
+        if not ms.empty:
+            ms["period"] = ms["reporting_period_end"].apply(nd)
+            ms = ms.sort_values("period").reset_index(drop=True)
+            ms["pool_factor"] = ms["total_balance"].astype(float) / orig_bal
+            pf_traces.append({
+                "x": list(range(1, len(ms) + 1)),
+                "y": [round(v, 6) for v in ms["pool_factor"].tolist()],
+                "type": "scatter", "mode": "lines", "name": deal,
+                "line": {"color": color},
+            })
+
+            # Loss vs Pool Factor: pair cert-authoritative cum loss with the
+            # pool-performance ending balance for the same distribution date.
+            # (monthly_summary cumsum undercounts for deals with ABS-EE gaps.)
+            loss_series = _cum_net_loss_series(deal)
+            if loss_series:
+                pool_bal = q("SELECT distribution_date, ending_pool_balance FROM pool_performance "
+                             "WHERE deal=?", (deal,))
+                bal_by_dt = {}
+                for _, r in pool_bal.iterrows():
+                    if r["ending_pool_balance"]:
+                        for fmt in ("%m/%d/%Y", "%Y-%m-%d"):
+                            try:
+                                bal_by_dt[datetime.strptime(str(r["distribution_date"]).strip()[:10], fmt)] = float(r["ending_pool_balance"])
+                                break
+                            except (ValueError, TypeError):
+                                pass
+                pf_x, pf_y = [], []
+                for dt, cn in loss_series:
+                    bal = bal_by_dt.get(dt)
+                    if bal is None:
+                        continue
+                    pf_x.append(round(bal / orig_bal, 6))
+                    pf_y.append(round(cn / orig_bal, 6))
+                if pf_x:
+                    pf_loss_traces.append({
+                        "x": pf_x, "y": pf_y,
+                        "type": "scatter", "mode": "lines+markers", "name": deal,
+                        "line": {"color": color},
+                        "marker": {"size": 4},
+                    })
+
+            # 30+ DQ rate: per-period 31-60 + 61-90 + 91-120 / ending pool balance,
+            # parsed from each cached servicer cert. Matches the cert's bucket
+            # definition (no 120+ bucket — those loans are charged off).
+            dq_series = _cert_dq_series(deal)
+            if dq_series:
+                dq_traces.append({
+                    "x": list(range(1, len(dq_series) + 1)),
+                    "y": [round(dq / epb, 6) if epb else 0 for _, dq, epb in dq_series],
+                    "type": "scatter", "mode": "lines", "name": deal,
+                    "line": {"color": color},
+                })
+
+            # Prior-month balance series for the annualized charge-off chart.
+            bal = ms["total_balance"].astype(float)
+
+            # Annualized net charge-off rate: (CO - recoveries) * 12 / avg pool balance.
+            # Uses prior-month balance as the denominator (standard industry form).
+            # Skip month 1 where there's no prior-month balance.
+            prev_bal = bal.shift(1)
+            net_co = (ms["period_chargeoffs"].fillna(0) - ms["period_recoveries"].fillna(0)).astype(float)
+            co_rate = (net_co * 12.0) / prev_bal.where(prev_bal > 0)
+            co_x = []; co_y = []
+            for idx, v in enumerate(co_rate.tolist()):
+                if idx == 0 or v is None or pd.isna(v):
+                    continue
+                co_x.append(idx + 1)   # deal age = 1-based index
+                co_y.append(round(float(v), 6))
+            if co_x:
+                co_traces.append({
+                    "x": co_x, "y": co_y,
+                    "type": "scatter", "mode": "lines", "name": deal,
+                    "line": {"color": color},
+                })
+
+        # Excess spread: WAC − CoD aligned on collection-period (year, month).
+        # WAC source (pool_performance.weighted_avg_apr for Prime; monthly_summary
+        # .weighted_avg_coupon for Non-Prime, which doesn't populate WAC in the
+        # servicer report) is keyed by the month-end of the collection period.
+        # CoD comes from pool_performance — but those rows use the distribution
+        # date, which is ~10 days after the collection period it reports on.
+        # Shifting the distribution month back by one gives the collection month.
+        pool = q("SELECT * FROM pool_performance WHERE deal=? ORDER BY dist_date_iso", (deal,))
+        if pool.empty:
+            continue
+        pool["period"] = pool["distribution_date"].apply(nd)
+        pool = pool.sort_values("period").reset_index(drop=True)
+
+        def _ym(s):
+            s = str(s).strip()
+            if len(s) >= 7 and s[4] in "-/":
+                try:
+                    return (int(s[:4]), int(s[5:7]))
+                except ValueError:
+                    return None
+            return None
+
+        # WAC by collection month
+        wac_by_col = {}
+        if "weighted_avg_apr" in pool.columns and pool["weighted_avg_apr"].notna().any():
+            for _, row in pool.iterrows():
+                ym = _ym(row["period"])
+                w = row["weighted_avg_apr"]
+                if ym and pd.notna(w):
+                    col_ym = (ym[0], ym[1] - 1) if ym[1] > 1 else (ym[0] - 1, 12)
+                    wac_by_col[col_ym] = float(w)
+        else:
+            wac_ms = q("SELECT reporting_period_end, weighted_avg_coupon FROM monthly_summary "
+                       "WHERE deal=? AND weighted_avg_coupon IS NOT NULL ORDER BY reporting_period_end", (deal,))
+            for _, row in wac_ms.iterrows():
+                ym = _ym(nd(row["reporting_period_end"]))
+                if ym:
+                    wac_by_col[ym] = float(row["weighted_avg_coupon"])
+
+        # CoD by collection month
+        try:
+            notes_df = q("SELECT class, coupon_rate FROM notes WHERE deal=? AND coupon_rate IS NOT NULL", (deal,))
+        except Exception:
+            notes_df = pd.DataFrame()
+        norm_rate_lookup = {}
+        if not notes_df.empty:
+            for cls, rate in zip(notes_df["class"], notes_df["coupon_rate"]):
+                norm = cls.upper().replace("-", "").replace(" ", "").replace("CLASS", "")
+                norm_rate_lookup[norm] = rate
+        for col in note_bal_cols.values():
+            if col in pool.columns:
+                pool[col] = pool[col].ffill()
+
+        cod_by_col = {}
+        has_ni = "total_note_interest" in pool.columns
+        has_nb = "aggregate_note_balance" in pool.columns
+        for _, row in pool.iterrows():
+            ym = _ym(row["period"])
+            if not ym:
+                continue
+            col_ym = (ym[0], ym[1] - 1) if ym[1] > 1 else (ym[0] - 1, 12)
+            cod_val = None
+            if has_ni and has_nb:
+                ni = row.get("total_note_interest")
+                nb = row.get("aggregate_note_balance")
+                if pd.notna(ni) and pd.notna(nb) and float(nb) > 0 and float(ni) > 0:
+                    v = float(ni) / float(nb) * 12
+                    if 0 < v < 0.25:
+                        cod_val = v
+            if cod_val is None and norm_rate_lookup:
+                w_sum, t_bal = 0.0, 0.0
+                for cls, col in note_bal_cols.items():
+                    if col in pool.columns and cls in norm_rate_lookup:
+                        bal = row.get(col)
+                        if pd.notna(bal) and float(bal) > 0:
+                            w_sum += norm_rate_lookup[cls] * float(bal)
+                            t_bal += float(bal)
+                if t_bal > 0:
+                    cod_val = w_sum / t_bal
+            if cod_val is not None:
+                cod_by_col[col_ym] = cod_val
+
+        keys = sorted(set(wac_by_col) & set(cod_by_col))
+        # Drop the first period. The first servicer cert reports note interest
+        # for a partial accrual period (closing date → first payment date,
+        # typically 20-30 days), but our CoD annualizes by ×12. That understates
+        # CoD on the first observation and creates a ~1-2% upward spike in
+        # excess spread at month 1 on every deal — a chart artifact, not a
+        # real jump in profitability.
+        if len(keys) > 1:
+            keys = keys[1:]
+        if keys:
+            spread_traces.append({
+                "x": list(range(1, len(keys) + 1)),
+                "y": [round(wac_by_col[k] - cod_by_col[k], 6) for k in keys],
+                "type": "scatter", "mode": "lines", "name": deal,
+                "line": {"color": color},
+            })
+
+    if pf_traces:
+        h += chart(pf_traces, {
+            "title": f"{title} — Pool Factor by Deal Age",
+            "xaxis": {"title": "Deal Age (Months)"},
+            "yaxis": {"tickformat": ".0%", "title": "Pool Factor (Remaining / Original)"},
+            "hovermode": "x unified",
+            "legend": {"orientation": "h", "y": -0.3},
+        }, height=450)
+
+    if pf_loss_traces:
+        h += chart(pf_loss_traces, {
+            "title": f"{title} — Cumulative Net Loss vs Pool Factor",
+            "xaxis": {"title": "Pool Factor (Remaining / Original)",
+                      "tickformat": ".0%", "autorange": "reversed"},
+            "yaxis": {"tickformat": ".2%", "title": "Cum Net Loss (% of Orig Bal)"},
+            "hovermode": "closest",
+            "legend": {"orientation": "h", "y": -0.3},
+        }, height=450)
+
+    if dq_traces:
+        h += chart(dq_traces, {
+            "title": f"{title} — 30+ Day Delinquency Rate by Deal Age",
+            "xaxis": {"title": "Deal Age (Months)"},
+            "yaxis": {"tickformat": ".2%", "title": "30+ DQ Balance / Pool Balance"},
+            "hovermode": "x unified",
+            "legend": {"orientation": "h", "y": -0.3},
+        }, height=450)
+
+    if co_traces:
+        h += chart(co_traces, {
+            "title": f"{title} — Annualized Net Charge-Off Rate by Deal Age",
+            "xaxis": {"title": "Deal Age (Months)"},
+            "yaxis": {"tickformat": ".2%", "title": "Net Charge-Offs × 12 / Prior Month Balance"},
+            "hovermode": "x unified",
+            "legend": {"orientation": "h", "y": -0.3},
+        }, height=450)
+
+    if spread_traces:
+        h += chart(spread_traces, {
+            "title": f"{title} — Excess Spread by Deal Age (Consumer Rate − Trust Cost of Debt)",
+            "xaxis": {"title": "Deal Age (Months)"},
+            "yaxis": {"tickformat": ".2%", "title": "Excess Spread"},
+            "hovermode": "x unified",
+            "legend": {"orientation": "h", "y": -0.3},
+        }, height=450)
+
+    return h
+
+
+def _loss_forecast_buildup_tables(model_results):
+    """Per-deal lifetime loss-forecast build-up using the conditional Markov
+    forward simulation (see carvana_abs/conditional_markov.py).
+
+    For each currently-active loan we walk its (state, age, balance) forward
+    month-by-month to original term, applying transition probabilities binned
+    by (tier, current_state, age_bucket, FICO_bucket, LTV_bucket, modified)
+    and amortizing the balance via empirical paydown curves binned by
+    (tier, term_bucket, age). Mass entering Default at month t contributes
+    expected loss = mass × balance(t) × LGD(tier, age, FICO, LTV).
+
+    Output columns:
+        Realized $/% — cert's cumulative net charge-off
+        DQ pipeline $ — sum of expected future loss for loans currently 1+ payment behind
+        Performing future $ — same for loans currently up-to-date
+        Total $ midpoint — realized + dq + performing
+        Total $ −1σ / +1σ — total ± 1 standard deviation of forecast (Bernoulli per loan, summed)
+    """
+    # Read from dashboard.db model_results['conditional_markov'] directly so
+    # the build-up table picks up forecasts written by conditional_markov.py
+    # without the model_results JSON blob having to be re-saved.
+    cm = q("SELECT value FROM model_results WHERE key='conditional_markov'")
+    if cm.empty:
+        return ""
+    cm_data = json.loads(cm.iloc[0]["value"])
+    by_deal = cm_data.get("by_deal", {})
+    p_def_ref = cm_data.get("p_default_reference", {})
+
+    def build_for(deals, title):
+        rows = []
+        for deal in deals:
+            d = by_deal.get(deal)
+            if not d: continue
+            orig = get_orig_bal(deal)
+            if not orig or orig <= 0: continue
+            realized = d["realized"]; dq = d["dq_pending"]; perf = d["performing_future"]
+            mid = d["total_expected"]
+            lo = d["total_minus_1sd"]; hi = d["total_plus_1sd"]
+            cal_factor = d.get("calibration_factor", 1.0)
+            def pct(x): return f"{x/orig:.2%}" if orig else "-"
+            rows.append({
+                "Deal": deal,
+                "Active Loans": f"{d['active_loans']:,}",
+                "Realized $": fm(realized),
+                "Realized %": pct(realized),
+                "DQ Pipeline $": fm(dq),
+                "Performing Future $": fm(perf),
+                "Cohort Cal": f"{cal_factor:.2f}×",
+                "Total $ −1σ": fm(lo),
+                "Total $ midpoint": fm(mid),
+                "Total $ +1σ": fm(hi),
+                "Total %": pct(mid),
+            })
+        if not rows:
+            return ""
+        return (f"<h3>{title} — Lifetime Loss Forecast Build-Up</h3>"
+                + table_html(pd.DataFrame(rows), cls="compare"))
+
+    h = ""
+    h += build_for(PRIME_DEALS, "Prime")
+    h += build_for(NONPRIME_DEALS, "Non-Prime")
+
+    # Reference table: 1-month default + payoff probabilities at the most
+    # populated (state, age, FICO) cells. Lets you eyeball the model.
+    for tier in ("Prime", "NonPrime"):
+        rows = p_def_ref.get(tier, [])
+        if not rows: continue
+        # Collapse to most-populated cells, sort by N descending, top 30
+        rows_sorted = sorted(rows, key=lambda r: -r["n"])[:30]
+        ref_df = pd.DataFrame([{
+            "State": r["state"], "Age": r["age"], "FICO": r["fico"],
+            "n obs": f"{r['n']:,}",
+            "P(Default) 1mo": f"{r['p_default_1mo']:.4%}",
+            "P(Payoff) 1mo": f"{r['p_payoff_1mo']:.4%}",
+        } for r in rows_sorted])
+        h += f"<h3>{tier} — One-month transition probabilities (top 30 cells)</h3>"
+        h += table_html(ref_df, cls="compare")
+
+    if h:
+        h = ("<div class=\"tc\">" + h
+             + "<p style=\"font-size:.75rem;color:#666;margin-top:8px;\">"
+             "<b>Realized</b> from the servicer cert's cumulative net charge-off line. "
+             "<b>DQ pipeline</b> + <b>Performing future</b> are the per-loan forward "
+             "simulation results for active loans currently delinquent / current. "
+             "Transitions binned by tier × state × age × FICO × LTV × modified flag "
+             "with sparse-cell fallbacks. Balance amortized monthly via empirical "
+             "paydown curves observed in performing loans (modified loans use a "
+             "separate curve or held flat if too sparse). LGD per defaulted loan "
+             "binned by tier × age × FICO × LTV. ±1σ accumulates per-loan "
+             "Bernoulli variance — captures within-portfolio dispersion, not macro "
+             "shock.</p></div>")
+    return h
+
+
+def generate_model_content():
+    """Generate HTML for the Default Model analysis section."""
+    mr = None
+    try:
+        mr = q("SELECT value FROM model_results WHERE key='default_model'")
+    except Exception:
+        pass
+
+    # If no pre-computed results, try to run the model inline
+    if mr is None or mr.empty:
+        logger.info("No pre-computed model results found, running model inline...")
+        try:
+            import importlib.util
+            model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "default_model.py")
+            spec = importlib.util.spec_from_file_location("default_model", model_path)
+            dm = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(dm)
+            dm.DASHBOARD_DB = ACTIVE_DB
+            dm.OUTPUT_JSON = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "deploy", "LAST_MODEL_RESULTS.json")
+            df = dm.load_data(ACTIVE_DB)
+            logger.info(f"Inline model: loaded {len(df)} loans")
+            if len(df) > 0:
+                df, feature_cols = dm.engineer_features(df)
+                results = dm.train_models(df, feature_cols)
+                if results:
+                    dm.save_results(results, ACTIVE_DB, dm.OUTPUT_JSON)
+                    mr = q("SELECT value FROM model_results WHERE key='default_model'")
+        except Exception as e:
+            logger.error(f"Inline model failed: {e}")
+
+    if mr is None or mr.empty:
+        return "<p>Default model could not be computed.</p>"
+
+    results = json.loads(mr.iloc[0]["value"])
+    ds = results["dataset"]
+    h = ""
+
+    # ── Dataset Summary ──
+    h += f"""<div class="metrics">
+<div class="metric"><div class="mv">{ds['total_loans']:,}</div><div class="ml">Total Loans</div></div>
+<div class="metric"><div class="mv">{ds['defaults']:,}</div><div class="ml">Defaults</div></div>
+<div class="metric"><div class="mv">{ds['default_rate']:.2%}</div><div class="ml">Default Rate</div></div>
+<div class="metric"><div class="mv">{ds['train_size']:,}</div><div class="ml">Train Set</div></div>
+<div class="metric"><div class="mv">{ds['test_size']:,}</div><div class="ml">Test Set</div></div>
+</div>"""
+
+    # ── Loss Forecast Build-Up (per deal, split Prime vs Non-Prime) ──
+    h += _loss_forecast_buildup_tables(results)
+
+    # ── Model Comparison Table ──
+    rows = []
+    for name, m in results["models"].items():
+        rows.append({
+            "Model": name.replace("_", " ").title(),
+            "Accuracy": f"{m['accuracy']:.1%}",
+            "AUC-ROC": f"{m['auc_roc']:.3f}",
+            "Precision": f"{m['precision']:.1%}",
+            "Recall": f"{m['recall']:.1%}",
+            "F1 Score": f"{m['f1']:.1%}",
+        })
+    h += "<h3>Model Performance</h3>" + table_html(pd.DataFrame(rows), cls="compare")
+
+    # ── ROC Curves ──
+    roc_traces = []
+    colors = {"logistic_regression": "#1976D2", "random_forest": "#D32F2F"}
+    for name, m in results["models"].items():
+        roc = m["roc_curve"]
+        roc_traces.append({
+            "x": roc["fpr"], "y": roc["tpr"],
+            "type": "scatter", "mode": "lines",
+            "name": f"{name.replace('_',' ').title()} (AUC={m['auc_roc']:.3f})",
+            "line": {"color": colors.get(name, "#388E3C")},
+        })
+    roc_traces.append({
+        "x": [0, 1], "y": [0, 1], "type": "scatter", "mode": "lines",
+        "name": "Random (AUC=0.5)", "line": {"color": "#999", "dash": "dash"},
+    })
+    h += chart(roc_traces, {
+        "title": "ROC Curve",
+        "xaxis": {"title": "False Positive Rate"},
+        "yaxis": {"title": "True Positive Rate"},
+        "legend": {"orientation": "h", "y": -0.2},
+    })
+
+    # ── Feature Importance (Random Forest) ──
+    rf = results["models"].get("random_forest", {})
+    if "feature_importance" in rf:
+        fi = rf["feature_importance"]
+        sorted_fi = sorted(fi.items(), key=lambda x: x[1], reverse=True)
+        h += chart([{
+            "x": [kv[0] for kv in sorted_fi],
+            "y": [kv[1] for kv in sorted_fi],
+            "type": "bar", "marker": {"color": "#1976D2"},
+        }], {"title": "Feature Importance (Random Forest)", "yaxis": {"tickformat": ".1%"}})
+
+    # ── Logistic Regression Coefficients ──
+    lr = results["models"].get("logistic_regression", {})
+    if "coefficients" in lr:
+        coefs = lr["coefficients"]
+        sorted_c = sorted(coefs.items(), key=lambda x: abs(x[1]), reverse=True)
+        colors_c = ["#D32F2F" if v < 0 else "#388E3C" for _, v in sorted_c]
+        h += chart([{
+            "x": [kv[0] for kv in sorted_c],
+            "y": [kv[1] for kv in sorted_c],
+            "type": "bar", "marker": {"color": colors_c},
+        }], {"title": "Logistic Regression Coefficients (standardized)",
+             "yaxis": {"title": "Coefficient"}})
+
+    # ── Confusion Matrices ──
+    for name, m in results["models"].items():
+        cm = m["confusion_matrix"]
+        cm_df = pd.DataFrame({
+            "": ["Actual No Default", "Actual Default"],
+            "Predicted No Default": [f"{cm[0][0]:,}", f"{cm[1][0]:,}"],
+            "Predicted Default": [f"{cm[0][1]:,}", f"{cm[1][1]:,}"],
+        })
+        h += f"<h3>Confusion Matrix — {name.replace('_',' ').title()}</h3>" + table_html(cm_df, cls="compare")
+
+    # ── Segment Analysis: Predicted vs Actual ──
+    segs = results.get("segments", {})
+
+    for seg_key, seg_title in [("by_fico", "Default Rate by FICO Score"),
+                                ("by_vintage", "Default Rate by Origination Year"),
+                                ("by_ltv", "Default Rate by LTV"),
+                                ("by_rate", "Default Rate by Interest Rate")]:
+        seg = segs.get(seg_key)
+        if not seg:
+            continue
+        h += chart([
+            {"x": seg["labels"], "y": seg["actual_rate"], "type": "bar",
+             "name": "Actual", "marker": {"color": "#D32F2F"}},
+            {"x": seg["labels"], "y": seg["predicted_rate"], "type": "bar",
+             "name": "Predicted", "marker": {"color": "#1976D2"}},
+        ], {"title": seg_title, "barmode": "group",
+            "yaxis": {"tickformat": ".1%"}, "hovermode": "x unified",
+            "legend": {"orientation": "h", "y": -0.2}})
+        # Table
+        tbl_rows = []
+        for i, label in enumerate(seg["labels"]):
+            row = {"Segment": label, "Loans": f"{seg['loans'][i]:,}",
+                   "Actual Default": f"{seg['actual_rate'][i]:.2%}",
+                   "Predicted Default": f"{seg['predicted_rate'][i]:.2%}"}
+            tbl_rows.append(row)
+        h += table_html(pd.DataFrame(tbl_rows), cls="compare")
+
+    # ── Loss Severity ──
+    sev = segs.get("loss_severity")
+    if sev:
+        h += f"""<h3>Loss Severity (Defaulted Loans Only)</h3>
+<div class="metrics">
+<div class="metric"><div class="mv">{sev['total_defaulted']:,}</div><div class="ml">Defaulted Loans</div></div>
+<div class="metric"><div class="mv">{fm(sev['avg_chargeoff'])}</div><div class="ml">Avg Chargeoff</div></div>
+<div class="metric"><div class="mv">{fm(sev['avg_recovery'])}</div><div class="ml">Avg Recovery</div></div>
+<div class="metric"><div class="mv">{fm(sev['avg_net_loss'])}</div><div class="ml">Avg Net Loss</div></div>
+<div class="metric"><div class="mv">{sev['recovery_rate']:.1%}</div><div class="ml">Recovery Rate</div></div>
+<div class="metric"><div class="mv">{fm(sev['median_chargeoff'])}</div><div class="ml">Median Chargeoff</div></div>
+</div>"""
+
+    return h
+
+
+# ---------------------------------------------------------------------------
+# Residual Economics Tab  (landing page — first/default tab)
+# ---------------------------------------------------------------------------
+
+def _safe_div(a, b):
+    """Return a/b or None when b is zero/None."""
+    if b is None or b == 0:
+        return None
+    return a / b
+
+
+def _rt_parse_date(s):
+    """Parse pool_performance distribution_date (m/d/Y or Y-m-d). Returns datetime or None."""
+    if not s:
+        return None
+    for fmt in ('%m/%d/%Y', '%Y-%m-%d', '%m-%d-%Y'):
+        try:
+            return datetime.strptime(str(s).strip(), fmt)
+        except Exception:
+            pass
+    return None
+
+
+def _rt_months_since(cutoff_str, dist_dt):
+    """Whole-months from cutoff to distribution date, minimum 1."""
+    c = _rt_parse_date(cutoff_str)
+    if not c or not dist_dt:
+        return None
+    return max(1, (dist_dt.year - c.year) * 12 + (dist_dt.month - c.month))
+
+
+def _rt_segment(deal, issuer):
+    """Classify a deal into one of: Carvana Prime, Carvana Non-Prime, CarMax."""
+    if issuer == 'CARMX':
+        return 'CarMax'
+    return 'Carvana Prime' if '-P' in deal else 'Carvana Non-Prime'
+
+
+def _rt_load_issuer(raw_db, issuer):
+    """Load (terms, perf) for a single issuer's raw DB.
+
+    terms[deal] -> dict(ipb, cutoff, wal, issuer)
+    perf[deal]  -> list of dicts {dist, cnl, ebp, nco, dq_3160, dq_6190,
+                   dq_91120, dq_121p, recoveries, gross_co} sorted by dist
+                   ascending
+    """
+    from collections import defaultdict as _dd
+    terms, perf = {}, _dd(list)
+    if not os.path.exists(raw_db):
+        return terms, perf
+    conn = sqlite3.connect(raw_db)
+    try:
+        for deal, ipb, cutoff in conn.execute(
+            "SELECT deal, initial_pool_balance, cutoff_date FROM deal_terms"
+        ).fetchall():
+            if ipb and ipb < 5e9:
+                terms[deal] = {'ipb': ipb, 'cutoff': cutoff, 'issuer': issuer}
+        for (deal, dd, cnl, ebp, nco,
+             dq1, dq2, dq3, dq4, rec, gco) in conn.execute(
+            "SELECT deal, distribution_date, cumulative_net_losses, "
+            "ending_pool_balance, net_charged_off_amount, "
+            "delinquent_31_60_balance, delinquent_61_90_balance, "
+            "delinquent_91_120_balance, delinquent_121_plus_balance, "
+            "recoveries, gross_charged_off_amount "
+            "FROM pool_performance"
+        ).fetchall():
+            dt = _rt_parse_date(dd)
+            if dt is None:
+                continue
+            perf[deal].append({
+                'dist': dt,
+                'cnl': cnl or 0,
+                'ebp': ebp or 0,
+                'nco': nco or 0,
+                'dq_3160': dq1 or 0,
+                'dq_6190': dq2 or 0,
+                'dq_91120': dq3 or 0,
+                'dq_121p': dq4 or 0,
+                'recoveries': rec or 0,
+                'gross_co': gco or 0,
+            })
+        for deal in perf:
+            perf[deal].sort(key=lambda r: r['dist'])
+    finally:
+        conn.close()
+    return terms, dict(perf)
+
+
+def _rt_load_forecasts(raw_db):
+    """Load Markov deal_forecasts for one issuer DB.
+
+    Returns dict[deal] -> {
+        'at_issuance_cnl_pct': float,   # Markov at-issuance lifetime CNL forecast (%)
+        'current_projected_cnl_pct': float,  # realized + Markov-projected remaining (%)
+        'realized_cnl_pct': float,      # realized CNL to date (% of original balance)
+        'cal_factor': float,            # Bayesian calibration multiplier
+        'pct_complete': float,          # realized / current_projected
+    }
+
+    Returns empty dict if deal_forecasts table does not exist yet.
+    """
+    out = {}
+    if not os.path.exists(raw_db):
+        return out
+    conn = sqlite3.connect(raw_db)
+    try:
+        has_df = conn.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='deal_forecasts'"
+        ).fetchone()[0]
+        if not has_df:
+            return out
+        for deal, ai, cp, rc, cf, pc in conn.execute(
+            "SELECT deal, at_issuance_cnl_pct, current_projected_cnl_pct, "
+            "realized_cnl_pct, cal_factor, pct_complete FROM deal_forecasts"
+        ).fetchall():
+            out[deal] = {
+                'at_issuance_cnl_pct': ai,
+                'current_projected_cnl_pct': cp,
+                'realized_cnl_pct': rc,
+                'cal_factor': cf,
+                'pct_complete': pc,
+            }
+    finally:
+        conn.close()
+    return out
+
+
+def generate_recent_trends_tab():
+    """Recent Trends — monthly-monitoring view for the residual-equity holder.
+
+    Reframed (2026-04-16): instead of a long-term at-issuance-vs-today peer
+    comparison, this tab answers a single monthly-monitoring question for an
+    equity holder who put equal $ into each pool at origination:
+
+        For the pools that still have value outstanding, did losses /
+        delinquencies / recoveries last month come in higher, lower, or
+        about the same as the CURRENT Markov model would have expected
+        for that pool at its current age?
+
+    Data sources:
+      - pool_performance (actuals: CNL, recoveries, DQ buckets, ending_pool_balance)
+      - deal_forecasts (at-issuance lifetime projection + cal factor)
+      - deploy/recent_trends_cache.json (per-deal month-by-month Markov-expected
+        trajectory; generated at end of unified_markov.run() — see
+        deal_monthly_trajectory() in unified_markov.py)
+
+    If the cache is missing (first run of the new code before next Markov
+    rebuild), we fall back to a simplified "pace-relative-to-lifetime"
+    expected-monthly-loss derived from deal_forecasts.at_issuance_cnl_pct
+    spread over typical term months — less faithful, but keeps the tab
+    renderable.
+
+    Focus weighting: by `outstanding $` (latest ending_pool_balance) — the
+    deals with the most capital at risk sort to the top. Carvana-first on
+    ties per meta-goal.
+    """
+    from collections import defaultdict as _dd
+
+    # ── 1. Load raw data + forecasts for both issuers ────────────────────
+    crv_db = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          "db", "carvana_abs.db")
+    cmx_db = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                          "carmax_abs", "db", "carmax_abs.db")
+
+    all_terms, all_perf = {}, {}
+    all_forecasts = {}
+    for db, issuer in [(crv_db, 'CRVNA'), (cmx_db, 'CARMX')]:
+        t, p = _rt_load_issuer(db, issuer)
+        all_terms.update(t)
+        all_perf.update(p)
+        all_forecasts.update(_rt_load_forecasts(db))
+
+    if not all_terms:
+        return "<div class='tc' style='display:block;padding:16px'><p>No data available yet.</p></div>"
+
+    # ── 2. Load per-deal Markov monthly trajectory cache ────────────────
+    cache_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "deploy", "recent_trends_cache.json")
+    monthly_cache = {}
+    cache_generated_at = None
+    if os.path.exists(cache_path):
+        try:
+            with open(cache_path) as f:
+                payload = json.load(f)
+            monthly_cache = payload.get("deals", {})
+            cache_generated_at = payload.get("generated_at")
+        except Exception as e:
+            logger.warning(f"Recent Trends: failed to load cache — {e}")
+
+    def _lookup_expected(deal, month):
+        """Return the cached (expected_cnl_pct, expected_monthly_loss_bps,
+        expected_dq30plus_pct, expected_active_balance_pct) at the given
+        1-indexed month, or None if missing / out of range.
+        """
+        c = monthly_cache.get(deal)
+        if not c or not c.get("months"):
+            return None
+        months = c["months"]
+        if month < 1 or month > len(months):
+            # Use last available if we're beyond the cached curve (rare —
+            # cache covers up to term_bucket[-1] = 84 months).
+            return None
+        row = months[month - 1]
+        return (row.get("expected_cnl_pct"),
+                row.get("expected_monthly_loss_bps"),
+                row.get("expected_dq30plus_pct"),
+                row.get("expected_active_balance_pct"))
+
+    # ── 3. Build per-deal monthly-monitoring record ──────────────────────
+    per_deal = {}
+    latest_dist_seen = None
+    any_cache_hit = False
+
+    for deal, t in all_terms.items():
+        rows = all_perf.get(deal, [])
+        if not rows or not t.get('ipb'):
+            continue
+        seg = _rt_segment(deal, t['issuer'])
+        cutoff = t['cutoff']
+        ipb = t['ipb']
+
+        latest = rows[-1]
+        if latest_dist_seen is None or latest['dist'] > latest_dist_seen:
+            latest_dist_seen = latest['dist']
+
+        m_latest = _rt_months_since(cutoff, latest['dist'])
+        outstanding = latest.get('ebp') or 0.0
+        pool_factor = (outstanding / ipb) if ipb > 0 else 0.0
+
+        mf = all_forecasts.get(deal)
+        at_issuance_pct = mf['at_issuance_cnl_pct'] if mf else None
+        current_proj_pct = mf['current_projected_cnl_pct'] if mf else None
+        realized_pct = mf['realized_cnl_pct'] if mf else None
+        cal = mf['cal_factor'] if mf else None
+
+        # Actual DQ 30+ rate (% of ending pool balance).
+        actual_dq30_pct = None
+        dq_bal = (latest.get('dq_3160', 0) + latest.get('dq_6190', 0)
+                  + latest.get('dq_91120', 0) + latest.get('dq_121p', 0))
+        if outstanding > 0:
+            actual_dq30_pct = dq_bal / outstanding * 100
+
+        # Monthly deltas (bps of initial pool balance) for the last 3 obs,
+        # each compared to the Markov-expected monthly pace at that age.
+        def _months_since(dist_dt):
+            return _rt_months_since(cutoff, dist_dt)
+
+        monthly_rows = []  # [(month_idx, date_str, actual_dq30_pct,
+                           #   actual_chargeoff_bps, actual_recovery_bps,
+                           #   actual_monthly_loss_bps, exp_...)]
+        # Walk last 3 observations where we can compute month-over-month.
+        n = len(rows)
+        for i in range(max(1, n - 3), n):
+            this_r = rows[i]
+            prev_r = rows[i - 1]
+            m_i = _months_since(this_r['dist'])
+            if m_i is None:
+                continue
+
+            # Actual monthly loss, charge-offs, recoveries (bps of ipb).
+            # pool_performance stores monthly flows (not cumulative), so each
+            # row's nco / gross_co / recoveries is that period only.
+            delta_cnl = (this_r['cnl'] - prev_r['cnl'])
+            this_nco = this_r.get('nco')
+            this_gco = this_r.get('gross_co')
+            this_rec = this_r.get('recoveries')
+            # Monthly charge-offs = gross charge-offs (what the pool lost to
+            # default before recoveries). Fall back to delta-cnl if gross not
+            # reported separately.
+            if this_gco is not None and ipb > 0:
+                actual_chargeoff_bps = this_gco / ipb * 10_000
+            elif this_nco is not None and ipb > 0:
+                actual_chargeoff_bps = this_nco / ipb * 10_000
+            else:
+                actual_chargeoff_bps = None
+            actual_monthly_loss_bps = (delta_cnl / ipb * 10_000) if ipb > 0 else None
+
+            # Recoveries: pool_performance.recoveries is the period-level
+            # recovery flow. Convention: positive = good for holder.
+            actual_recoveries_bps = None
+            if this_rec is not None and ipb > 0:
+                actual_recoveries_bps = this_rec / ipb * 10_000
+            elif actual_chargeoff_bps is not None and actual_monthly_loss_bps is not None:
+                # Fallback: implied recoveries = gross_co − net_loss.
+                actual_recoveries_bps = actual_chargeoff_bps - actual_monthly_loss_bps
+
+            # Actual DQ 30+ % at this month.
+            this_dq_bal = (this_r.get('dq_3160', 0) + this_r.get('dq_6190', 0)
+                           + this_r.get('dq_91120', 0) + this_r.get('dq_121p', 0))
+            this_ebp = this_r.get('ebp') if isinstance(this_r, dict) else None
+            actual_dq_at_i = (this_dq_bal / this_ebp * 100) if (this_ebp and this_ebp > 0) else None
+
+            # Cached expected values for this age.
+            exp = _lookup_expected(deal, m_i)
+            prev_exp = _lookup_expected(deal, m_i - 1) if m_i > 1 else None
+            if exp is not None:
+                any_cache_hit = True
+
+            exp_cnl_pct, exp_monthly_loss_bps, exp_dq30_pct, _ = (
+                exp if exp else (None, None, None, None))
+            prev_exp_cnl_pct, _, _, _ = (
+                prev_exp if prev_exp else (None, None, None, None))
+
+            # Fallback expected monthly loss if cache missing: lifetime/typical
+            # term, ~flat.
+            if exp_monthly_loss_bps is None and at_issuance_pct is not None:
+                typical_term = 72 if seg == 'Carvana Non-Prime' else 60
+                exp_monthly_loss_bps = at_issuance_pct * 100 / typical_term
+
+            # Expected monthly charge-off is a hair higher than expected net
+            # monthly loss (charge-off gross − recoveries). The Markov cache
+            # exposes the expected *net* monthly loss. Carvana/CarMax servicer
+            # reports show recoveries averaging ~20-35% of gross charge-offs,
+            # so as a proxy: expected_chargeoff ≈ expected_loss × 1.30.
+            # (This is a coarse Markov proxy since the cache builds LGD into
+            # the loss number directly — if LGD=0.75 and rec=0.25, gross ≈ loss/0.75.)
+            exp_chargeoff_bps = None
+            exp_recovery_bps = None
+            if exp_monthly_loss_bps is not None:
+                exp_chargeoff_bps = exp_monthly_loss_bps / 0.75  # assume avg LGD ~75%
+                exp_recovery_bps = exp_chargeoff_bps - exp_monthly_loss_bps
+
+            # Surprises (actual − expected).
+            # Sign convention: positive = worse than expected (bad for holder)
+            # for DQ and losses; positive recovery surprise = good.
+            dq_surprise_bps = None
+            if actual_dq_at_i is not None and exp_dq30_pct is not None:
+                # Both in %, convert to bps of pool *balance* (which is the
+                # comparable unit).
+                dq_surprise_bps = (actual_dq_at_i - exp_dq30_pct) * 100
+
+            chargeoff_surprise_bps = None
+            if actual_chargeoff_bps is not None and exp_chargeoff_bps is not None:
+                chargeoff_surprise_bps = actual_chargeoff_bps - exp_chargeoff_bps
+
+            recovery_surprise_bps = None
+            if actual_recoveries_bps is not None and exp_recovery_bps is not None:
+                recovery_surprise_bps = actual_recoveries_bps - exp_recovery_bps
+
+            loss_surprise_bps = None
+            if actual_monthly_loss_bps is not None and exp_monthly_loss_bps is not None:
+                loss_surprise_bps = actual_monthly_loss_bps - exp_monthly_loss_bps
+
+            monthly_rows.append({
+                'month': m_i,
+                'date': this_r['dist'],
+                'actual_dq30_pct': actual_dq_at_i,
+                'actual_chargeoff_bps': actual_chargeoff_bps,
+                'actual_recovery_bps': actual_recoveries_bps,
+                'actual_loss_bps': actual_monthly_loss_bps,
+                'exp_dq30_pct': exp_dq30_pct,
+                'exp_chargeoff_bps': exp_chargeoff_bps,
+                'exp_recovery_bps': exp_recovery_bps,
+                'exp_loss_bps': exp_monthly_loss_bps,
+                'dq_surprise_bps': dq_surprise_bps,
+                'chargeoff_surprise_bps': chargeoff_surprise_bps,
+                'recovery_surprise_bps': recovery_surprise_bps,
+                'loss_surprise_bps': loss_surprise_bps,
+            })
+
+        if not monthly_rows:
+            continue
+
+        latest_row = monthly_rows[-1]
+
+        # Trend tag — sign-pattern over last 3 loss_surprise_bps values
+        # (most recent = last). Positive = worse than expected.
+        def _trend_tag(series):
+            vals = [s.get('loss_surprise_bps') for s in series
+                    if s.get('loss_surprise_bps') is not None]
+            if len(vals) < 2:
+                return ('stable', '↔', 'insufficient history')
+            signs = [(1 if v > 5 else (-1 if v < -5 else 0)) for v in vals]
+            n_pos = sum(1 for s in signs if s > 0)
+            n_neg = sum(1 for s in signs if s < 0)
+            big_swing = any(abs(v) > 30 for v in vals)
+            if n_neg == len(signs):
+                return ('improving', '↗', 'losses below expected 3/3 mo')
+            if n_pos == len(signs):
+                return ('deteriorating', '↘', 'losses above expected 3/3 mo')
+            if n_pos > n_neg and max(vals) > 10:
+                return ('deteriorating', '↘', f'{n_pos}/{len(signs)} mo above expected')
+            if n_neg > n_pos and min(vals) < -10:
+                return ('improving', '↗', f'{n_neg}/{len(signs)} mo below expected')
+            if big_swing:
+                return ('noisy', '~', 'one big swing; mixed')
+            return ('stable', '↔', 'within ±5 bps of expected')
+
+        trend_name, trend_arrow, trend_reason = _trend_tag(monthly_rows)
+
+        # View shift: change in projected lifetime CNL since at-issuance.
+        # (current_projected_pct - at_issuance_pct) in bps.
+        view_shift_bps = None
+        if at_issuance_pct is not None and current_proj_pct is not None:
+            view_shift_bps = (current_proj_pct - at_issuance_pct) * 100
+
+        # Δ projected residual profit — rough proxy:
+        # = −(loss_surprise_bps of pool) + recovery_surprise_bps
+        # i.e. if losses come in +20 bps heavier this month, residual is
+        # ~−20 bps of pool that month.
+        residual_delta_bps = None
+        lsb = latest_row.get('loss_surprise_bps')
+        rsb = latest_row.get('recovery_surprise_bps')
+        if lsb is not None:
+            residual_delta_bps = -lsb
+            if rsb is not None:
+                # avoid double-counting: recovery_surprise already embedded
+                # in chargeoff_surprise vs loss_surprise. Keep just loss.
+                pass
+
+        # Status icon — cumulative cal factor + trend.
+        status_icon = '✓'
+        status_label = 'doing well'
+        if cal is not None and cal > 1.20:
+            status_icon = '✗'
+            status_label = 'problem'
+        elif cal is not None and cal > 1.10:
+            status_icon = '⚠'
+            status_label = 'watch'
+        elif trend_name == 'deteriorating':
+            status_icon = '⚠'
+            status_label = 'watch'
+
+        per_deal[deal] = {
+            'segment': seg,
+            'issuer': t['issuer'],
+            'ipb': ipb,
+            'outstanding': outstanding,
+            'pool_factor': pool_factor,
+            'latest_dist': latest['dist'],
+            'seasoning_months': m_latest,
+            'at_issuance_cnl_pct': at_issuance_pct,
+            'current_proj_cnl_pct': current_proj_pct,
+            'realized_cnl_pct': realized_pct,
+            'cal': cal,
+            'monthly_rows': monthly_rows,
+            'latest_surprise': latest_row,
+            'trend_name': trend_name,
+            'trend_arrow': trend_arrow,
+            'trend_reason': trend_reason,
+            'view_shift_bps': view_shift_bps,
+            'residual_delta_bps': residual_delta_bps,
+            'status_icon': status_icon,
+            'status_label': status_label,
+        }
+
+    if not per_deal:
+        return "<div class='tc' style='display:block;padding:16px'><p>No deals with pool-performance data yet.</p></div>"
+
+    # ── 4. Weighted-$ aggregates per issuer-class ────────────────────────
+    def _issuer_class(v):
+        if v['issuer'] == 'CARMX':
+            return 'CarMax'
+        return 'Carvana'
+
+    def _waggregate(rows, key):
+        """Dollar-weighted average by outstanding, skipping None."""
+        rr = [r for r in rows if r.get(key) is not None]
+        tot = sum(r['outstanding'] for r in rr)
+        if tot <= 0:
+            return None
+        return sum(r[key] * r['outstanding'] for r in rr) / tot
+
+    # Split into active (pool_factor ≥ 5%) and closing-out (< 5%).
+    FACTOR_CUTOFF = 0.05
+    active_deals = {d: v for d, v in per_deal.items()
+                    if v['pool_factor'] >= FACTOR_CUTOFF}
+    closing_deals = {d: v for d, v in per_deal.items()
+                     if v['pool_factor'] < FACTOR_CUTOFF}
+
+    # Sort: by outstanding descending, Carvana-first on ties.
+    def _sort_key(item):
+        d, v = item
+        issuer_pref = 0 if v['issuer'] == 'CRVNA' else 1
+        return (-(v['outstanding'] or 0), issuer_pref, d)
+
+    active_sorted = sorted(active_deals.items(), key=_sort_key)
+    closing_sorted = sorted(closing_deals.items(), key=_sort_key)
+
+    # ── 5. Headline narrative (dollar-weighted) ──────────────────────────
+    latest_date_str = (latest_dist_seen.strftime('%B %Y')
+                       if latest_dist_seen else 'the latest filing')
+    crv_rows = [v for v in active_deals.values() if v['issuer'] == 'CRVNA']
+    cmx_rows = [v for v in active_deals.values() if v['issuer'] == 'CARMX']
+    crv_out_sum = sum(v['outstanding'] for v in crv_rows)
+    cmx_out_sum = sum(v['outstanding'] for v in cmx_rows)
+
+    # Weighted latest-month surprise series (loss bps).
+    def _latest_surprise_wavg(rows, key):
+        rr = [v for v in rows if v.get('latest_surprise') is not None
+              and v['latest_surprise'].get(key) is not None]
+        tot = sum(v['outstanding'] for v in rr)
+        if tot <= 0:
+            return None
+        return sum(v['latest_surprise'][key] * v['outstanding'] for v in rr) / tot
+
+    crv_loss_surprise = _latest_surprise_wavg(crv_rows, 'loss_surprise_bps')
+    cmx_loss_surprise = _latest_surprise_wavg(cmx_rows, 'loss_surprise_bps')
+    crv_dq_surprise = _latest_surprise_wavg(crv_rows, 'dq_surprise_bps')
+    cmx_dq_surprise = _latest_surprise_wavg(cmx_rows, 'dq_surprise_bps')
+
+    def _surprise_word(bps):
+        if bps is None:
+            return 'n/a'
+        if bps > 15:
+            return 'materially hotter than expected'
+        if bps > 5:
+            return 'running hot'
+        if bps < -15:
+            return 'materially cooler than expected'
+        if bps < -5:
+            return 'running cool'
+        return 'in line'
+
+    # Biggest movers — by abs latest loss_surprise_bps, weighted-ish
+    # (only active deals).
+    movers_ranked = [(d, v) for d, v in active_deals.items()
+                     if v.get('latest_surprise') is not None
+                     and v['latest_surprise'].get('loss_surprise_bps') is not None]
+    movers_ranked.sort(
+        key=lambda kv: abs(kv[1]['latest_surprise']['loss_surprise_bps']),
+        reverse=True)
+    top_movers = movers_ranked[:3]
+
+    mover_phrases = []
+    for d, v in top_movers:
+        bps = v['latest_surprise']['loss_surprise_bps']
+        sign = '+' if bps >= 0 else ''
+        mover_phrases.append(
+            f"<b>{d}</b> ({sign}{bps:.0f} bps loss, "
+            f"{v['trend_arrow']} {v['trend_name']})")
+
+    # Weighted residual delta (bps, latest month).
+    residual_weighted_bps = _waggregate(list(active_deals.values()),
+                                        'residual_delta_bps')
+
+    def _fmt_bn(v):
+        if v is None or v == 0:
+            return "$0"
+        return f"${v / 1e9:.1f}B" if v >= 1e9 else f"${v / 1e6:.0f}M"
+
+    headline_parts = []
+    headline_parts.append(
+        f"Last month ({latest_date_str}), "
+        f"<b>~{_fmt_bn(crv_out_sum)}</b> of remaining ABS-backed Carvana loans "
+        f"and <b>~{_fmt_bn(cmx_out_sum)}</b> of CarMax saw "
+        f"delinquencies {_surprise_word(crv_dq_surprise) if crv_dq_surprise is not None else 'n/a'} "
+        f"(Carvana) vs. {_surprise_word(cmx_dq_surprise) if cmx_dq_surprise is not None else 'n/a'} "
+        f"(CarMax), and charge-off pace "
+        f"{_surprise_word(crv_loss_surprise) if crv_loss_surprise is not None else 'n/a'} "
+        f"(Carvana) vs. {_surprise_word(cmx_loss_surprise) if cmx_loss_surprise is not None else 'n/a'} (CarMax)."
+    )
+    if residual_weighted_bps is not None:
+        sign = '+' if residual_weighted_bps >= 0 else ''
+        headline_parts.append(
+            f"Net effect on projected residual profit this month: "
+            f"weighted <b>{sign}{residual_weighted_bps:.0f} bps</b> of outstanding pool "
+            f"(positive = residual ahead of plan)."
+        )
+    if mover_phrases:
+        headline_parts.append(
+            "The biggest movers this month: " + "; ".join(mover_phrases) + "."
+        )
+    # Trend sentence — count deteriorating vs improving across active deals.
+    n_deteriorating = sum(1 for v in active_deals.values()
+                          if v['trend_name'] == 'deteriorating')
+    n_improving = sum(1 for v in active_deals.values()
+                      if v['trend_name'] == 'improving')
+    n_stable = sum(1 for v in active_deals.values()
+                   if v['trend_name'] == 'stable')
+    n_noisy = sum(1 for v in active_deals.values()
+                  if v['trend_name'] == 'noisy')
+    headline_parts.append(
+        f"Across {len(active_deals)} active deals: "
+        f"{n_deteriorating} deteriorating, {n_improving} improving, "
+        f"{n_stable} stable, {n_noisy} noisy."
+    )
+
+    headline = " ".join(headline_parts)
+
+    # ── 6. Main table rows ──────────────────────────────────────────────
+    def _num(v, dp=2, suffix=''):
+        return f"{v:.{dp}f}{suffix}" if v is not None else '-'
+
+    def _signed_bps(v, dp=0):
+        if v is None:
+            return '-'
+        sign = '+' if v >= 0 else ''
+        return f"{sign}{v:.{dp}f} bps"
+
+    def _signed_bps_color(v, dp=0, invert=False):
+        """Signed bps with color: by default, negative=green (good for holder)
+        and positive=red (bad). invert=True flips (e.g. recoveries where
+        positive is good)."""
+        if v is None:
+            return '-'
+        sign = '+' if v >= 0 else ''
+        good = (v < 0) if not invert else (v > 0)
+        color = '#2E7D32' if good else ('#C62828' if v != 0 else '#757575')
+        return f"<span style='color:{color};font-weight:600'>{sign}{v:.{dp}f} bps</span>"
+
+    def _issuer_label(v):
+        seg = v['segment']
+        return seg  # Carvana Prime / Carvana Non-Prime / CarMax
+
+    def _deal_link(deal):
+        # Dashboard deal pages live at deals/<slug>/
+        return f"<a href='deals/{deal.lower()}/'>{deal}</a>"
+
+    def _row_html(deal, v):
+        ls = v.get('latest_surprise') or {}
+        return (
+            f"<tr>"
+            f"<td>{v['status_icon']} {_deal_link(deal)}</td>"
+            f"<td>{_issuer_label(v)}</td>"
+            f"<td>{_fmt_bn(v['outstanding'])}</td>"
+            f"<td>{v['pool_factor']*100:.1f}%</td>"
+            f"<td>{v['latest_dist'].strftime('%Y-%m')}</td>"
+            f"<td>{_signed_bps_color(ls.get('dq_surprise_bps'))}</td>"
+            f"<td>{_signed_bps_color(ls.get('chargeoff_surprise_bps'))}</td>"
+            f"<td>{_signed_bps_color(ls.get('recovery_surprise_bps'), invert=True)}</td>"
+            f"<td>{v['trend_arrow']} {v['trend_name']}</td>"
+            f"<td>{_signed_bps(v.get('view_shift_bps'))}</td>"
+            f"<td>{_signed_bps_color(v.get('residual_delta_bps'), invert=True)}</td>"
+            f"</tr>"
+        )
+
+    active_rows_html = "".join(_row_html(d, v) for d, v in active_sorted) or (
+        "<tr><td colspan=11>No active deals with usable data yet.</td></tr>"
+    )
+    closing_rows_html = "".join(_row_html(d, v) for d, v in closing_sorted)
+
+    main_table_header = (
+        "<thead><tr>"
+        "<th>Deal</th>"
+        "<th>Issuer</th>"
+        "<th>Outstanding $</th>"
+        "<th>Pool factor</th>"
+        "<th>Last data</th>"
+        "<th>Δ DQ 30+ (bps)</th>"
+        "<th>Δ Charge-offs (bps)</th>"
+        "<th>Δ Recoveries (bps)</th>"
+        "<th>Trend (3-mo)</th>"
+        "<th>View shift (lifetime bps)</th>"
+        "<th>Δ Residual (bps)</th>"
+        "</tr></thead>"
+    )
+
+    main_table = (
+        f"<table class='compare'>{main_table_header}<tbody>{active_rows_html}</tbody></table>"
+    )
+
+    closing_section = ""
+    if closing_rows_html:
+        closing_section = (
+            "<details style='margin-top:14px'>"
+            "<summary style='cursor:pointer;padding:6px 4px;font-size:.8rem;color:#555'>"
+            f"✓ Closing out — {len(closing_sorted)} deal(s) with &lt;5% pool factor "
+            "(click to expand)</summary>"
+            f"<table class='compare'>{main_table_header}<tbody>{closing_rows_html}</tbody></table>"
+            "</details>"
+        )
+
+    # ── 7. Chart 1 — last-month loss surprise per deal (top 15 by $) ─────
+    c1_rows = [(d, v) for d, v in active_sorted[:15]
+               if v.get('latest_surprise')
+               and v['latest_surprise'].get('loss_surprise_bps') is not None]
+    if c1_rows:
+        c1_labels = [d for d, _ in c1_rows]
+        c1_values = [round(v['latest_surprise']['loss_surprise_bps'], 1)
+                     for _, v in c1_rows]
+        c1_colors = ['#C62828' if x > 0 else '#2E7D32' for x in c1_values]
+        # Horizontal bars: x = bps, y = deal.  Sort biggest-exposure at top
+        # (so chart reads top-to-bottom = most $ at risk).
+        c1_trace = [{
+            'x': c1_values,
+            'y': c1_labels,
+            'type': 'bar',
+            'orientation': 'h',
+            'marker': {'color': c1_colors},
+            'text': [f"{v:+.0f}" for v in c1_values],
+            'textposition': 'outside',
+        }]
+        chart1_html = chart(
+            c1_trace,
+            {
+                'title': 'Last-month loss surprise vs Markov-expected (top 15 by outstanding $)',
+                'xaxis': {'title': 'bps surprise (red = worse than expected)',
+                          'zeroline': True, 'zerolinewidth': 2,
+                          'zerolinecolor': '#555'},
+                'yaxis': {'title': '', 'autorange': 'reversed'},
+                'showlegend': False,
+                'margin': {'l': 110, 'r': 40, 't': 45, 'b': 55},
+            },
+            height=max(340, 28 * len(c1_rows) + 80),
+        )
+    else:
+        chart1_html = ("<p style='padding:8px;color:#999'>Chart 1 unavailable — "
+                       "no deals have a cached Markov-expected monthly pace yet.</p>")
+
+    # ── 8. Chart 2 — 6-month rolling surprise series, top 8 by $ ─────────
+    c2_rows = active_sorted[:8]
+    c2_traces = []
+    import colorsys
+    def _palette(n):
+        out = []
+        for i in range(n):
+            h = (i * 1.0 / max(n, 1))
+            r, g, b = colorsys.hsv_to_rgb(h, 0.7, 0.85)
+            out.append(f"rgb({int(r*255)},{int(g*255)},{int(b*255)})")
+        return out
+    palette = _palette(len(c2_rows))
+
+    for (d, v), color in zip(c2_rows, palette):
+        rows = all_perf.get(d, [])
+        if len(rows) < 2:
+            continue
+        # Use up to 6 most recent months — walk rows[i] vs rows[i-1] to get
+        # delta_cnl per month, compare to cached expected.
+        ipb = v['ipb']
+        cutoff = all_terms[d]['cutoff']
+        months_x, surprises_y = [], []
+        start_i = max(1, len(rows) - 6)
+        for i in range(start_i, len(rows)):
+            this_r, prev_r = rows[i], rows[i - 1]
+            m_i = _rt_months_since(cutoff, this_r['dist'])
+            if m_i is None:
+                continue
+            actual_bps = (this_r['cnl'] - prev_r['cnl']) / ipb * 10_000 if ipb > 0 else None
+            exp = _lookup_expected(d, m_i)
+            if exp is None:
+                continue
+            _, exp_monthly_loss_bps, _, _ = exp
+            if actual_bps is None or exp_monthly_loss_bps is None:
+                continue
+            months_x.append(this_r['dist'].strftime('%Y-%m'))
+            surprises_y.append(round(actual_bps - exp_monthly_loss_bps, 1))
+        if len(months_x) < 2:
+            continue
+        c2_traces.append({
+            'x': months_x,
+            'y': surprises_y,
+            'type': 'scatter',
+            'mode': 'lines+markers',
+            'name': d,
+            'line': {'color': color, 'width': 2},
+            'marker': {'size': 5},
+        })
+    if c2_traces:
+        chart2_html = chart(
+            c2_traces,
+            {
+                'title': '6-month monthly loss surprise — top 8 deals by outstanding $',
+                'xaxis': {'title': 'Month'},
+                'yaxis': {'title': 'bps surprise (vs Markov-expected pace)',
+                          'zeroline': True, 'zerolinewidth': 2,
+                          'zerolinecolor': '#555'},
+                'legend': {'orientation': 'h', 'y': -0.3},
+                'margin': {'l': 60, 'r': 20, 't': 45, 'b': 100},
+            },
+            height=360,
+        )
+    else:
+        chart2_html = ("<p style='padding:8px;color:#999'>Chart 2 unavailable "
+                       "— cached monthly trajectory not populated yet.</p>")
+
+    # ── 9. Methodology box / freshness footer ────────────────────────────
+    cache_note = ""
+    if cache_generated_at:
+        cache_note = f" · Markov monthly-expected cache generated {cache_generated_at[:10]}."
+    elif not any_cache_hit:
+        cache_note = (" · <b>Markov monthly-expected cache not populated yet</b> — "
+                      "fallback flat-pace expectation used until next unified_markov run.")
+
+    methodology = (
+        "<p style='padding:10px 4px 4px;font-size:.7rem;color:#555;line-height:1.55'>"
+        "<b>How to read:</b> \"Expected\" = the current unified Markov model's "
+        "projected monthly pace for the deal at its current age "
+        "(see deal_monthly_trajectory() in unified_markov.py). Surprise = "
+        "actual monthly delta − expected monthly delta. Trend = sign-pattern "
+        "of the last 3 monthly surprises. Rows sorted by remaining "
+        "outstanding $ — biggest active exposures first; Carvana ahead of "
+        "CarMax on ties (per residual-equity framing).  Δ Recoveries is "
+        "shown with positive=good-for-holder; Δ DQ / Δ Charge-offs / Δ Residual "
+        "use positive=bad-for-holder (red)."
+        f"{cache_note}"
+        "</p>"
+    )
+
+    latest_deal = max(per_deal.items(), key=lambda kv: kv[1]['latest_dist'])
+    n_forecasts = sum(1 for v in per_deal.values() if v['cal'] is not None)
+    freshness = (
+        f"Latest servicer filing: {latest_deal[0]} ({latest_deal[1]['issuer']}) "
+        f"on {latest_deal[1]['latest_dist'].strftime('%Y-%m-%d')}. "
+        f"Markov forecasts loaded for {n_forecasts} of {len(per_deal)} deals "
+        f"(deal_forecasts table). Data sourced from SEC EDGAR."
+    )
+
+    # ── 10. Assemble HTML ────────────────────────────────────────────────
+    html = f"""
+<div class="tc" id="recent-trends-content" style="display:block">
+  <h2 style="padding:12px 4px 0;font-size:1.05rem;color:#1976D2">Recent Trends — monthly monitoring</h2>
+  <p style="padding:4px;font-size:.8rem;line-height:1.5;color:#333">{headline}</p>
+
+  <h3 style="padding:12px 4px 4px;font-size:.9rem">Per-deal monthly surprise vs Markov-expected</h3>
+  <div class="tbl">{main_table}</div>
+  {closing_section}
+
+  <h3 style="padding:16px 4px 4px;font-size:.9rem">Chart 1 — Last-month loss surprise by deal</h3>
+  {chart1_html}
+
+  <h3 style="padding:16px 4px 4px;font-size:.9rem">Chart 2 — 6-month rolling surprise (top 8 by $)</h3>
+  {chart2_html}
+
+  {methodology}
+
+  <p style="padding:10px 4px 20px;font-size:.65rem;color:#888;border-top:1px solid #eee;margin-top:12px">{freshness}</p>
+</div>
+"""
+    return html
+
+def generate_economics_tab():
+    """Build the residual-economics landing-page HTML.
+
+    Returns a single HTML string containing:
+      1. A summary economics table (one row per deal)
+      2. A methodology writeup with inline diagrams
+    """
+    import math
+
+    # ── 1. Gather deal_terms from the *full* (raw) DBs ──────────────────
+    carvana_full = os.path.join(os.path.dirname(os.path.abspath(__file__)), "db", "carvana_abs.db")
+    carmax_full = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                               "carmax_abs", "db", "carmax_abs.db")
+
+    deals_data = []  # list of dicts, one per deal
+
+    for db_path, issuer in [(carvana_full, "CRVNA"), (carmax_full, "CARMX")]:
+        if not os.path.exists(db_path):
+            continue
+        conn = sqlite3.connect(db_path)
+        # Check if deal_terms exists
+        has_dt = conn.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='deal_terms'"
+        ).fetchone()[0]
+        if not has_dt:
+            conn.close()
+            continue
+
+        rows = conn.execute("""
+            SELECT deal, initial_pool_balance, weighted_avg_coupon,
+                   servicing_fee_annual_pct, cutoff_date,
+                   class_a1_pct, class_a2_pct, class_a3_pct, class_a4_pct,
+                   class_b_pct, class_c_pct, class_d_pct, class_n_pct,
+                   initial_oc_pct, cnl_trigger_schedule, dq_trigger_pct,
+                   dq_trigger_schedule, oc_target_pct, oc_floor_pct,
+                   initial_reserve_pct, reserve_floor_pct
+            FROM deal_terms
+            WHERE terms_extracted = 1
+            ORDER BY cutoff_date
+        """).fetchall()
+        cols = ["deal", "initial_pool_balance", "weighted_avg_coupon",
+                "servicing_fee_annual_pct", "cutoff_date",
+                "class_a1_pct", "class_a2_pct", "class_a3_pct", "class_a4_pct",
+                "class_b_pct", "class_c_pct", "class_d_pct", "class_n_pct",
+                "initial_oc_pct", "cnl_trigger_schedule", "dq_trigger_pct",
+                "dq_trigger_schedule", "oc_target_pct", "oc_floor_pct",
+                "initial_reserve_pct", "reserve_floor_pct"]
+        for row in rows:
+            d = dict(zip(cols, row))
+            d["issuer"] = issuer
+            # Sanity: skip deals with clearly bad pool balance (>$5B for a single deal)
+            if d["initial_pool_balance"] and d["initial_pool_balance"] > 5e9:
+                continue
+            # Skip deals with no pool balance
+            if not d["initial_pool_balance"]:
+                continue
+            deals_data.append(d)
+        conn.close()
+
+    if not deals_data:
+        return "<p style='padding:16px'>No deal terms data available.</p>"
+
+    # ── 2. Consumer WAC from loans tables ────────────────────────────────
+    consumer_wac = {}
+    for db_path, db_label in [
+        (os.path.join(os.path.dirname(os.path.abspath(__file__)), "db", "dashboard.db"), "crvna_dash"),
+        (os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                      "carmax_abs", "db", "dashboard.db"), "carmx_dash"),
+    ]:
+        if not os.path.exists(db_path):
+            continue
+        conn = sqlite3.connect(db_path)
+        has_loans = conn.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='loans'"
+        ).fetchone()[0]
+        if has_loans:
+            wac_rows = conn.execute("""
+                SELECT deal,
+                       SUM(original_interest_rate * original_loan_amount) / SUM(original_loan_amount)
+                FROM loans
+                GROUP BY deal
+            """).fetchall()
+            for r in wac_rows:
+                consumer_wac[r[0]] = r[1]
+        conn.close()
+
+    # ── 3. Pool performance aggregates ───────────────────────────────────
+    # Also: first-period weighted_avg_original_term per deal, for WAL estimation.
+    first_period_orig_term = {}  # deal -> months
+    perf_agg = {}  # deal -> {total_interest, total_servicing_fee, cum_losses, periods, max_bal}
+    for db_path in [
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "db", "dashboard.db"),
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                     "carmax_abs", "db", "dashboard.db"),
+    ]:
+        if not os.path.exists(db_path):
+            continue
+        conn = sqlite3.connect(db_path)
+        has_pp = conn.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='pool_performance'"
+        ).fetchone()[0]
+        if not has_pp:
+            conn.close()
+            continue
+        pp_rows = conn.execute("""
+            SELECT deal,
+                   SUM(interest_collections) as total_interest,
+                   SUM(actual_servicing_fee) as total_svc,
+                   MAX(cumulative_net_losses) as cum_losses,
+                   COUNT(*) as periods,
+                   MAX(beginning_pool_balance) as max_bal
+            FROM pool_performance
+            WHERE dist_date_iso IS NOT NULL
+            GROUP BY deal
+        """).fetchall()
+        for r in pp_rows:
+            perf_agg[r[0]] = {
+                "total_interest": r[1] or 0,
+                "total_servicing_raw": r[2] or 0,
+                "cum_losses": r[3] or 0,
+                "periods": r[4] or 0,
+                "max_bal": r[5] or 0,
+            }
+        # First-period (earliest reporting month) weighted_avg_original_term.
+        # Used as the deal's at-issuance WAL input.
+        try:
+            ot_rows = conn.execute("""
+                SELECT pp.deal, pp.weighted_avg_original_term
+                FROM pool_performance pp
+                JOIN (
+                    SELECT deal, MIN(dist_date_iso) md
+                    FROM pool_performance
+                    WHERE dist_date_iso IS NOT NULL
+                      AND weighted_avg_original_term IS NOT NULL
+                    GROUP BY deal
+                ) x ON pp.deal = x.deal AND pp.dist_date_iso = x.md
+                WHERE pp.weighted_avg_original_term IS NOT NULL
+            """).fetchall()
+            for d_, ot in ot_rows:
+                if ot:
+                    first_period_orig_term[d_] = float(ot)
+        except Exception:
+            pass
+        conn.close()
+
+    # ── 4. Model forecasts (from model_results in Carvana dashboard DB) ─
+    model_forecasts = {}  # deal -> {predicted_default_rate, actual_default_rate}
+    crvna_dash = os.path.join(os.path.dirname(os.path.abspath(__file__)), "db", "dashboard.db")
+    if os.path.exists(crvna_dash):
+        conn = sqlite3.connect(crvna_dash)
+        has_mr = conn.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='model_results'"
+        ).fetchone()[0]
+        if has_mr:
+            try:
+                import json as _json
+                raw = conn.execute("SELECT value FROM model_results WHERE key='default_model'").fetchone()
+                if raw:
+                    mdata = _json.loads(raw[0])
+                    lf = mdata.get("segments", {}).get("lifetime_forecast_by_deal", {})
+                    for deal, info in lf.items():
+                        orig = info.get("total_orig_amount", 0)
+                        if orig > 0:
+                            model_forecasts[deal] = {
+                                "predicted_loss_pct": info["predicted_default_amount"] / orig,
+                                "actual_loss_pct": info["actual_default_amount"] / orig,
+                            }
+            except Exception:
+                pass
+        conn.close()
+
+    # ── 5. Check for Markov deal_forecasts table ─────────────────────────
+    markov_forecasts = {}  # deal -> {at_issuance_cnl_pct, current_projected_cnl_pct, wal, breach_prob}
+    for db_path in [carvana_full, carmax_full]:
+        if not os.path.exists(db_path):
+            continue
+        conn = sqlite3.connect(db_path)
+        has_df = conn.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='deal_forecasts'"
+        ).fetchone()[0]
+        if has_df:
+            try:
+                df_rows = conn.execute("SELECT * FROM deal_forecasts").fetchall()
+                df_cols = [d[1] for d in conn.execute("PRAGMA table_info(deal_forecasts)").fetchall()]
+                for row in df_rows:
+                    rd = dict(zip(df_cols, row))
+                    markov_forecasts[rd.get("deal", "")] = rd
+            except Exception:
+                pass
+        conn.close()
+
+    has_markov = bool(markov_forecasts)
+
+    # ── 6. Compute economics for each deal ───────────────────────────────
+    for d in deals_data:
+        deal = d["deal"]
+        ipb = d["initial_pool_balance"]
+
+        # Capital structure
+        aaa_pct = sum(filter(None, [d.get("class_a1_pct"), d.get("class_a2_pct"),
+                                     d.get("class_a3_pct"), d.get("class_a4_pct")])) or 0
+        aa_pct = d.get("class_b_pct") or 0
+        a_pct = d.get("class_c_pct") or 0
+        bbb_pct = d.get("class_d_pct") or 0
+        oc_pct = d.get("initial_oc_pct") or 0
+        # If OC > 50%, it's likely a parse error (e.g. 99.6% for non-prime = residual, not OC)
+        # Compute OC as 1 - sum of all notes
+        notes_total = aaa_pct + aa_pct + a_pct + bbb_pct + (d.get("class_n_pct") or 0)
+        if notes_total > 0.01 and notes_total < 1.0:
+            computed_oc = 1.0 - notes_total
+            if computed_oc > 0:
+                oc_pct = computed_oc
+
+        d["aaa_pct"] = aaa_pct
+        d["aa_pct"] = aa_pct
+        d["a_pct"] = a_pct
+        d["bbb_pct"] = bbb_pct
+        d["oc_pct"] = oc_pct
+
+        # Consumer WAC
+        d["consumer_wac"] = consumer_wac.get(deal)
+
+        # Cost of debt
+        d["cost_of_debt"] = d.get("weighted_avg_coupon")
+
+        # Excess spread / yr
+        if d["consumer_wac"] and d["cost_of_debt"]:
+            d["excess_spread_yr"] = d["consumer_wac"] - d["cost_of_debt"]
+        else:
+            d["excess_spread_yr"] = None
+
+        # WAL — separated into two quantities:
+        #   wal_initial: at-issuance forecast WAL (used for Initial Forecast Tot XS & Svc).
+        #   wal_now:     realized-to-date + extrapolated-remaining WAL for the Current Forecast
+        #                group.  For very young deals where extrapolation is unreliable we
+        #                fall back to wal_initial so the column remains comparable.
+        perf = perf_agg.get(deal, {})
+        periods = perf.get("periods", 0)
+
+        mf = markov_forecasts.get(deal, {})
+
+        # At-issuance WAL.  Empirically calibrated from 48 mostly-paid-off deals across
+        # all three segments (Carvana Prime/Non-Prime, CarMax): observed
+        # WAL / (orig_term_months / 12) factor is 0.340–0.349 with tight spread.
+        # We use a single factor (0.344) since per-segment differences are within noise.
+        WAL_PAYDOWN_FACTOR = 0.344
+        orig_term_m = first_period_orig_term.get(deal)
+        if orig_term_m and orig_term_m > 0:
+            wal_initial = (orig_term_m / 12.0) * WAL_PAYDOWN_FACTOR
+        elif mf.get("wal"):
+            wal_initial = mf["wal"]
+        else:
+            # Fallback — segment typical 66mo (CarMax/CV Prime) or 72mo (CV Non-Prime)
+            seg_is_nonprime = "-N" in deal
+            default_m = 72 if seg_is_nonprime else 66
+            wal_initial = (default_m / 12.0) * WAL_PAYDOWN_FACTOR
+
+        d["wal_initial"] = round(wal_initial, 2)
+        # wal_now filled in by section 6b (balance-series pass); default to wal_initial
+        d["wal_now"] = d["wal_initial"]
+        # Keep "wal" for back-compat (used by weighted-avg summary); equals wal_initial.
+        d["wal"] = d["wal_initial"]
+
+        # Servicing fee
+        svc_annual = d.get("servicing_fee_annual_pct") or 0
+
+        # Expected losses
+        if mf.get("at_issuance_cnl_pct"):
+            d["expected_loss_pct"] = mf["at_issuance_cnl_pct"] / 100.0  # DB stores percent; formatter expects fraction
+        elif deal in model_forecasts:
+            d["expected_loss_pct"] = model_forecasts[deal]["predicted_loss_pct"]
+        else:
+            d["expected_loss_pct"] = None
+
+        # Realized/actual losses
+        if perf and ipb > 0:
+            d["actual_cum_losses_pct"] = perf.get("cum_losses", 0) / ipb
+        else:
+            d["actual_cum_losses_pct"] = None
+
+        # Projected losses (current model projection)
+        if mf.get("current_projected_cnl_pct"):
+            d["projected_loss_pct"] = mf["current_projected_cnl_pct"] / 100.0  # DB stores percent; formatter expects fraction
+        elif deal in model_forecasts:
+            d["projected_loss_pct"] = model_forecasts[deal]["actual_loss_pct"]
+        else:
+            d["projected_loss_pct"] = d.get("actual_cum_losses_pct")
+
+        # Actual cumulative interest as % of initial pool
+        if perf and ipb > 0:
+            d["actual_cum_interest_pct"] = perf.get("total_interest", 0) / ipb
+        else:
+            d["actual_cum_interest_pct"] = None
+
+        # Actual servicing as % of initial pool
+        # For Carvana, actual_servicing_fee in pool_perf is the annual % (stored raw)
+        # For CarMax, it's actual dollars. Detect by magnitude.
+        if perf and ipb > 0:
+            raw_svc = perf.get("total_servicing_raw", 0)
+            if raw_svc > 100:
+                # Looks like dollar amounts (CarMax)
+                d["actual_cum_servicing_pct"] = raw_svc / ipb
+            else:
+                # Carvana: use deal_terms servicing_fee_annual_pct * age_in_years
+                age_years = periods / 12.0
+                d["actual_cum_servicing_pct"] = svc_annual * age_years
+        else:
+            d["actual_cum_servicing_pct"] = None
+
+        # % forecast complete (how much of pool has amortized)
+        if perf and ipb > 0:
+            latest_bal = perf.get("max_bal", ipb)
+            # We need ending balance, not max. Let me use cum_losses + amortization proxy
+            # Actually: pool factor = ending_balance / initial_balance
+            # We stored max_bal. We need a different query for ending balance.
+            # Approximate: fraction of interest collected vs expected
+            d["pct_complete"] = None  # Will compute from WAL below
+        else:
+            d["pct_complete"] = None
+
+        # Trigger risk
+        if mf.get("breach_prob") is not None:
+            d["trigger_risk"] = mf["breach_prob"]
+        else:
+            d["trigger_risk"] = None
+
+    # ── 6b. Realized/current WAL (wal_now) from pool_performance balances ─
+    # Realized WAL so far + linear-paydown extrapolation of remaining life.
+    # For very young deals (pool_factor > 0.80 or periods < 4) the extrapolation
+    # is noisy and will collapse toward zero — we fall back to wal_initial so
+    # the Current Forecast column stays sensible.
+    from collections import defaultdict as _dd
+    all_deal_bals = _dd(list)
+    for db_path in [
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "db", "dashboard.db"),
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                     "carmax_abs", "db", "dashboard.db"),
+    ]:
+        if not os.path.exists(db_path):
+            continue
+        conn = sqlite3.connect(db_path)
+        wal_rows = conn.execute("""
+            SELECT deal, ending_pool_balance
+            FROM pool_performance
+            WHERE dist_date_iso IS NOT NULL AND ending_pool_balance IS NOT NULL
+            ORDER BY deal, dist_date_iso
+        """).fetchall()
+        conn.close()
+        for row in wal_rows:
+            all_deal_bals[row[0]].append(row[1])
+
+    for d in deals_data:
+        deal = d["deal"]
+        ipb = d["initial_pool_balance"]
+        bals = all_deal_bals.get(deal, [])
+        if not bals or not ipb:
+            d["pool_factor"] = None
+            d["pct_complete"] = None
+            continue
+        periods = len(bals)
+        latest_bal = bals[-1]
+        pool_factor = latest_bal / ipb if ipb > 0 else 0
+        d["pool_factor"] = pool_factor
+        d["pct_complete"] = max(0.0, min(1.0, 1.0 - pool_factor))
+
+        # Realized WAL component (sum of balance ratios / 12)
+        realized_wal = sum(b / ipb for b in bals) / 12.0
+
+        wal_initial = d.get("wal_initial")
+
+        if pool_factor <= 0.05 or periods < 2:
+            # Essentially fully amortized — realized component is the WAL.
+            # For a deal with <2 periods, realized≈0 so fall back to wal_initial.
+            wal_now = realized_wal if periods >= 4 else wal_initial
+        elif pool_factor > 0.80 or periods < 4:
+            # Brand-new deal — linear extrapolation is unreliable, use wal_initial.
+            wal_now = wal_initial
+        else:
+            # In-progress — extrapolate remaining WAL using observed average
+            # monthly paydown rate.
+            monthly_paydown = (1.0 - pool_factor) / periods
+            if monthly_paydown > 0:
+                remaining_months = pool_factor / monthly_paydown
+                remaining_wal = (pool_factor / 2.0) * (remaining_months / 12.0)
+                wal_now = realized_wal + remaining_wal
+            else:
+                wal_now = wal_initial
+            # Guard against extrapolation blow-ups / collapses.
+            if wal_initial:
+                wal_now = max(wal_initial * 0.6, min(wal_initial * 1.5, wal_now))
+
+        d["wal_now"] = round(wal_now, 2) if wal_now is not None else None
+
+    # ── 7. Compute derived economics columns ─────────────────────────────
+    for d in deals_data:
+        # Use the at-issuance WAL for "Initial Forecast" totals.  This is the
+        # industry-standard residual-economics view: expected lifetime spend
+        # and expected lifetime servicing vs. expected lifetime losses.
+        wal = d.get("wal_initial")
+        svc = d.get("servicing_fee_annual_pct") or 0
+
+        # Total excess spread = excess/yr × WAL
+        if d.get("excess_spread_yr") is not None and wal:
+            d["total_excess_spread"] = d["excess_spread_yr"] * wal
+        else:
+            d["total_excess_spread"] = None
+
+        # Servicing & other = servicing_fee × WAL
+        if wal:
+            d["total_servicing_cost"] = svc * wal
+        else:
+            d["total_servicing_cost"] = None
+
+        # Initial interest = WAC × WAL (the at-issuance counterpart to
+        # projected_lifetime_interest_pct; not displayed as its own Initial
+        # column but needed for the per-column delta in the Variance group).
+        if d.get("consumer_wac") is not None and wal:
+            d["initial_interest_pct"] = d["consumer_wac"] * wal
+        else:
+            d["initial_interest_pct"] = None
+
+        # Expected residual = total excess - servicing - expected losses
+        if (d.get("total_excess_spread") is not None and
+                d.get("total_servicing_cost") is not None and
+                d.get("expected_loss_pct") is not None):
+            d["expected_residual"] = (d["total_excess_spread"]
+                                      - d["total_servicing_cost"]
+                                      - d["expected_loss_pct"])
+        else:
+            d["expected_residual"] = None
+
+        # Current Forecast = LIFETIME view as the model sees it TODAY.
+        # Same structure as Initial Forecast, but uses wal_now (realized +
+        # extrapolated remaining) and the latest Markov projected loss.
+        # Old formula mixed realized-to-date interest/servicing with a lifetime
+        # projected loss, producing apples-to-oranges variance for new deals.
+        # If wal_now is missing (brand-new deal where extrapolation hasn't
+        # settled), fall back to wal_initial so Current ≈ Initial → variance ≈ 0.
+        wal_curr = d.get("wal_now") or d.get("wal_initial")
+        xs_yr = d.get("excess_spread_yr")
+        if (xs_yr is not None and wal_curr is not None
+                and d.get("projected_loss_pct") is not None):
+            d["projected_lifetime_interest_pct"] = (
+                d["consumer_wac"] * wal_curr if d.get("consumer_wac") else None
+            )
+            d["projected_lifetime_servicing_pct"] = svc * wal_curr
+            d["projected_lifetime_excess_spread"] = xs_yr * wal_curr
+            d["actual_residual"] = (
+                d["projected_lifetime_excess_spread"]
+                - d["projected_lifetime_servicing_pct"]
+                - d["projected_loss_pct"]
+            )
+        else:
+            d["projected_lifetime_interest_pct"] = None
+            d["projected_lifetime_servicing_pct"] = None
+            d["projected_lifetime_excess_spread"] = None
+            d["actual_residual"] = None
+
+        # Variance
+        if d.get("actual_residual") is not None and d.get("expected_residual") is not None:
+            d["variance"] = d["actual_residual"] - d["expected_residual"]
+        else:
+            d["variance"] = None
+
+    # ── 8. Build HTML table ──────────────────────────────────────────────
+    def pf(v, decimals=2):
+        """Format as percentage string."""
+        if v is None:
+            return '<span style="color:#999">—</span>'
+        return f"{v*100:.{decimals}f}%"
+
+    def pf_color(v, decimals=2):
+        """Format percentage with green/red coloring."""
+        if v is None:
+            return '<span style="color:#999">—</span>'
+        color = "#388E3C" if v >= 0 else "#D32F2F"
+        return f'<span style="color:{color};font-weight:600">{v*100:.{decimals}f}%</span>'
+
+    def dollar_hover(pct_val, ipb, decimals=2):
+        """Return pct string with $ amount on hover."""
+        if pct_val is None or ipb is None:
+            return '<span style="color:#999">—</span>'
+        dollar = pct_val * ipb
+        dollar_str = fm(dollar)
+        return f'<span title="{dollar_str}">{pct_val*100:.{decimals}f}%</span>'
+
+    def trigger_badge(prob):
+        """Color-coded trigger risk badge."""
+        if prob is None:
+            return '<span style="color:#999">—</span>'
+        if prob < 0.10:
+            return f'<span style="background:#C8E6C9;color:#2E7D32;padding:1px 6px;border-radius:4px;font-weight:600">{prob*100:.0f}%</span>'
+        elif prob < 0.30:
+            return f'<span style="background:#FFF9C4;color:#F57F17;padding:1px 6px;border-radius:4px;font-weight:600">{prob*100:.0f}%</span>'
+        else:
+            return f'<span style="background:#FFCDD2;color:#C62828;padding:1px 6px;border-radius:4px;font-weight:600">{prob*100:.0f}%</span>'
+
+    # Separate Carvana Prime, CarMax, Carvana Non-Prime
+    crvna_prime = [d for d in deals_data if d["issuer"] == "CRVNA" and "-P" in d["deal"]]
+    crvna_nonprime = [d for d in deals_data if d["issuer"] == "CRVNA" and "-N" in d["deal"]]
+    carmx_deals = [d for d in deals_data if d["issuer"] == "CARMX"]
+
+    # Sort chronologically
+    crvna_prime.sort(key=lambda x: x.get("cutoff_date") or "")
+    crvna_nonprime.sort(key=lambda x: x.get("cutoff_date") or "")
+    carmx_deals.sort(key=lambda x: x.get("cutoff_date") or "")
+
+    # Interleave Carvana Prime and CarMax by cutoff date for main table
+    prime_and_carmax = sorted(crvna_prime + carmx_deals, key=lambda x: x.get("cutoff_date") or "")
+
+    def _group_of(d):
+        if d["issuer"] == "CARMX":
+            return "kmx-prime"
+        if "-N" in d["deal"]:
+            return "cv-nonprime"
+        return "cv-prime"
+
+    # ── Column definitions (new 4-group layout) ─────────────────────────────
+    # (css_class, header_label)
+    COL_DEFS = [
+        ("g-id g-first", "Issuer"),
+        ("g-id", "Deal"),
+        ("g-id", "Cutoff"),
+        ("g-id", "Orig Bal"),
+        ("g-init g-first", "WAC"),
+        ("g-init", "CoD"),
+        ("g-init", "XS/yr"),
+        ("g-init", "WAL"),
+        ("g-init", "Tot XS"),
+        ("g-init", "Svc"),
+        ("g-init", "Exp Loss"),
+        ("g-init", "Exp Resid"),
+        ("g-curr g-first", "Proj Int"),
+        ("g-curr", "Proj Svc"),
+        ("g-curr", "WAL now"),
+        ("g-curr", "Proj Loss"),
+        ("g-curr", "Curr Resid"),
+        ("g-var g-first", "Δ Int"),
+        ("g-var", "Δ Svc"),
+        ("g-var", "Δ WAL"),
+        ("g-var", "Δ Loss"),
+        ("g-var", "Δ Resid"),
+        ("g-var", "%Done"),
+        ("g-var", "Trig Risk"),
+        ("g-cap g-first", "AAA"),
+        ("g-cap", "AA"),
+        ("g-cap", "A"),
+        ("g-cap", "BBB"),
+        ("g-cap", "OC"),
+        ("g-cap", "Terms"),
+    ]
+    NUM_COLS = len(COL_DEFS)  # 27
+    GROUP_HEADERS = [
+        ("g-id", "Identity", 4),
+        ("g-init", "Initial Forecast (at issuance)", 8),
+        ("g-curr", "Current Forecast (lifetime view today: WAL_now × spread − loss)", 5),
+        ("g-var", "Deltas / Variance (Current − Initial)", 7),
+        ("g-cap", "Loan / Cap Structure", 6),
+    ]
+
+    def _num(val):
+        if val is None or (isinstance(val, float) and pd.isna(val)):
+            return ""
+        return val
+
+    def _pct_disp(v, dec=2):
+        if v is None or (isinstance(v, float) and pd.isna(v)):
+            return '<span style="color:#999">—</span>'
+        return f"{v*100:.{dec}f}%"
+
+    def _build_table_rows(deal_list):
+        rows_html = ""
+        for d in deal_list:
+            ipb = d["initial_pool_balance"]
+            cutoff_raw = d.get("cutoff_date") or ""
+            cutoff_disp = "—"
+            if cutoff_raw:
+                try:
+                    from datetime import datetime as _dt
+                    dt = _dt.strptime(cutoff_raw, "%Y-%m-%d")
+                    cutoff_disp = dt.strftime("%b-%y")
+                except Exception:
+                    cutoff_disp = cutoff_raw
+
+            # Compact trigger / OC / reserve summary (semantics unchanged)
+            dq_sched = d.get("dq_trigger_schedule")
+            oc_t = d.get("oc_target_pct")
+            oc_f = d.get("oc_floor_pct")
+            res_pct = d.get("initial_reserve_pct")
+            parts = []
+            if dq_sched:
+                try:
+                    import json as _json
+                    sched = _json.loads(dq_sched) if isinstance(dq_sched, str) else dq_sched
+                    if sched:
+                        first = sched[0].get("threshold_pct", "?")
+                        last = sched[-1].get("threshold_pct", "?")
+                        parts.append(f"DQ {first}-{last}%")
+                except Exception:
+                    pass
+            if oc_t: parts.append(f"OC↑{oc_t*100:.1f}%")
+            if oc_f: parts.append(f"OC↓{oc_f*100:.1f}%")
+            if res_pct: parts.append(f"Res {res_pct*100:.1f}%")
+            trigger_text = "; ".join(parts) if parts else "—"
+
+            var_pct = d.get("variance")
+            var_dollars = var_pct * ipb if (var_pct is not None and ipb is not None) else None
+
+            issuer = d["issuer"]
+            deal_id = d["deal"]
+            group = _group_of(d)
+
+            wal_v = d.get("wal_initial")
+            wal_disp = f"{wal_v:.1f}y" if (wal_v is not None and not (isinstance(wal_v, float) and pd.isna(wal_v))) else '<span style="color:#999">—</span>'
+            wal_now_v = d.get("wal_now")
+            wal_now_disp = f"{wal_now_v:.1f}y" if (wal_now_v is not None and not (isinstance(wal_now_v, float) and pd.isna(wal_now_v))) else '<span style="color:#999">—</span>'
+
+            def pct_cell(grp_cls, key, dec=2):
+                v = d.get(key)
+                disp = _pct_disp(v, dec)
+                return f'<td class="{grp_cls}">{disp}</td>'
+
+            cells = []
+            # Identity (4)
+            cells.append(f'<td class="g-id g-first">{issuer}</td>')
+            cells.append(f'<td class="g-id" style="font-weight:600">{deal_id}</td>')
+            cells.append(f'<td class="g-id">{cutoff_disp}</td>')
+            cells.append(f'<td class="g-id">{fm(ipb)}</td>')
+            # Initial Forecast (8)
+            cells.append(pct_cell("g-init g-first", "consumer_wac", 2))
+            cells.append(pct_cell("g-init", "cost_of_debt", 2))
+            cells.append(pct_cell("g-init", "excess_spread_yr", 2))
+            cells.append(f'<td class="g-init">{wal_disp}</td>')
+            cells.append(pct_cell("g-init", "total_excess_spread", 2))
+            cells.append(pct_cell("g-init", "total_servicing_cost", 2))
+            cells.append(pct_cell("g-init", "expected_loss_pct", 2))
+            er = d.get("expected_residual")
+            cells.append(f'<td class="g-init">{pf_color(er)}</td>')
+            # Current Forecast (5) — LIFETIME view as the model sees it today
+            cells.append(pct_cell("g-curr g-first", "projected_lifetime_interest_pct", 2))
+            cells.append(pct_cell("g-curr", "projected_lifetime_servicing_pct", 2))
+            cells.append(f'<td class="g-curr">{wal_now_disp}</td>')
+            cells.append(pct_cell("g-curr", "projected_loss_pct", 2))
+            ar = d.get("actual_residual")
+            cells.append(f'<td class="g-curr">{pf_color(ar)}</td>')
+            # Deltas / Variance (7) — Current − Initial, column-by-column
+            def _delta_pct_cell(grp_cls, curr_key, init_key, dec=2, color=False):
+                cv = d.get(curr_key)
+                iv = d.get(init_key)
+                if cv is None or iv is None:
+                    return f'<td class="{grp_cls}"><span style="color:#999">—</span></td>'
+                delta = cv - iv
+                if color:
+                    # For residual/loss, sign matters for the reader. Residual:
+                    # higher = better (green). Loss: higher = worse (red).
+                    inverted = (curr_key == "projected_loss_pct")
+                    good = (delta < 0) if inverted else (delta >= 0)
+                    col = "#388E3C" if good else "#D32F2F"
+                    inner = f'<span style="color:{col};font-weight:600">{delta*100:+.{dec}f}%</span>'
+                else:
+                    inner = f"{delta*100:+.{dec}f}%"
+                if ipb is not None:
+                    return f'<td class="{grp_cls}" title="{fm(delta*ipb)}">{inner}</td>'
+                return f'<td class="{grp_cls}">{inner}</td>'
+
+            cells.append(_delta_pct_cell("g-var g-first", "projected_lifetime_interest_pct", "initial_interest_pct", 2))
+            cells.append(_delta_pct_cell("g-var", "projected_lifetime_servicing_pct", "total_servicing_cost", 2))
+            # Δ WAL (years)
+            wn = d.get("wal_now")
+            wi = d.get("wal_initial")
+            if wn is not None and wi is not None:
+                d_wal = wn - wi
+                cells.append(f'<td class="g-var">{d_wal:+.2f}y</td>')
+            else:
+                cells.append('<td class="g-var"><span style="color:#999">—</span></td>')
+            cells.append(_delta_pct_cell("g-var", "projected_loss_pct", "expected_loss_pct", 2, color=True))
+            cells.append(_delta_pct_cell("g-var", "actual_residual", "expected_residual", 2, color=True))
+            pc = d.get("pct_complete")
+            pc_disp = f"{pc*100:.0f}%" if (pc is not None and not (isinstance(pc,float) and pd.isna(pc))) else '<span style="color:#999">—</span>'
+            cells.append(f'<td class="g-var">{pc_disp}</td>')
+            trig_prob = d.get("trigger_risk")
+            cells.append(f'<td class="g-var">{trigger_badge(trig_prob)}</td>')
+            # Cap Structure (6)
+            cells.append(pct_cell("g-cap g-first", "aaa_pct", 1))
+            cells.append(pct_cell("g-cap", "aa_pct", 1))
+            cells.append(pct_cell("g-cap", "a_pct", 1))
+            cells.append(pct_cell("g-cap", "bbb_pct", 1))
+            cells.append(pct_cell("g-cap", "oc_pct", 1))
+            cells.append(f'<td class="g-cap" style="font-size:.58rem;max-width:140px;white-space:normal;line-height:1.2">{trigger_text}</td>')
+
+            rows_html += (
+                f'<tr class="data-row" data-group="{group}">' + "".join(cells) + "</tr>\n"
+            )
+        return rows_html
+
+    def _weighted_avg_row(deal_list, label, group_key=""):
+        """Weighted-average summary row, pinned to bottom, excluded from sort."""
+        total_ipb = sum(d["initial_pool_balance"] for d in deal_list)
+        if total_ipb == 0:
+            return ""
+
+        def wavg(key):
+            vals = [(d.get(key), d["initial_pool_balance"]) for d in deal_list if d.get(key) is not None]
+            if not vals:
+                return None
+            return sum(v * w for v, w in vals) / sum(w for _, w in vals)
+
+        wa = {k: wavg(k) for k in [
+            "aaa_pct", "aa_pct", "a_pct", "bbb_pct", "oc_pct",
+            "consumer_wac", "cost_of_debt", "excess_spread_yr",
+            "wal_initial", "wal_now",
+            "total_excess_spread", "total_servicing_cost", "expected_loss_pct",
+            "expected_residual", "initial_interest_pct",
+            "projected_lifetime_interest_pct", "projected_lifetime_servicing_pct",
+            "projected_loss_pct", "actual_residual", "variance", "pct_complete",
+        ]}
+
+        def p(v, dec=2):
+            if v is None or (isinstance(v, float) and pd.isna(v)):
+                return "—"
+            return f"{v*100:.{dec}f}%"
+
+        wal_str = f"{wa['wal_initial']:.1f}y" if wa.get("wal_initial") else "—"
+        wal_now_str = f"{wa['wal_now']:.1f}y" if wa.get("wal_now") else wal_str
+        var_pct = wa.get("variance")
+        var_dollars = (var_pct * total_ipb) if var_pct is not None else None
+
+        cells = []
+        cells.append('<td class="g-id g-first"></td>')
+        cells.append(f'<td class="g-id" style="background:#E3F2FD">{label}</td>')
+        cells.append('<td class="g-id"></td>')
+        cells.append(f'<td class="g-id">{fm(total_ipb)}</td>')
+        cells.append(f'<td class="g-init g-first">{p(wa["consumer_wac"],2)}</td>')
+        cells.append(f'<td class="g-init">{p(wa["cost_of_debt"],2)}</td>')
+        cells.append(f'<td class="g-init">{p(wa["excess_spread_yr"],2)}</td>')
+        cells.append(f'<td class="g-init">{wal_str}</td>')
+        cells.append(f'<td class="g-init">{p(wa["total_excess_spread"],2)}</td>')
+        cells.append(f'<td class="g-init">{p(wa["total_servicing_cost"],2)}</td>')
+        cells.append(f'<td class="g-init">{p(wa["expected_loss_pct"],2)}</td>')
+        cells.append(f'<td class="g-init">{pf_color(wa["expected_residual"])}</td>')
+        cells.append(f'<td class="g-curr g-first">{p(wa["projected_lifetime_interest_pct"],2)}</td>')
+        cells.append(f'<td class="g-curr">{p(wa["projected_lifetime_servicing_pct"],2)}</td>')
+        cells.append(f'<td class="g-curr">{wal_now_str}</td>')
+        cells.append(f'<td class="g-curr">{p(wa["projected_loss_pct"],2)}</td>')
+        cells.append(f'<td class="g-curr">{pf_color(wa["actual_residual"])}</td>')
+        # Per-column deltas (Current − Initial), mirroring the 5 Current cols
+        def _wa_delta_pct(curr_key, init_key, dec=2, color=False, first=False):
+            cv = wa.get(curr_key); iv = wa.get(init_key)
+            klass = "g-var g-first" if first else "g-var"
+            if cv is None or iv is None:
+                return f'<td class="{klass}">—</td>'
+            delta = cv - iv
+            if color:
+                inverted = (curr_key == "projected_loss_pct")
+                good = (delta < 0) if inverted else (delta >= 0)
+                col = "#388E3C" if good else "#D32F2F"
+                inner = f'<span style="color:{col}">{delta*100:+.{dec}f}%</span>'
+            else:
+                inner = f"{delta*100:+.{dec}f}%"
+            return f'<td class="{klass}" title="{fm(delta*total_ipb)}">{inner}</td>'
+
+        cells.append(_wa_delta_pct("projected_lifetime_interest_pct", "initial_interest_pct", 2, first=True))
+        cells.append(_wa_delta_pct("projected_lifetime_servicing_pct", "total_servicing_cost", 2))
+        if wa.get("wal_now") is not None and wa.get("wal_initial") is not None:
+            cells.append(f'<td class="g-var">{wa["wal_now"]-wa["wal_initial"]:+.2f}y</td>')
+        else:
+            cells.append('<td class="g-var">—</td>')
+        cells.append(_wa_delta_pct("projected_loss_pct", "expected_loss_pct", 2, color=True))
+        cells.append(_wa_delta_pct("actual_residual", "expected_residual", 2, color=True))
+        cells.append(f'<td class="g-var">{p(wa["pct_complete"],0) if wa.get("pct_complete") else "—"}</td>')
+        cells.append('<td class="g-var"></td>')
+        cells.append(f'<td class="g-cap g-first">{p(wa["aaa_pct"],1)}</td>')
+        cells.append(f'<td class="g-cap">{p(wa["aa_pct"],1)}</td>')
+        cells.append(f'<td class="g-cap">{p(wa["a_pct"],1)}</td>')
+        cells.append(f'<td class="g-cap">{p(wa["bbb_pct"],1)}</td>')
+        cells.append(f'<td class="g-cap">{p(wa["oc_pct"],1)}</td>')
+        cells.append('<td class="g-cap"></td>')
+
+        group_attr = f' data-group="{group_key}"' if group_key else ""
+        return (
+            f'<tr class="avg-row"{group_attr} style="background:#E3F2FD;font-weight:700">'
+            + "".join(cells) + "</tr>\n"
+        )
+
+    forecast_source = "Markov chain" if has_markov else "logistic regression"
+    forecast_note = "" if has_markov else ' <span style="color:#F57F17;font-size:.6rem">(LR model — Markov pending)</span>'
+
+    # ── Build the dynamic parts of the header from COL_DEFS ─────────────────
+    group_header_cells = "".join(
+        f'<th class="{gcls} g-first" colspan="{span}">{label}</th>'
+        for (gcls, label, span) in GROUP_HEADERS
+    )
+    col_header_cells = "".join(
+        f'<th class="{cls}">{label}</th>' for (cls, label) in COL_DEFS
+    )
+
+    # Carvana-centric summary for the top of the tab.
+    _n_cv_prime = len(crvna_prime)
+    _n_cv_np = len(crvna_nonprime)
+    _n_cv = _n_cv_prime + _n_cv_np
+    _n_cm = len(carmx_deals)
+    _n_total = _n_cv + _n_cm
+    # Weighted-avg Carvana Prime expected vs projected CNL, if available
+    def _wavg_cv(deal_list, key):
+        vals = [(d.get(key), d.get("initial_pool_balance")) for d in deal_list
+                if d.get(key) is not None and d.get("initial_pool_balance")]
+        if not vals:
+            return None
+        return sum(v * w for v, w in vals) / sum(w for _, w in vals)
+    _cv_exp = _wavg_cv(crvna_prime, "expected_loss_pct")
+    _cv_proj = _wavg_cv(crvna_prime, "projected_loss_pct")
+    _cv_insight = ""
+    if _cv_exp is not None and _cv_proj is not None:
+        _delta_pp = (_cv_proj - _cv_exp) * 100
+        if _delta_pp > 0.3:
+            _cv_insight = (f" Weighted across Carvana Prime, current-projected CNL "
+                           f"<strong>{_cv_proj*100:.2f}%</strong> is "
+                           f"<strong>{_delta_pp:+.2f} pp above</strong> the at-issuance "
+                           f"projection of {_cv_exp*100:.2f}% &mdash; meaningful compression "
+                           f"of Carvana residual cashflows.")
+        elif _delta_pp < -0.3:
+            _cv_insight = (f" Weighted across Carvana Prime, current-projected CNL "
+                           f"<strong>{_cv_proj*100:.2f}%</strong> is "
+                           f"<strong>{_delta_pp:+.2f} pp below</strong> the at-issuance "
+                           f"projection of {_cv_exp*100:.2f}% &mdash; a positive read-through "
+                           f"for Carvana residual cashflows.")
+        else:
+            _cv_insight = (f" Weighted across Carvana Prime, current-projected CNL "
+                           f"<strong>{_cv_proj*100:.2f}%</strong> is tracking within "
+                           f"{abs(_delta_pp):.2f} pp of the at-issuance projection "
+                           f"({_cv_exp*100:.2f}%) &mdash; Carvana residual cashflows "
+                           f"progressing as modeled.")
+    carvana_summary_html = (
+        f'<div style="padding:8px 12px 4px;margin:4px 0 8px;background:#F5F9FF;'
+        f'border-left:3px solid #1976D2;max-width:900px">'
+        f'<p style="font-size:.78rem;color:#333;line-height:1.55;margin:0">'
+        f'<strong>Carvana focus.</strong> {_n_cv} of {_n_total} deals shown are Carvana '
+        f'({_n_cv_prime} Prime + {_n_cv_np} Non-Prime); {_n_cm} CarMax deals are included '
+        f'as the peer benchmark.{_cv_insight}'
+        f'</p></div>'
+    )
+
+    h = f"""<div style="padding:8px 12px">
+<h2 style="font-size:1rem;margin-bottom:4px">Residual Economics — All Deals{forecast_note}</h2>
+{carvana_summary_html}
+<p style="font-size:.7rem;color:#666;margin:4px 0 6px;max-width:50em">
+Averages stay pinned at the bottom.
+Loss forecasts from {forecast_source} model. {'Markov model running — forecasts will update.' if not has_markov else ''}
+</p>
+<div class="econ-controls" role="toolbar" aria-label="Residual Economics filters">
+  <label><input type="checkbox" class="econ-filter" value="cv-prime" checked onclick="econFilter()"> Carvana Prime</label>
+  <label><input type="checkbox" class="econ-filter" value="cv-nonprime" checked onclick="econFilter()"> Carvana Non-Prime</label>
+  <label><input type="checkbox" class="econ-filter" value="kmx-prime" checked onclick="econFilter()"> CarMax Prime</label>
+</div>
+</div>
+<div class="tbl econ-table-wrap" id="econTableWrap">
+<table class="econ" id="econTable">
+<thead>
+<tr class="group-header">{group_header_cells}</tr>
+<tr class="col-header" style="position:sticky;top:0;z-index:2;background:#f5f5f5">{col_header_cells}</tr>
+</thead>
+<tbody>
+"""
+
+    # Data rows (sortable) — Prime + CarMax interleaved, plus non-prime below
+    h += _build_table_rows(prime_and_carmax)
+    if crvna_nonprime:
+        h += _build_table_rows(crvna_nonprime)
+
+    # Averages pinned to bottom, NOT sortable; each tagged with data-group so
+    # the filter hides them when the corresponding group is unchecked.
+    if crvna_prime:
+        h += _weighted_avg_row(crvna_prime, "Carvana Prime Avg", "cv-prime")
+    if carmx_deals:
+        h += _weighted_avg_row(carmx_deals, "CarMax Avg", "kmx-prime")
+    if crvna_nonprime:
+        h += _weighted_avg_row(crvna_nonprime, "Carvana Non-Prime Avg", "cv-nonprime")
+    if prime_and_carmax:
+        h += _weighted_avg_row(prime_and_carmax, "All Prime Avg (Carvana+CarMax)", "all-prime")
+
+    h += "</tbody></table></div>\n"
+
+    # ── Filter JavaScript (vanilla, no external libs) ──────────────────────
+    h += """
+<script>
+(function(){
+  var table = document.getElementById('econTable');
+  if (!table) return;
+  var tbody = table.tBodies[0];
+
+  window.econFilter = function(){
+    var enabled = {};
+    document.querySelectorAll('input.econ-filter').forEach(function(c){
+      enabled[c.value] = c.checked;
+    });
+    tbody.querySelectorAll('tr.data-row').forEach(function(r){
+      r.style.display = enabled[r.dataset.group] ? '' : 'none';
+    });
+    tbody.querySelectorAll('tr.avg-row').forEach(function(r){
+      var g = r.dataset.group;
+      if (g === 'all-prime') {
+        r.style.display = (enabled['cv-prime'] && enabled['kmx-prime']) ? '' : 'none';
+      } else {
+        r.style.display = enabled[g] ? '' : 'none';
+      }
+    });
+  };
+})();
+</script>
+"""
+
+    # ── 9. Pointer to the Methodology & Findings tab — sits clearly below
+    # the table as a footer, never crowding it on mobile. The .econ-footer-note
+    # class adds a 32px top margin and removes any sticky/overlay behaviour.
+    h += (
+        '<div class="econ-footer-note">'
+        '<p>'
+        '<strong>Methodology.</strong> For a full writeup of the Markov model, '
+        'Bayesian calibration, issuer comparison (regression), cost-of-funds '
+        'analysis, limitations, and reproducibility details, switch to the '
+        '<strong>Methodology &amp; Findings</strong> tab in the selector above.'
+        '</p></div>'
+    )
+
+    return h
+
+
+
+def _write_page(out_dir, rel_path, html):
+    """Write an HTML file into out_dir at rel_path (e.g. "economics/index.html").
+    Creates parent directories as needed. Returns the absolute path written."""
+    full = os.path.join(out_dir, rel_path)
+    os.makedirs(os.path.dirname(full), exist_ok=True)
+    with open(full, "w", encoding="utf-8") as f:
+        f.write(html)
+    return full
+
+
+def _deal_page_title(issuer_prefix, deal):
+    if issuer_prefix == "crvna":
+        return f"Carvana {deal} — Dashboard"
+    return f"CarMax {deal} — Dashboard"
+
+
+def _deal_page_body(issuer_prefix, deal, metrics_html, tabs_html):
+    """Body for a per-deal page: header line + metrics + sub-tab nav/panes."""
+    if issuer_prefix == "crvna":
+        heading = f"Carvana Auto Receivables Trust {deal}"
+    else:
+        heading = f"CarMax Auto Owner Trust {deal}"
+    back = f'<p style="padding:8px 12px 0;font-size:.7rem"><a href="{BASE_URL_PATH}/deals/" style="color:#1976D2;text-decoration:none">&larr; All deals</a></p>'
+    return (f'{back}'
+            f'<h2 style="padding:4px 12px 0;font-size:1.05rem;color:#333">{heading}</h2>\n'
+            f'{metrics_html}\n{tabs_html}')
+
+
+def _load_deal_meta(issuer_prefix, deal):
+    """Load cutoff_date + initial_pool_balance for the deal-index card.
+    Returns (cutoff_str, ipb_float) — either can be None if not in deal_terms."""
+    db = ACTIVE_DB if issuer_prefix == "crvna" else CARMAX_DB
+    if not db:
+        return (None, None)
+    try:
+        conn = sqlite3.connect(db)
+        row = conn.execute(
+            "SELECT cutoff_date, initial_pool_balance FROM deal_terms WHERE deal=?",
+            (deal,)
+        ).fetchone()
+        conn.close()
+        if row:
+            return (row[0], row[1])
+    except Exception:
+        pass
+    return (None, None)
+
+
+def _render_deal_index(carvana_deals, carmax_deals):
+    """Build the /deals/ landing page: a grid of cards linking to each deal."""
+    cards = []
+    # Carvana deals — newest first (deal ids sort chronologically).
+    for deal in sorted(carvana_deals, reverse=True):
+        cutoff, ipb = _load_deal_meta("crvna", deal)
+        slug = _slugify_deal("crvna", deal)
+        ipb_str = fm(ipb) if ipb else "—"
+        cutoff_str = cutoff or "—"
+        cards.append(
+            f'<a class="deal-card crvna" href="{BASE_URL_PATH}/deals/{slug}/">'
+            f'<div class="dc-name">Carvana {deal}</div>'
+            f'<div class="dc-meta">Cutoff: {cutoff_str} · Initial pool: {ipb_str}</div>'
+            f'<span class="dc-issuer">CRVNA</span></a>'
+        )
+    for deal in sorted(carmax_deals, reverse=True):
+        cutoff, ipb = _load_deal_meta("carmx", deal)
+        slug = _slugify_deal("carmx", deal)
+        ipb_str = fm(ipb) if ipb else "—"
+        cutoff_str = cutoff or "—"
+        cards.append(
+            f'<a class="deal-card carmx" href="{BASE_URL_PATH}/deals/{slug}/">'
+            f'<div class="dc-name">CarMax {deal}</div>'
+            f'<div class="dc-meta">Cutoff: {cutoff_str} · Initial pool: {ipb_str}</div>'
+            f'<span class="dc-issuer">CARMX</span></a>'
+        )
+    n = len(cards)
+    header = (
+        '<h2 style="padding:12px 12px 0;font-size:1.05rem;color:#1976D2">Deals</h2>'
+        f'<p style="padding:4px 12px;font-size:.8rem;color:#555">'
+        f'{n} deals across Carvana (CRVNA) and CarMax (CARMX). '
+        f'Each card opens the deal page with Pool Summary, Delinquencies, Losses, '
+        f'Notes &amp; OC, Cash Waterfall, Recovery, and Documents as sub-tabs.</p>'
+    )
+    return header + '<div class="deal-grid">' + "\n".join(cards) + '</div>'
+
+
+def _render_comparison_hub(prime_html, nonprime_html, carmax_prime_html,
+                           cross_issuer_html, model_html):
+    """Auxiliary comparison/modeling content that used to live as extra rows
+    in the dropdown. Appended to the deal-index page so none of it is orphaned
+    — each section gets an anchor link at the top.
+
+    This is intentionally secondary to the deal cards (which are the primary
+    navigation target for the Deals page).
+    """
+    sections = []
+    toc = []
+    def _add(slug, title, html):
+        if not html:
+            return
+        toc.append(f'<a href="#{slug}" style="color:#1976D2;text-decoration:none">{title}</a>')
+        sections.append(
+            f'<section id="{slug}" style="padding:0 4px">'
+            f'<h3 style="font-size:1rem;color:#1976D2;margin:18px 0 6px;padding:0 8px;'
+            f'border-top:1px solid #e0e0e0;padding-top:14px">{title}</h3>'
+            f'{html}</section>'
+        )
+    _add("prime",        "Carvana Prime comparison",     prime_html)
+    _add("nonprime",     "Carvana Non-Prime comparison", nonprime_html)
+    _add("carmax-prime", "CarMax Prime comparison",      carmax_prime_html)
+    _add("cross-issuer", "Carvana vs CarMax — Prime",    cross_issuer_html)
+    _add("model",        "Default model",                model_html)
+    if not sections:
+        return ""
+    toc_html = (
+        '<div style="padding:8px 12px;background:#ECEFF1;border-radius:6px;'
+        'margin:16px 12px 0;font-size:.75rem">'
+        '<strong>Comparison &amp; modeling sections:</strong> '
+        + " &middot; ".join(toc) + '</div>'
+    )
+    return toc_html + "\n".join(sections)
+
+
+def main():
+    global _chart_id
+    _chart_id = 0
+
+    deal_contents = {}
+    for deal in DASHBOARD_DEALS:
+        logger.info(f"Generating {deal}...")
+        result = generate_deal_content(deal)
+        if result:
+            deal_contents[deal] = result
+
+    if not deal_contents:
+        logger.error("No deals with data found.")
+        return
+
+    # Generate CarMax per-deal content (only if the CarMax DB is available)
+    carmax_deal_contents = {}
+    if carmax_available():
+        for deal in CARMAX_DEALS:
+            logger.info(f"Generating CARMX {deal}...")
+            try:
+                result = generate_carmax_deal_content(deal)
+            except Exception as e:
+                logger.error(f"[CARMX {deal}] Failed: {e}")
+                result = None
+            if result:
+                carmax_deal_contents[deal] = result
+    else:
+        logger.info("CarMax DB not found — skipping CarMax deal tabs.")
+
+    # Generate comparison sections (appended as secondary content on the
+    # Deals index page — see _render_comparison_hub).
+    logger.info("Generating Prime comparison...")
+    prime_html = generate_comparison_content(
+        [d for d in PRIME_DEALS if d in deal_contents], "Prime Deals")
+    logger.info("Generating Non-Prime comparison...")
+    nonprime_html = generate_comparison_content(
+        [d for d in NONPRIME_DEALS if d in deal_contents], "Non-Prime Deals")
+
+    carmax_prime_html = ""
+    cross_issuer_html = ""
+    if carmax_available() and carmax_deal_contents:
+        logger.info("Generating CarMax Prime comparison...")
+        carmax_prime_html = generate_carmax_comparison_content(
+            [d for d in CARMAX_PRIME_DEALS if d in carmax_deal_contents],
+            "CarMax Prime Deals")
+        logger.info("Generating cross-issuer (Carvana vs CarMax) comparison...")
+        cross_issuer_html = generate_cross_issuer_comparison()
+
+    # Generate default model analysis
+    logger.info("Generating Default Model analysis...")
+    model_html = generate_model_content()
+
+    # Generate residual economics tab
+    logger.info("Generating Residual Economics tab...")
+    economics_html = generate_economics_tab()
+
+    # Generate recent trends tab (landing page)
+    logger.info("Generating Recent Trends tab...")
+    try:
+        recent_trends_html = generate_recent_trends_tab()
+    except Exception as e:
+        logger.error(f"Recent Trends tab failed: {e}")
+        recent_trends_html = (
+            f"<div class='tc' style='display:block;padding:16px'>"
+            f"<p>Recent Trends unavailable: {e}</p></div>"
+        )
+
+    # Generate methodology & findings tab (reads analytics cache).
+    logger.info("Generating Methodology & Findings tab...")
+    try:
+        from carvana_abs.methodology_tab import generate_methodology_tab
+        methodology_html = generate_methodology_tab()
+    except Exception as e:
+        logger.error(f"Methodology tab failed: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        methodology_html = (
+            f"<div class='tc' style='display:block;padding:16px'>"
+            f"<p>Methodology tab unavailable: {e}</p></div>"
+        )
+
+    # ── Write the multi-page tree into static_site/preview/ ────────────────
+    out_dir = os.path.join(OUT_DIR, "preview")
+    os.makedirs(out_dir, exist_ok=True)
+
+    # Shared static assets.
+    os.makedirs(os.path.join(out_dir, "assets"), exist_ok=True)
+    css_path = os.path.join(out_dir, "assets", "shared.css")
+    js_path = os.path.join(out_dir, "assets", "shared.js")
+    with open(css_path, "w", encoding="utf-8") as f:
+        f.write(SHARED_CSS)
+    with open(js_path, "w", encoding="utf-8") as f:
+        f.write(SHARED_JS)
+    logger.info(
+        f"Assets: shared.css={os.path.getsize(css_path)/1024:.1f} KB, "
+        f"shared.js={os.path.getsize(js_path)/1024:.1f} KB")
+
+    pages_written = []
+
+    # Top-level pages.
+    p = _write_page(out_dir, "index.html",
+                    _page_shell("Carvana ABS — Recent Trends", "recent",
+                                recent_trends_html))
+    pages_written.append(p)
+    p = _write_page(out_dir, "economics/index.html",
+                    _page_shell("Carvana ABS — Residual Economics", "economics",
+                                economics_html))
+    pages_written.append(p)
+    p = _write_page(out_dir, "methodology/index.html",
+                    _page_shell("Carvana ABS — Methodology & Findings",
+                                "methodology", methodology_html))
+    pages_written.append(p)
+
+    # Deal index (primary) + comparison sections (secondary).
+    deals_body = _render_deal_index(list(deal_contents.keys()),
+                                    list(carmax_deal_contents.keys()))
+    deals_body += _render_comparison_hub(prime_html, nonprime_html,
+                                         carmax_prime_html, cross_issuer_html,
+                                         model_html)
+    p = _write_page(out_dir, "deals/index.html",
+                    _page_shell("Carvana ABS — Deals", "deals", deals_body))
+    pages_written.append(p)
+
+    # Per-deal pages — Carvana first, then CarMax. Each one gets its own
+    # directory (/deals/<slug>/index.html) so trailing-slash URLs work.
+    for deal, (metrics, tabs) in deal_contents.items():
+        slug = _slugify_deal("crvna", deal)
+        body = _deal_page_body("crvna", deal, metrics, tabs)
+        title = _deal_page_title("crvna", deal)
+        p = _write_page(out_dir, f"deals/{slug}/index.html",
+                        _page_shell(title, "deals", body))
+        pages_written.append(p)
+
+    for deal, (metrics, tabs) in carmax_deal_contents.items():
+        slug = _slugify_deal("carmx", deal)
+        body = _deal_page_body("carmx", deal, metrics, tabs)
+        title = _deal_page_title("carmx", deal)
+        p = _write_page(out_dir, f"deals/{slug}/index.html",
+                        _page_shell(title, "deals", body))
+        pages_written.append(p)
+
+    # Summary for the logs.
+    total_bytes = sum(os.path.getsize(p) for p in pages_written)
+    sizes = [os.path.getsize(p) for p in pages_written]
+    logger.info(
+        f"Wrote {len(pages_written)} pages to {out_dir} "
+        f"(min={min(sizes)/1024:.0f} KB, "
+        f"median={sorted(sizes)[len(sizes)//2]/1024:.0f} KB, "
+        f"max={max(sizes)/1024:.0f} KB, "
+        f"total={total_bytes/1024/1024:.1f} MB across tree). "
+        f"Carvana deals: {len(deal_contents)}. CarMax deals: {len(carmax_deal_contents)}.")
+
+
+if __name__ == "__main__":
+    main()
