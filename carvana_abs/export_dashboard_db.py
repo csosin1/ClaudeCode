@@ -44,10 +44,14 @@ def main():
     if os.path.exists(DASHBOARD_DB):
         os.remove(DASHBOARD_DB)
 
-    src = sqlite3.connect(DB_PATH)
-    dst = sqlite3.connect(DASHBOARD_DB)
+    # 5-min busy_timeout so a momentarily-held writer (daily ingest cron,
+    # Markov mid-checkpoint, etc.) doesn't crash the export with
+    # `database is locked`. Mirrors the carmax-side fix (see comment there).
+    src = sqlite3.connect(DB_PATH, timeout=300)
+    dst = sqlite3.connect(DASHBOARD_DB, timeout=300)
 
     src.execute("PRAGMA journal_mode=WAL")
+    src.execute("PRAGMA busy_timeout=300000")
 
     # Ensure the source DB has the dist_date_iso column populated — so the
     # CREATE-TABLE-from-sqlite_master snapshot copied to dst includes it and
