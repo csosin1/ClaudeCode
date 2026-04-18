@@ -1,0 +1,6352 @@
+[
+  {
+    "chain_id": 24,
+    "canonical_name": "Gold's Gym Fitnessstudio",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://golds-gym.de/studio/berlin",
+    "n_locations_with_this_domain": 3
+  },
+  {
+    "chain_id": 40,
+    "canonical_name": "Sportforum",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.sportforum-wuppertal.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 82,
+    "canonical_name": "Yogastudio",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://yogastudio.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 129,
+    "canonical_name": "ProFit Gym",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.profitgym.nl/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 143,
+    "canonical_name": "Alpha Fitness",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://alphafitness.nl/locaties/utrecht/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 149,
+    "canonical_name": "Movement Gym",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://movement-gym.com/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 206,
+    "canonical_name": "Newstyle",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.newstylehealthcenters.com/newstyle-leiden/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 238,
+    "canonical_name": "Arendse Health club",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.arendse.nl/fitness-breda/",
+    "n_locations_with_this_domain": 3
+  },
+  {
+    "chain_id": 279,
+    "canonical_name": "Quantum Fit",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.247quantumfit.nl/sportschool-veendam/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 356,
+    "canonical_name": "Fit Factory",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.fitfactory.nl/eindhoven/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 549,
+    "canonical_name": "Infinity Fitness",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.infinityfitness.be/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 667,
+    "canonical_name": "B-Fit",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.b-fit.ch/zollikofen",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 699,
+    "canonical_name": "Bushido",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://sportschoolbushido.nl/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 786,
+    "canonical_name": "Selection Fitness",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.selection-fitness.com/",
+    "n_locations_with_this_domain": 3
+  },
+  {
+    "chain_id": 947,
+    "canonical_name": "Fitklusiv",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://fitklusiv.de/studio-herne/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 954,
+    "canonical_name": "actiwita Vitalstudio",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.actiwita.de",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 968,
+    "canonical_name": "Dekker",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.fitness-studiodekker.nl",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 1007,
+    "canonical_name": "gym",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.gofit-boom.be/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 1028,
+    "canonical_name": "InJoy",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.injoy-recklinghausen.de/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 1041,
+    "canonical_name": "Vitadrom",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://vitadromgruppe.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 1047,
+    "canonical_name": "Elite Fitness",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.elitefitness08.fr",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 1085,
+    "canonical_name": "Lijfkracht Boutique",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://lijfkracht.community/weesp/",
+    "n_locations_with_this_domain": 3
+  },
+  {
+    "chain_id": 1166,
+    "canonical_name": "Sahaja Yoga",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://sahajayoga.nl/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 1237,
+    "canonical_name": "easyfit",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.easyfit-waldbronn.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 1319,
+    "canonical_name": "Pure Pilates",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.purepilatesamsterdam.nl",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 1322,
+    "canonical_name": "Afterburn",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.afterburn.be/",
+    "n_locations_with_this_domain": 3
+  },
+  {
+    "chain_id": 1350,
+    "canonical_name": "Hot Yoga",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.hotyogaoudenaarde.be/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 1395,
+    "canonical_name": "Fitness Loft",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.fitnessloft-juliaseidel.de",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 1479,
+    "canonical_name": "Dojo",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://dojobussum.nl/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 1507,
+    "canonical_name": "all inclusive FITNESS",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://ai-fitness.de",
+    "n_locations_with_this_domain": 3
+  },
+  {
+    "chain_id": 1535,
+    "canonical_name": "Feel Fit Center",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.feelfitcenter.nl/locatie/bemmel/",
+    "n_locations_with_this_domain": 3
+  },
+  {
+    "chain_id": 1567,
+    "canonical_name": "Aspria",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.aspria.com/en/brussels-arts-loi",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 1622,
+    "canonical_name": "Freiraum",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.freiraum-rifferswil.ch/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 1696,
+    "canonical_name": "Fitness Camp",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://www.fitness-camp.de",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 1700,
+    "canonical_name": "New Life Fitness",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://new-life-fitness.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 2655,
+    "canonical_name": "Beest Boulders",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://beestboulders.com/vestigingen/beest-boulders-den-haag/",
+    "n_locations_with_this_domain": 3
+  },
+  {
+    "chain_id": 2925,
+    "canonical_name": "PADEL2GO",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.padel-2-go.nl/padel-woerden/",
+    "n_locations_with_this_domain": 3
+  },
+  {
+    "chain_id": 3330,
+    "canonical_name": "Satya",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.yogastudiosatya.nl/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 3419,
+    "canonical_name": "PadelCasa",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.padelcasa.com/pages/utrecht-home",
+    "n_locations_with_this_domain": 3
+  },
+  {
+    "chain_id": 3956,
+    "canonical_name": "Easyfit",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://easyfit.fr/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 4297,
+    "canonical_name": "Stadtbad",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.stadtwerke-neuss.de/baeder-eishalle/stadtbad",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 4389,
+    "canonical_name": "Monkeyspot",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.monkeyspot.de",
+    "n_locations_with_this_domain": 3
+  },
+  {
+    "chain_id": 4614,
+    "canonical_name": "Sparkx",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://sparkx.com/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 4747,
+    "canonical_name": "TeamSport Go Karting",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.teamsport-ekarting.nl/locaties/utrecht",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 4902,
+    "canonical_name": "My Padel Club",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://mypadelclub.nl/nijmegen/",
+    "n_locations_with_this_domain": 3
+  },
+  {
+    "chain_id": 8708,
+    "canonical_name": "Sportoase",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.sportoase.be/nl/duinenwater",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 8845,
+    "canonical_name": "VV-NEXT Laakdal",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.vv-next.be/",
+    "n_locations_with_this_domain": 3
+  },
+  {
+    "chain_id": 9964,
+    "canonical_name": "Flow Studio",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://flow-studio.lu/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 9986,
+    "canonical_name": "Body Fit",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.bodyfit.be/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 10038,
+    "canonical_name": "Luxfit",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://luxfit.com/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 10041,
+    "canonical_name": "Viv'Eden",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.viveden.com/compiegne.php",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 10141,
+    "canonical_name": "Athletic Center",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://www.athletic-center.lu/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 10152,
+    "canonical_name": "Olympia Fitness",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.olympia-fitness.be/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 10163,
+    "canonical_name": "Athletic Gym",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.facebook.com/athleticgymsprimont/?locale=fr_FR",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 10221,
+    "canonical_name": "The Loft",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.the-loft.fr/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 10335,
+    "canonical_name": "Climb Up",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://lille-lesquin.climb-up.fr",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 10436,
+    "canonical_name": "Waterbike",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://waterbike.fr/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 11114,
+    "canonical_name": "Arena",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.arenafootindoorwavre.com/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 11254,
+    "canonical_name": "C.T.C. La Calamine",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.ctc-la-calamine.be",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 12258,
+    "canonical_name": "Cercles de la forme",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.cerclesdelaforme.com/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 12262,
+    "canonical_name": "Evo",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://evofitness.ch",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 12298,
+    "canonical_name": "Let's Go",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.letsgofitness.ch",
+    "n_locations_with_this_domain": 3
+  },
+  {
+    "chain_id": 12307,
+    "canonical_name": "Jonny M.",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://jonny-m.de/club-europaplatz",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 12308,
+    "canonical_name": "Lady Moving",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://ladymoving-villierssurmarne.fr",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 12407,
+    "canonical_name": "Frau Aktiv",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://frauaktiv-rosdorf.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 12408,
+    "canonical_name": "GYM",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.gym-24.de/gaertringen-express.html",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 12433,
+    "canonical_name": "Progress Form",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.progress-form.fr/chelles/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 12517,
+    "canonical_name": "Prime Time Fitness",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://primetime-fitness.de/fitnessstudios/frankfurt/frankfurt-schweizer-platz/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 12554,
+    "canonical_name": "American Fitness",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://www.american-fitness-center.de/lu_start,158.html",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 12562,
+    "canonical_name": "Sportprinz",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.sportprinz-fitness.de/freiburg-ii",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 12610,
+    "canonical_name": "Fit Club",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.fitclubgenova.com/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 12623,
+    "canonical_name": "Amazonia",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.amazonia.com/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 12626,
+    "canonical_name": "DK Fitness und Wellness Loft",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://mechernich.fitness-wellness-loft.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 12666,
+    "canonical_name": "Rituel Sport Club",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://rituel-sportclub.fr/salle-de-sport/saint-egreve/",
+    "n_locations_with_this_domain": 3
+  },
+  {
+    "chain_id": 12685,
+    "canonical_name": "Training Academy",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://trainingacademy.fr",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 12688,
+    "canonical_name": "Run Up",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.runupforme.fr/club-lunel",
+    "n_locations_with_this_domain": 3
+  },
+  {
+    "chain_id": 12912,
+    "canonical_name": "Muskelkater",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.muskelkater-giessen.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 13271,
+    "canonical_name": "easy Fit",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://easyfit-villingen.de/",
+    "n_locations_with_this_domain": 3
+  },
+  {
+    "chain_id": 13277,
+    "canonical_name": "Espace forme",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://espaceformebetting.fr/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 13285,
+    "canonical_name": "ixmal",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://ixmal.de/studios/darmstadt.html",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 13342,
+    "canonical_name": "Gym24",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.gym-24.de",
+    "n_locations_with_this_domain": 3
+  },
+  {
+    "chain_id": 13345,
+    "canonical_name": "Fitnesswerk",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://fitnesswerk.com/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 13355,
+    "canonical_name": "Iron Gym",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://irongympetrer.wixsite.com/website",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 13365,
+    "canonical_name": "Sport Avenue",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.sport-avenue-pau.com",
+    "n_locations_with_this_domain": 3
+  },
+  {
+    "chain_id": 13447,
+    "canonical_name": "Fifty Nine",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://fiftyninefitnessclub.fr/voiron/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 13532,
+    "canonical_name": "Bella Vitalis",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.bella-vitalis.de/fitness-in-herxheim/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 13642,
+    "canonical_name": "Hatha Yoga",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://yoga-freiraum.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 13648,
+    "canonical_name": "Fitness Time",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://fitness-time.de",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 13701,
+    "canonical_name": "Fitness Boutique",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.fitnessboutique.fr/pages/fitnessboutique-montelimar",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 13797,
+    "canonical_name": "Easy Gym",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.easygym.fr",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 13889,
+    "canonical_name": "Fitness Level",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://fitness-level.com/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 14056,
+    "canonical_name": "Fitelya",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://fitelya.fr/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 14067,
+    "canonical_name": "Accrosport",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://accrosport.com/clubs/caen/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 14303,
+    "canonical_name": "dynamo",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://dynamo-cycling.com/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 14534,
+    "canonical_name": "California Gym",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://californiagym-38.fr/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 14636,
+    "canonical_name": "easyGym",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.easygym.fr/salle-de-sport/perigueux",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 14747,
+    "canonical_name": "Fitness-Loft",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.fitness-lofts.de/studios/emmendigen",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 14760,
+    "canonical_name": "InFit",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.infit-fitness.de/germering/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 14812,
+    "canonical_name": "FitnessLoft",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.fitness-lofts.de/studios/fitness-loft-loerrach/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 14936,
+    "canonical_name": "La Palestra",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.lapalestra.cat/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 14980,
+    "canonical_name": "DreamFit",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.dreamfit.cz/performance-gym-ladvi",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 15121,
+    "canonical_name": "Oliver Joseph Fitness",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.oliverjosephhoniton.co.uk",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 15434,
+    "canonical_name": "Basic Factory",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://basicfactory.es/badalona/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 15542,
+    "canonical_name": "Fitness club",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.rueil-fitness.club",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 15625,
+    "canonical_name": "Giga Fit",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.wedemain.fr/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 15883,
+    "canonical_name": "Ananda",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://anandainstitutsaar.de",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 16328,
+    "canonical_name": "Anahata",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://vidyatamyoga.com/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 16409,
+    "canonical_name": "Miss Sporty",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.mrssporty.de/club/kiel-wik/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 16468,
+    "canonical_name": "HappyFit",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.happyfit.eu/standorte/stadtgut-steyr",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 16574,
+    "canonical_name": "Viding",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://viding.es/viding-valladolid",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 16718,
+    "canonical_name": "Fitness Oase",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.fitnessoase-eitorf.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 16781,
+    "canonical_name": "Fitness-Treff",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://fitnesstreff-lindemann.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 17266,
+    "canonical_name": "Vivagym",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://www.vivagym.es/gym/cartagena/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 17312,
+    "canonical_name": "City Fit",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.cityfit-fuessen.de",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 17316,
+    "canonical_name": "Beone",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://www.beonecenter.com/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 17346,
+    "canonical_name": "Orangetheory Fitness",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.orange-fitness.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 17809,
+    "canonical_name": "Bodyfit",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://www.bodyfitcenter.es/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 18718,
+    "canonical_name": "Benefit",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.benefit-fitness.de/osnabrueck-2/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 20289,
+    "canonical_name": "Indoorwall",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.indoorwall.com/centros-indoorwall-rocodromos/indoorwall-getafe",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 25885,
+    "canonical_name": "Padel Barcelona - El Prat",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://padelbarcelonaelprat.com/",
+    "n_locations_with_this_domain": 3
+  },
+  {
+    "chain_id": 28493,
+    "canonical_name": "Fit for 24",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://fitfor24.de/studios/pößneck/",
+    "n_locations_with_this_domain": 3
+  },
+  {
+    "chain_id": 28540,
+    "canonical_name": "SuperFit",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://superfit.club/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 28545,
+    "canonical_name": "FlexXfit",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.flexxfit.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 28583,
+    "canonical_name": "trainingsraum",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://dertrainingsraum.de",
+    "n_locations_with_this_domain": 3
+  },
+  {
+    "chain_id": 28588,
+    "canonical_name": "Thomas Sport Center",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.tsc-unterhaching.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 28669,
+    "canonical_name": "20minutes",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://20-minutes.de",
+    "n_locations_with_this_domain": 3
+  },
+  {
+    "chain_id": 28767,
+    "canonical_name": "Hello Fit",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.hellofit.de/studio/landsberg.html",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 28876,
+    "canonical_name": "Elixia",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://elixia.de/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 28920,
+    "canonical_name": "Yoga Vidya",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.yoga-vidya.de/center/altenburg/",
+    "n_locations_with_this_domain": 3
+  },
+  {
+    "chain_id": 28962,
+    "canonical_name": "body + soul",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.bodyandsoul.de/standorte/werk12/das-center-im-ueberblick",
+    "n_locations_with_this_domain": 3
+  },
+  {
+    "chain_id": 29026,
+    "canonical_name": "Green Yoga",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://greenyoga.co/studio",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 29051,
+    "canonical_name": "INVIBE",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.invibe.at/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 29066,
+    "canonical_name": "Body & Soul",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.bodyandsoul.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 29088,
+    "canonical_name": "Meridian Spa",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://www.meridianspa.de/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 29232,
+    "canonical_name": "BFit24",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.bfit24.de/preetz",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 29483,
+    "canonical_name": "EASYFITNESS",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://easyfitness.club/studio/easyfitness-lingen/",
+    "n_locations_with_this_domain": 3
+  },
+  {
+    "chain_id": 30393,
+    "canonical_name": "Euforie",
+    "location_count": 3,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.euforie.cz/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 22,
+    "canonical_name": "Hyvibes",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://hyvibes.de/city/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 31,
+    "canonical_name": "Mrs.Sporty",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.mrssporty.de/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 46,
+    "canonical_name": "Cryosizer",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://cryosizer.com/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 61,
+    "canonical_name": "Equal",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://equalyoga.com",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 70,
+    "canonical_name": "Pepp.fit",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://pepp.fit",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 97,
+    "canonical_name": "Top Fit",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://www.topfit-studios.de/studio/wiesental/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 113,
+    "canonical_name": "bbb health boutique",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://bbbhealthboutique.nl/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 125,
+    "canonical_name": "iYoga",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.iyogautrecht.nl",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 131,
+    "canonical_name": "GetFit35",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.getfit35.nl/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 173,
+    "canonical_name": "The Fitness House",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.thefitnesshouse.nl/nl/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 181,
+    "canonical_name": "Healthy Bastards",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://healthy-bastards.nl",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 184,
+    "canonical_name": "Balanzs",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://balanzs.nl/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 192,
+    "canonical_name": "Personal Fit Club",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.personalfitclub.nl/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 207,
+    "canonical_name": "HealthMe",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://healthme.nl/locaties/wassenaar/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 222,
+    "canonical_name": "Base For Stability",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://baseforstability.nl/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 231,
+    "canonical_name": "Formupgrade",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.formupgrade.nl/nijmegen-noord/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 235,
+    "canonical_name": "GymOne",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.gymone.nl/gyms/den-haag/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 253,
+    "canonical_name": "bbb Health Boutique",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://bbbhealthboutique.nl/bbb-rotterdam/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 273,
+    "canonical_name": "Bodyvita",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.bodyvita.nl",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 290,
+    "canonical_name": "Totally in Shape",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://totallyinshape.nl/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 309,
+    "canonical_name": "Ron Haans",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.ronhaans.nl/sportschool-assen/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 310,
+    "canonical_name": "Jetts Fitness",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://jetts.nl/gyms/jetts-eindhoven-gestel/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 347,
+    "canonical_name": "LITE",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://litepersonaltraining.nl/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 417,
+    "canonical_name": "Corpus Milon",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.corpusmilonclubs.nl/locaties/tubbergen",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 447,
+    "canonical_name": "Sport Je Fit",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://sportjefit-grijpskerk.nl/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 449,
+    "canonical_name": "Wav-e Studios",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://wav-estudios.com/wav-e-locaties/cuijk/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 479,
+    "canonical_name": "The Little Gym",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://amsterdam.thelittlegym.eu/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 497,
+    "canonical_name": "Sportvision",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.sportvision.nu/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 498,
+    "canonical_name": "ProFit",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://profitgym.nl",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 512,
+    "canonical_name": "Next Fit",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://nextfit.nl/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 541,
+    "canonical_name": "Arendse health club",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://arendse.nl/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 543,
+    "canonical_name": "Yogacentrum Tilburg",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://yogacentrumtilburg.nl",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 567,
+    "canonical_name": "Yoga Today",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.yogatoday.nl/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 587,
+    "canonical_name": "Family Fitness",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://familyfitness-laren.nl",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 592,
+    "canonical_name": "Elke dag yoga",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.elkedagyoga.nl/locatie/castellum/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 629,
+    "canonical_name": "Sporza",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://www.sporza-joure.nl/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 632,
+    "canonical_name": "Keep Fit",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://keepfit-joure.nl",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 659,
+    "canonical_name": "Go4Fit",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.go4fit.nl/go4fit-wijchen",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 661,
+    "canonical_name": "Hart for Her",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.hartforher.nl/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 692,
+    "canonical_name": "The Fitness Studio",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://thefitnessstudio.nl/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 696,
+    "canonical_name": "Hart for her",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.hartforher.nl/vestigingen/sport-fitness-afvallen-vrouwen-tiel",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 711,
+    "canonical_name": "Pulse20",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.pulse20.nl/studios/leeuwarden/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 732,
+    "canonical_name": "fitklusiv",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://fitklusiv.de/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 748,
+    "canonical_name": "Feel Fit",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://feel-fit.ch/#angebot",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 751,
+    "canonical_name": "Fit Up",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://fitup.it/novara/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 760,
+    "canonical_name": "wellyou fitness",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://wellyou.eu/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 790,
+    "canonical_name": "Happy Yoga",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.happyyoga.de/pages/landing-page",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 799,
+    "canonical_name": "Sporting",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.sporting-emden.de/fitnessstudio-emden.html",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 844,
+    "canonical_name": "Rundum Yoga",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://rundumyoga.de/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 852,
+    "canonical_name": "KörperFormen",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.körperformen.com",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 857,
+    "canonical_name": "Health Works Fitness",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.healthworks.eu/clubs/hilversum",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 894,
+    "canonical_name": "Just Move",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://justmove-stolwijk.nl/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 942,
+    "canonical_name": "Fit-Out",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.fit-out.be/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 1022,
+    "canonical_name": "Reuvers",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.reuvers.nu/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 1048,
+    "canonical_name": "Fit-Now!",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.fit-now.nl",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 1061,
+    "canonical_name": "25 Minutes",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://25minutes.de/studio/hamburg-othmarschen/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 1064,
+    "canonical_name": "FitnessBoutique",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://bruxelles.fitnessboutique.be/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 1107,
+    "canonical_name": "All inclusive Fitness",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.ai-fitness.de/studios/rosenheim-city",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 1109,
+    "canonical_name": "FitX Fitnessstudio",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.fitx.de/fitnessstudios/gelsenkirchen-mitte",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 1137,
+    "canonical_name": "Newstyle Healthcenters",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.newstylehealthcenters.com",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 1138,
+    "canonical_name": "Yoga Sukha",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.yogasukha.yoga/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 1161,
+    "canonical_name": "Dutch Gym",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://dutchgym.nl/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 1179,
+    "canonical_name": "Lord Vishnus Couch",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.vishnuscouch.de/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 1218,
+    "canonical_name": "TechnoGym",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.trainiq.ch/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 1220,
+    "canonical_name": "Brussels Yoga Loft",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://brusselsyogaloft.com/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 1239,
+    "canonical_name": "United Yoga",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://united-yoga.de/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 1263,
+    "canonical_name": "Yoga & Co",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://yogaandco.fr",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 1268,
+    "canonical_name": "RijnmondFit",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.rijnmondfit.nl/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 1282,
+    "canonical_name": "Body Sculpt",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://salonkee.be/salon/body-sculpt",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 1289,
+    "canonical_name": "Division 92",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://division92.be/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 1292,
+    "canonical_name": "Viva Pilates",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://vivapilates.nl",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 1320,
+    "canonical_name": "One Gym",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.gymone.nl/gyms/amstelveen/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 1331,
+    "canonical_name": "New Fit 24",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://www.newfit24bedburg.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 1353,
+    "canonical_name": "Das Studio",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://dasstudiomonheim.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 1383,
+    "canonical_name": "'t Afslankhuys",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.afslankhuys.be/nl/aartselaar",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 1386,
+    "canonical_name": "FAMILY fitness club",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.familyfitnessclublangenfeld.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 1403,
+    "canonical_name": "Kineto",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.kineto.club/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 1411,
+    "canonical_name": "Body-Gym",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://www.bodygym-duisburg.de/kontakt.html",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 1426,
+    "canonical_name": "Pulse Fitness",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.impulse-fitness-koeln.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 1438,
+    "canonical_name": "Visiolife",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.visio-life.de/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 1456,
+    "canonical_name": "XtraFit",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.xtrafit.de/mainz/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 1472,
+    "canonical_name": "ACHTER",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.achter.club/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 1493,
+    "canonical_name": "Sportcentrum VU",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://www.sportcentrum.vu.nl",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 1516,
+    "canonical_name": "fit4fun - Sport- und Fintessstudio",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://fit4fun-lemke.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 1519,
+    "canonical_name": "Trib3",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://trib3.es/estudios/espana/barcelona/balmes/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 1520,
+    "canonical_name": "Blue Fit",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.blue-fit.nl",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 1561,
+    "canonical_name": "Maxmove",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://maxmove-fitness.de/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 1587,
+    "canonical_name": "Release",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://release-antwerp.be",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 1589,
+    "canonical_name": "Fresh Fitness",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://fresh-fitness.nl",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 1601,
+    "canonical_name": "Allstar Fitness",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.allstar-fitness.de",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 1609,
+    "canonical_name": "Rite",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.rite-studios.com/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 1620,
+    "canonical_name": "Xtrafit",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://xtrafit.de/studios/k%C3%B6ln-zentrum",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 1628,
+    "canonical_name": "@My Gym",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.atmygymheers.com/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 1640,
+    "canonical_name": "Megaherz-Yoga",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://megaherz-yoga.com/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 1688,
+    "canonical_name": "Ashtanga Yoga Shala",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://ashtanga-yoga-shala.com",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 1723,
+    "canonical_name": "Spirit Fitness",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.spirit-fitness.be/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 1742,
+    "canonical_name": "Limitless",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://limit-less.de/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 1753,
+    "canonical_name": "LadyFit",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://myladyfit.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 1761,
+    "canonical_name": "BodyFit",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://body-fitness.be/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 1845,
+    "canonical_name": "Sporthal De Brug",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.sport050.nl/sportlocaties/sporthallen/sporthal-de-brug",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 1847,
+    "canonical_name": "Sportoase Philipssite",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.sportoase.be/nl/philipssite",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 1930,
+    "canonical_name": "Ter Eiken",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.tereiken.be/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 1973,
+    "canonical_name": "Fit In",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.fit-in-duesseldorf.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 2024,
+    "canonical_name": "Boulder",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.boulder.one/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 2131,
+    "canonical_name": "Sporthal De Kamp",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.binnensporthengelo.nl",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 2137,
+    "canonical_name": "Impuls Fitnessstudio",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://impuls-aktiv.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 2171,
+    "canonical_name": "MediFit",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.medifit-erftstadt.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 2224,
+    "canonical_name": "Zwembad de Waterlelie",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.esa-aalsmeer.nl/de-waterlelie",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 2232,
+    "canonical_name": "Sporthoeve",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.desporthoeve.nl",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 2279,
+    "canonical_name": "Bowling Stones",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.bowlingstones.be/bowling-oudenaarde-bowlen",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 2376,
+    "canonical_name": "Donnas Frauenfitness",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://www.donnas.de/bornheim",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 2394,
+    "canonical_name": "Tabonon",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://tabonon.nl",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 2406,
+    "canonical_name": "Z.L.T.B.",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.zltb.nl/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 2434,
+    "canonical_name": "Profit Gym",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://profitgym.nl/club/zwolle-dieze/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 2468,
+    "canonical_name": "Boks!",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://boksgouda.nl/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 2475,
+    "canonical_name": "Tribes",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.yourtribes.nl/studios/doezastraat",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 2497,
+    "canonical_name": "Bodytec",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.bodytecnootdorp.nl",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 2510,
+    "canonical_name": "YMCA",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://ymca-zutphen.nl/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 2518,
+    "canonical_name": "wellyou Fitness",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://wellyou.eu/fitnessstudios/itzehoe/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 2529,
+    "canonical_name": "Medi-Fit",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.medi-fit-doetinchem.nl",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 2558,
+    "canonical_name": "Klimbos Apeldoorn",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://klimbos.nl/locaties/apeldoorn/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 2567,
+    "canonical_name": "Zuiderpark",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.sporthallenapeldoorn.nl/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 2578,
+    "canonical_name": "Avanti",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://ttvavanti.nl",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 2612,
+    "canonical_name": "Life Fit",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.lifefit.nl",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 2622,
+    "canonical_name": "De Klimmuur",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.deklimmuur.nl/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 2665,
+    "canonical_name": "Medifit",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.medifit-hauenstein.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 2671,
+    "canonical_name": "De Fakkel",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.de-fakkel.nl",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 2727,
+    "canonical_name": "Padelife",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://padelife.nl/padelife-breda/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 2816,
+    "canonical_name": "Haguegym",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.imoves.nl",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 2824,
+    "canonical_name": "Mountain Network",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://mountain-network.nl/klimcentra/locaties/klimhal-dordrecht/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 2877,
+    "canonical_name": "Studentensportcentrum Eindhoven",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://ssceindhoven.tue.nl/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 2914,
+    "canonical_name": "HealthCity",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://healthcityzuid.nl/vught/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 2924,
+    "canonical_name": "C.O.V. Desto",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://desto-utrecht.nl/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 2932,
+    "canonical_name": "Sporthal De Bloemhof",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.esa-aalsmeer.nl/binnensportaccommodaties/sporthallen/de-bloemhof",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 2973,
+    "canonical_name": "Sportcentrum Polderpoort",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.polderpoort.nl/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 3073,
+    "canonical_name": "Plaza Sportz Coevorden",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.plazasportzcoevorden.nl/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 3313,
+    "canonical_name": "VOLEA Padel",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.volea.nl/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 3403,
+    "canonical_name": "Deimoshal",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://heerhugowaardsport.nl/heerhugowaardsport/horeca/deimoshal/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 3446,
+    "canonical_name": "Padel Power Club",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://padelpowerclub.nl/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 3581,
+    "canonical_name": "XXL Gym",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://xxlgym.nl",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 3702,
+    "canonical_name": "Fitclub",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://fitclub.nl/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 3718,
+    "canonical_name": "Olympic",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.olympicsportcentrum.nl",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 3723,
+    "canonical_name": "VV Hoogezand",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.vvhoogezand.nl/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 3787,
+    "canonical_name": "Ridderweide Tennis en Padel",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.ridderweide.nl/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 3801,
+    "canonical_name": "Sportpark Vechtzoom",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.svvechtzoom.nl/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 3861,
+    "canonical_name": "Stuntwerk",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://stuntwerk.de/koeln-muelheim/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 3881,
+    "canonical_name": "Laco",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.laco.eu/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 3925,
+    "canonical_name": "Tanzwerk Wesseling",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.tanzwerk-wesseling.de/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 3982,
+    "canonical_name": "Yoga Zeit",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.yogazeit-ab.de",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 4046,
+    "canonical_name": "De Dam",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://biljartdedam.nl/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 4066,
+    "canonical_name": "WingTsun Akademie",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.kungfuforlife.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 4079,
+    "canonical_name": "Neoliet",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.neoliet.nl/eindhoven-zuid/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 4147,
+    "canonical_name": "Jumpstyle",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://jumpstyleheerenveen.nl/home",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 4150,
+    "canonical_name": "Element Boulders",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://essen.element-boulders.de",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 4166,
+    "canonical_name": "Studio B",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://studio-b-borken.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 4222,
+    "canonical_name": "Aquarena",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://aquarena.fr/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 4230,
+    "canonical_name": "My Healthclub",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://myhealthclub.nl/heerhugowaard",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 4242,
+    "canonical_name": "Topsportcentrum De Koog",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.sportbedrijfzaanstad.nl",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 4252,
+    "canonical_name": "Boulder Gym Arnhem Rijnhal",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.climbingnetwork.nl/indoor/locatie/bouldergym-arnhem",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 4285,
+    "canonical_name": "Tai Chi Chuan",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://itcca.nl/delft",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 4338,
+    "canonical_name": "X TU Delft",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.tudelft.nl/x/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 4517,
+    "canonical_name": "Zwemkasteel Nienoord",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.landgoednienoord.nl/zwemkasteel/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 4562,
+    "canonical_name": "Padelcentrum Bol",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://padelcentrumbol.nl",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 4578,
+    "canonical_name": "Sportpark Calslagen",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://sportinaalsmeer.nl/accommodatie/sportpark-calslagen",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 4601,
+    "canonical_name": "Valley Padel",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://valleypadel.nl/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 4644,
+    "canonical_name": "Padelpoints",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://padelpoints.nl/locatie/hoofddorp/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 4741,
+    "canonical_name": "Adventure Valley",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.snowworld.com/zoetermeer/nl/klimpark",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 4783,
+    "canonical_name": "Autosportstadion De Polderputten",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.ovalracing-terapel.nl",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 4793,
+    "canonical_name": "Fit Five",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.fitfive.be/fitfive-bruxelles/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 4796,
+    "canonical_name": "Fire Gym",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://firegym.de/firegym-geesthacht",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 4799,
+    "canonical_name": "Fit & Fight",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.fit-and-fight.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 4842,
+    "canonical_name": "Garrincha",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://garrincha.be/locaties/gent/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 4930,
+    "canonical_name": "Sportmühle",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://www.sportmuehle.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 4938,
+    "canonical_name": "Just Padel Centre",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://justpadelcentre.nl/eersel/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 4947,
+    "canonical_name": "Padelclub Vlaardingen",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://padelclubrotterdam.nl/vlaardingen-indoor/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 5366,
+    "canonical_name": "Forest Domaine",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.forestdomaine.be",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 5547,
+    "canonical_name": "Grün-Weiß Vardingholt",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://gw-vardingholt.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 5665,
+    "canonical_name": "MHC Rosmalen",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.mhcrosmalen.nl",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 5669,
+    "canonical_name": "Punch",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.punch-fitness.de",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 5722,
+    "canonical_name": "Sport Oase",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.fitnessstudio-sport-oase-ochtrup.de",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 5776,
+    "canonical_name": "Universitair Sportcentrum",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.uscleiden.com",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 5806,
+    "canonical_name": "VV Lochuizen",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.lochuizen.nu",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 6001,
+    "canonical_name": "Studio 53",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.studio-53.de",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 6074,
+    "canonical_name": "Sportcentrum De Tumkens",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://reservaties.begijnendijk.be/?PageID=18&WindowID=94256&ItemID=3",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 6130,
+    "canonical_name": "Sportcenter Molenbos",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.sportcentermolenbos.be",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 6280,
+    "canonical_name": "all inclusive fitness",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.ai-fitness.de/studios/essen-kray",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 6324,
+    "canonical_name": "De Molen",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.antwerpen.be/info/52d5051d39d8a6ec798b46d7/openluchtzwembad-de-molen",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 6400,
+    "canonical_name": "Hondapark",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://www.hondapark.be",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 6416,
+    "canonical_name": "Sportpark Heikant",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://arendonk.be/vrije-tijd/sport/gemeentelijke-sportinfrastructuur/sportpark-heikant",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 6813,
+    "canonical_name": "Palaestra",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://palaestraasso.wixsite.com/ciss",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 7148,
+    "canonical_name": "Sint-Sebastiaansgilde",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://sint-sebastiaan-voort.jimdofree.com/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 7159,
+    "canonical_name": "Kölner Rugby Park",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.rugby-koeln.de",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 8169,
+    "canonical_name": "enni.sportpark",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.enni.de/sport-baeder/baeder/ennisportpark-rheinkamp.html",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 8465,
+    "canonical_name": "Sporthal Het Rooi 2",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.antwerpen.be/nl/info/sporthal-het-rooi-2-in-berchem",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 8631,
+    "canonical_name": "Tennisclub Grün-Weiss Geldern im Verein Eintracht e.V.",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.tennisclub-geldern.de/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 9572,
+    "canonical_name": "BattleKart",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.battlekart.com/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 9961,
+    "canonical_name": "LuxFit",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://luxfit.com/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 9968,
+    "canonical_name": "Domyos",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://club.domyos.fr/club-de-marcq",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 9993,
+    "canonical_name": "Corespa",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.corespa.fr/salle-de-sport-coignieres-suivi-personnalise-corespa/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 10008,
+    "canonical_name": "Easy Fit",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.easyfitpremium.be/vestiging/easy-fit-oostende/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 10009,
+    "canonical_name": "FitForm",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://fitform-lille.com/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 10015,
+    "canonical_name": "Billie Yoga",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.billieyoga.com/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 10031,
+    "canonical_name": "One",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.worthingbjj.co.uk/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 10037,
+    "canonical_name": "Alma",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.alma-studio.be",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 10050,
+    "canonical_name": "Newfit",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.newfit.be",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 10097,
+    "canonical_name": "De Loft",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.deloft-fitness.be/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 10150,
+    "canonical_name": "Harmony",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://harmony-forme.fr/harmony-sains-en-gohelle/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 10189,
+    "canonical_name": "Topfit",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.topfit.be/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 10266,
+    "canonical_name": "Fitness Zone",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://fitnesszone.ch/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 10302,
+    "canonical_name": "Starship Laser",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://starshiplaser.com",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 10390,
+    "canonical_name": "Base nautique",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.saint-quentin-tourisme.fr/sensations-sportives/1078-location-de-velos---vtt-a-la-base-nautique.html",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 10423,
+    "canonical_name": "Piscine municipale de Seclin",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.ville-seclin.fr/sport/piscine",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 10714,
+    "canonical_name": "L'atelier",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.lateliermorteau.fr/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 10758,
+    "canonical_name": "Stedelijk zwembad",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.nieuwpoort.be/zwembad",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 10768,
+    "canonical_name": "Twins Club",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.twinsclub.be/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 10971,
+    "canonical_name": "École de Pilotage",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.ualrt.org/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 11040,
+    "canonical_name": "Centre sportif Léo Lagrange",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://metropole.toulouse.fr/annuaire/piscine-leo-lagrange",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 11042,
+    "canonical_name": "Tennisland",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://www.tennisland-rebecq.be/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 11079,
+    "canonical_name": "Piscine du Blocry",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://csblocry.be/piscines/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 11092,
+    "canonical_name": "Centre Sportif Local",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.marche.be/sport/service-sport/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 11175,
+    "canonical_name": "Piscine Communale",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.vielsalm.be/bouger-et-decouvir-a-vielsalm/sport/piscines",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 11230,
+    "canonical_name": "Syrdall Schwemm",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.syrdall-schwemm.lu",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 11266,
+    "canonical_name": "Sportzentrum",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.tsv-kesternich.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 11714,
+    "canonical_name": "Vrijetijdscampus",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.houthulst.be/vrijetijdscampus",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 11798,
+    "canonical_name": "VenturiX Outdoortraining & Events",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.venturix.nl/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 12103,
+    "canonical_name": "The Hangar",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.the-hangar.be/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 12228,
+    "canonical_name": "Kraftpunkt",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://korb.kraft-punkt.de/index.html",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 12229,
+    "canonical_name": "Let‘s Go",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.letsgofitness.ch/de/club/uster/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 12233,
+    "canonical_name": "puls fit & wellnessclub",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.puls-stuttgart.de/stuttgart-mitte",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 12254,
+    "canonical_name": "Discount Fit",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.discountfit.ch/de/standorte/biel---bienne",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 12276,
+    "canonical_name": "One Fitness",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.onefitness-irun.com/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 12281,
+    "canonical_name": "Donna's Frauenfitness",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.donnas.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 12302,
+    "canonical_name": "Studio 45",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.sportclubstudio45.com/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 12339,
+    "canonical_name": "Studio Fitness",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.studio-fitness.fr",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 12397,
+    "canonical_name": "LIFE Swiss Health Club",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://life-swiss-health-club.ch/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 12404,
+    "canonical_name": "Fitness Treff",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.fitness-treff-dieburg.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 12406,
+    "canonical_name": "Medical Fitness",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.ortema-medicalfitness.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 12483,
+    "canonical_name": "California Fitness",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://california-fitness-goettingen.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 12495,
+    "canonical_name": "Be fit",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://www.befit-fitness.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 12499,
+    "canonical_name": "Top Sports",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://www.topsports-fitness.de",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 12513,
+    "canonical_name": "EMS Sportwelt",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://ems-sportwelt.ch/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 12518,
+    "canonical_name": "Énergie Forme",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.energieforme.net/clubs/energie-forme-sannois/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 12527,
+    "canonical_name": "Paradox",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.paradox.work/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 12545,
+    "canonical_name": "Yoga Samadhi",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://www.yogasamadhi.fr/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 12558,
+    "canonical_name": "20 Hours",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.20hours.it/index.php/sedi/milano-citta/club-panzeri",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 12561,
+    "canonical_name": "FitPur",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.fit-pur.eu/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 12588,
+    "canonical_name": "San-Fit",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://san-fit.com/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 12602,
+    "canonical_name": "ActivSports",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://www.activ-fitness-deutschland.de/karlsruhe.html",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 12611,
+    "canonical_name": "Power Play",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://powerplay-fitness.de/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 12647,
+    "canonical_name": "Venice Beach",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.venicebeach-fitness.de/studios/lifestyle-fitness/worms.html",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 12700,
+    "canonical_name": "EVO",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://evofitness.ch/evo-lucerne/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 12729,
+    "canonical_name": "Battling Club",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.battlingclubparis10.fr/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 12740,
+    "canonical_name": "Palestre Italiane",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.palestreitaliane.it/palestre/legnano/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 12749,
+    "canonical_name": "self-fitness.ch",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.self-fitness.ch/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 12777,
+    "canonical_name": "Tonic",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://tonicnet.it/i-nostri-club/milano-lambrate/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 12826,
+    "canonical_name": "So Good",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://sogoodfitness.com/salle-de-sport-toulon/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 12872,
+    "canonical_name": "Up2You",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.up2you-sport.com/clubs/saint-genis-pouilly/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 12893,
+    "canonical_name": "Moving",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://www.movingclamart.fr/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 12923,
+    "canonical_name": "Top Form",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://top-form-frankfurt.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 12959,
+    "canonical_name": "Yogang",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://yogang.fr/yogang-saint-jean-de-luz/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 12985,
+    "canonical_name": "Aktiv & Gesund",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://www.mainz-bleibt-fit.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 12989,
+    "canonical_name": "Esprit Fitness",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://www.espritfitness.ch",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 12997,
+    "canonical_name": "FactorGym",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.factorgym.de/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 13081,
+    "canonical_name": "R21",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.r21oleronlesporttoutenun.com/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 13096,
+    "canonical_name": "Fit 'n Fun",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.fitnfun-mainz.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 13107,
+    "canonical_name": "Fitness Plus",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.fitnessplus.ch/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 13129,
+    "canonical_name": "Personaltraining",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://www.md-Martindietz.de",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 13142,
+    "canonical_name": "Evo Fitness",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://evofitness.ch/evo-bern",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 13188,
+    "canonical_name": "Back2Motion",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.back2motion.de/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 13202,
+    "canonical_name": "Bodyworks",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.bodyworks-dresden.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 13207,
+    "canonical_name": "Les cercles de la forme",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.cerclesdelaforme.com/salle-de-sport/chatelet-4eme/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 13461,
+    "canonical_name": "Namasté",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://namaste-yoga-und-pilates.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 13470,
+    "canonical_name": "Progress",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.progress.swiss/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 13483,
+    "canonical_name": "Physioline",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.physioline.ch/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 13485,
+    "canonical_name": "Smart Body",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.smart-body.fr/centre-aquabike-paris-16",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 13559,
+    "canonical_name": "Powerhouse Gym",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.powerhousegym-stuttgart.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 13581,
+    "canonical_name": "Smartgym",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://smartgym.de/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 13609,
+    "canonical_name": "Pilatesfabrik",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.getraenkeinsel.ch",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 13682,
+    "canonical_name": "Jungle Gym",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://jungle-gym.fr/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 13700,
+    "canonical_name": "Soma Yoga",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://somayoga-freiburg.de/kontakt/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 13714,
+    "canonical_name": "Élancia",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.elancia.fr/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 13764,
+    "canonical_name": "Efit",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.efit.ch",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 13766,
+    "canonical_name": "América Fitness",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.americafitness.fr/venus-fitness/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 13844,
+    "canonical_name": "Elevate",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://elevate-fitness.fr/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 13916,
+    "canonical_name": "Fit4you",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://fit4you-fitness.de/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 13922,
+    "canonical_name": "Défi Gym",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.defigym-vernon.fr",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 13959,
+    "canonical_name": "Evolution Gym",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.evolutiongym.eu/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 13966,
+    "canonical_name": "Enjoy Fitness Club",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://studio-enjoy.de",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 14007,
+    "canonical_name": "Die Fitnesslounge",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.fitnesslounge57.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 14036,
+    "canonical_name": "Proxiforme",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.bidart.proxiforme.fr",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 14044,
+    "canonical_name": "TNT",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://tnt-fitness.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 14100,
+    "canonical_name": "Forum Fitness",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.nysc.ch/de/forum_fitness.html",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 14120,
+    "canonical_name": "24hours7days",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://www.24hours7days.it",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 14154,
+    "canonical_name": "Lloyds Gym",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.lloydsgym.com",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 14178,
+    "canonical_name": "Club Tenis Pamplona",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://www.club-tenis.com",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 14198,
+    "canonical_name": "La Salle du Temps",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://lasalledutemps.com",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 14203,
+    "canonical_name": "Gym Studio",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.gymstudio.fr/zumba-paris-parmentier.html",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 14214,
+    "canonical_name": "Anahata Yoga",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://anahatayogaheidelberg.com/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 14284,
+    "canonical_name": "L'Atelier du Yoga",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.atelier-du-yoga.fr/lyon/index.php",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 14368,
+    "canonical_name": "Fitactive",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.fitactive.it/i-club/biassono.php",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 14371,
+    "canonical_name": "Purfitness",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://purfitness.de/fitnessstudio-langenselbold#",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 14379,
+    "canonical_name": "Apollo Sporting Club",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://apollosportingclub.com/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 14383,
+    "canonical_name": "In Shape",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.inshape.de/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 14389,
+    "canonical_name": "Fit Seven Eleven",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://fitseveneleven.de/clubs/fitnessstudio-bad-nauheim/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 14406,
+    "canonical_name": "Sport Prinz",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.sportprinz-fitness.de/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 14411,
+    "canonical_name": "Physic Form",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://physicformbrest.com/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 14412,
+    "canonical_name": "IronBodyFit",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://testez-ironbodyfit.fr/pontarlier/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 14423,
+    "canonical_name": "Néo Forme",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://neoforme.jimdofree.com/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 14424,
+    "canonical_name": "Fitness Fabrik",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://www.fitnessfabrik-altenberg.de/index.php",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 14483,
+    "canonical_name": "Le Complexe",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://lecomplexefitness.fr",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 14546,
+    "canonical_name": "Espace Fitness",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://bulleo.epernay-agglo.fr/activites-forme",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 14584,
+    "canonical_name": "orange palestre",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.orangepalestre.it/palestra/lingotto/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 14646,
+    "canonical_name": "Corpore Sano Academy",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.corporesano-academy.fr",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 14808,
+    "canonical_name": "Total Fitness",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.total-fitness.es/#!",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 14937,
+    "canonical_name": "Fitdich",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.fitdich.ch/fitness-center-in-horw-luzern/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 15048,
+    "canonical_name": "GYMPOD",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://gympod.de/kirchehrenbach",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 15077,
+    "canonical_name": "Espace Fluidité",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.espacefluidite.fr/sport_en_salle_1/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 15112,
+    "canonical_name": "OJ Gyms",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://ojgyms.co.uk/axminster-gym/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 15118,
+    "canonical_name": "Forme Attitude",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.forme-attitude.net",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 15150,
+    "canonical_name": "Fitlife",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.fit-life.fr/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 15166,
+    "canonical_name": "Gymnasia",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.gymnasia.fr/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 15238,
+    "canonical_name": "Corpus Vitalis",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.corpusvitalis-brackenheim.com/grafenau",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 15249,
+    "canonical_name": "Sparta",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://spartasportcenter.com/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 15260,
+    "canonical_name": "JD Gyms",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.jdgyms.co.uk/gym/plymouth/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 15273,
+    "canonical_name": "Open Fit",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://open-fit.es",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 15290,
+    "canonical_name": "GET FIT",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.getfitgroup.de/studios/hunfeld",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 15296,
+    "canonical_name": "Metabolik",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://sportsclub.metabolik.fr/salle-de-sport-olivet/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 15304,
+    "canonical_name": "Circle Fitness Club",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.circlefitnessclub.de/fitnessstudio-marpingen",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 15344,
+    "canonical_name": "Wellness & Fitness",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.wellness-fitness-od.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 15351,
+    "canonical_name": "Fitness Life",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://fitnesslife-osterburken.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 15355,
+    "canonical_name": "Wefit club",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://wefit.club/club/salle-de-sport-vire/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 15368,
+    "canonical_name": "Sincronia Yoga",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.sincroniayoga.es",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 15406,
+    "canonical_name": "The Gym Group",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.thegoodgym.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 15462,
+    "canonical_name": "Forme Up",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.forme-up.fr",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 15628,
+    "canonical_name": "fitness express",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.fitnessexpress-clubs.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 15656,
+    "canonical_name": "Gymstar",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.gymstar.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 15710,
+    "canonical_name": "evo fitness",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://evofitness.ch",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 15739,
+    "canonical_name": "Yoga Praxis",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.yogapraxis-heidelberg.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 15926,
+    "canonical_name": "Lady Fit",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.soladyfit.fr/?soladyfit=1",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 15948,
+    "canonical_name": "Fitness Champ",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.fitnesschamp.club/mannheim",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 15955,
+    "canonical_name": "East-Side-Gym",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.eastsidegym.de/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 15960,
+    "canonical_name": "Arena Fitness",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://arena-fitness.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 15979,
+    "canonical_name": "wefit.club",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://wefit.club/club/salle-de-sport-guerande/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 16127,
+    "canonical_name": "Balméo",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.balmeo.fr/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 16168,
+    "canonical_name": "Yoga Place",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.yogaplace.fr/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 16233,
+    "canonical_name": "Fitness Forum",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://fitnessforum.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 16271,
+    "canonical_name": "Impuls Fitness",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.impuls-willstaett.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 16293,
+    "canonical_name": "DS Fit",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.ds-fit.de",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 16390,
+    "canonical_name": "Dany",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.dany-koblenz.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 16436,
+    "canonical_name": "Athletic Fitness",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://www.athleticfitness.eu/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 16452,
+    "canonical_name": "Urban Gym",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.salle-sport-tours.fr/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 16459,
+    "canonical_name": "Oxypark",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.masalledesport.com/salle/13021,oxypark-gournay-en-bray,club-de-fitness,gournay-en-bray,76220,fr",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 16476,
+    "canonical_name": "BH Live",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://bhliveactive.org.uk/littledown",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 16511,
+    "canonical_name": "Workout",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://workout-buehl.de",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 16605,
+    "canonical_name": "Day Night Sports",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://day-night-sports.de/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 16680,
+    "canonical_name": "Supreme Club",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://supreme-club.de",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 16720,
+    "canonical_name": "Gymnasium",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://gymnasium.pt/ginasio-faro/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 16760,
+    "canonical_name": "WHY.BE.FIT",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.whybefit.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 16788,
+    "canonical_name": "Switch Gym",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.switchgym.co.uk/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 16898,
+    "canonical_name": "Bannatyne Health Club",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.bannatyne.co.uk",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 16937,
+    "canonical_name": "Maddisons",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.madisonsfitness.com/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 17152,
+    "canonical_name": "Mas Pilates Studio",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://anep-pilates.com/centros-pilates/alicante/mas-pilates-studio_53",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 17252,
+    "canonical_name": "Time To Fitness 24",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.timetofitness24.com/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 17459,
+    "canonical_name": "Box360",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://xfhiit360.com/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 17472,
+    "canonical_name": "Fraile Gym",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.frailegym.com/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 17814,
+    "canonical_name": "Shaolin",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.shaolinspain.com/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 17821,
+    "canonical_name": "Poliesportiu Verge del Carme - Beteró",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://fhcv.es/betero/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 17855,
+    "canonical_name": "Natural Climb",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://naturalclimb.es/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 17906,
+    "canonical_name": "Paidesport Center",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.paidesportcenter.com/gimnasio_Bonaire",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 17917,
+    "canonical_name": "BeOne Fitness & Sport",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://beone.es/centers/lugo",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 17920,
+    "canonical_name": "Loop Fitness",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.loop-fitness.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 17930,
+    "canonical_name": "Shape Up",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.shapeupspain.com",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 17931,
+    "canonical_name": "MOVE",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://movestudio.pt/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 17932,
+    "canonical_name": "Hammer Box",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://hammerbox.es",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 17940,
+    "canonical_name": "Sinergym",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://synergym.es/torrejon/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 17954,
+    "canonical_name": "JAF Club",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.jafclub.pt",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 18068,
+    "canonical_name": "BeFit",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.be-fit.pt/befit/leiria",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 18070,
+    "canonical_name": "Go Gym",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://gogym.pt/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 18270,
+    "canonical_name": "Maxx Gym",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://maxxgym-nb.de",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 18333,
+    "canonical_name": "Gimnasio Vigor",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://gimnasiovigor.com/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 18383,
+    "canonical_name": "Time To Fitness",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://ttf.pt",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 18418,
+    "canonical_name": "Henko",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://henkotrainer.wodbuster.com/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 18479,
+    "canonical_name": "Prime",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.prime-sportclub.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 18581,
+    "canonical_name": "Quare Saúde e Rendemento",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://quaresr.es",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 18666,
+    "canonical_name": "Zona Zero",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://zonazerocentro.com",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 18859,
+    "canonical_name": "Esportiu la Piscina. Centre Municipal d'Esport i Salut",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.parcdelgarraf.cat/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 19068,
+    "canonical_name": "Bekoerrota Kiroldegia",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.lezo.eus/eu/kirola/bekoerrota-kiroldegia",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 19162,
+    "canonical_name": "Sangha Yoga",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.yogatorrejon.com/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 19174,
+    "canonical_name": "Olimpic Club",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://olimpic-club.es",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 19414,
+    "canonical_name": "Club de Esgrima de Madrid",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.clubdeesgrimademadrid.com/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 19430,
+    "canonical_name": "Punto de Nieve Santa Inés",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://www.puntodenievesantaines.com",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 19672,
+    "canonical_name": "UrbanSoccer",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.urbansoccer.fr/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 19782,
+    "canonical_name": "Polideportivo Maria de Huerva",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://www.mariadehuerva.es/areas/deportes/centro-deportivo-municipal-0",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 19797,
+    "canonical_name": "Base de Loisirs",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://foyer-stpaul.fr/base.php",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 19852,
+    "canonical_name": "Polideportivo María de Villota",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://mvillotabutarque.es/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 20012,
+    "canonical_name": "Cangas Aventura",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.cangasaventura.com/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 20033,
+    "canonical_name": "Wanted Park",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.laser-game-66.fr/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 20100,
+    "canonical_name": "Laser Quest",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://tarbes.laserquest.fr/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 20387,
+    "canonical_name": "Campo Base",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://centroescalada.es",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 20659,
+    "canonical_name": "Tiro de Pichón",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://gorrion.club/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 20855,
+    "canonical_name": "Pazo dos Deportes",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.coruna.gal/deportes/gl/instalacions/instalacions-deportivas-municipais/detalle-instalacions-deportivas/pazo-dos-deportes-da-cidade-deportiva-de-riazor/entidad/1149056036808",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 21171,
+    "canonical_name": "Complexo Desportivo Paulo Pinto",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.cm-sjm.pt/pt/espacos-desportivos-complexo-desportivo-paulo-pinto",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 21255,
+    "canonical_name": "Complexe de Pelote",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://www.pau.fr/384-complexe-de-pelote.htm",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 21303,
+    "canonical_name": "Piscine Municipale des Ramiers",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.mairie-blagnac.fr/piscine-des-ramiers-et-activites",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 22301,
+    "canonical_name": "Centro Especializado de Alto Rendimiento Río Esgueva",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.centrodeportivorioesgueva.com/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 22828,
+    "canonical_name": "Piscina de Canterac",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.valladolid.es/es/ayuntamiento/cartas-servicios/piscinas-climatizadas/piscina-canterac",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 23923,
+    "canonical_name": "Piscina Coberta Municipal",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://www.piscinalcudia.com/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 24444,
+    "canonical_name": "Pavelló Olímpic Municipal",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.reusesport.cat/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 24729,
+    "canonical_name": "Piscine Intercommunale",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://axat.fr/piscine-intercommunale/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 24794,
+    "canonical_name": "Inacua",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.inacua.com/torrejon-de-ardoz/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 25642,
+    "canonical_name": "Move & Go",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://moveandgo.es/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 26324,
+    "canonical_name": "San Martin futbol zelaia",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.vitoria-gasteiz.org/wb021/was/contenidoAction.do?idioma=es&uid=entuo_8_5_2",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 27397,
+    "canonical_name": "Ciudad Deportiva Fundación Málaga Club de Fútbol",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.malagacf.com",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 28456,
+    "canonical_name": "Positiv",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.positiv-gruppe.de/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 28462,
+    "canonical_name": "Future Fit",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.myfuturefit.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 28486,
+    "canonical_name": "Gym 80",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.gym80-bassum.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 28521,
+    "canonical_name": "Bavarese",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.fitnessclub-kolbermoor.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 28522,
+    "canonical_name": "FitStop",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.fit-stop.com/fitnessstudio-unterschleissheim/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 28524,
+    "canonical_name": "medius",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.medius-fitness.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 28532,
+    "canonical_name": "My Time Fitness",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://mytime-fitness-brv.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 28536,
+    "canonical_name": "FittiCO",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://fitti.co/studio-dresden-mitte/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 28541,
+    "canonical_name": "SunYoga",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://sunyoga.de",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 28629,
+    "canonical_name": "Leibwächter Fitness",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.leibwaechter.fitness/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 28634,
+    "canonical_name": "Gesundheitszentrum Niedermeier",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.gesundheitszentrum-niedermeier.com/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 28706,
+    "canonical_name": "Three Boons Yoga",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.threeboonsyoga.de/mitte",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 28730,
+    "canonical_name": "Sport- & Freizeithaus Bad Doberan",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://sport-freizeithaus.de/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 28769,
+    "canonical_name": "Localfit",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.localfit.eu",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 28820,
+    "canonical_name": "Lifestyle Ladies",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.lifestyleladies.com/standorte/studiodetails/238/83059-kolbermoor-rosenheimer-strasse-22/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 28826,
+    "canonical_name": "Yogaschule Lebensbaum",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.treff-lebensbaum.de/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 28827,
+    "canonical_name": "Speedfitness",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://speedfitness-bruckmuehl.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 28832,
+    "canonical_name": "Fitness Company",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://fitness-company.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 28845,
+    "canonical_name": "Formel 4",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.formel4-fitness.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 28847,
+    "canonical_name": "20one",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.20one.de/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 28872,
+    "canonical_name": "BodyImpuls",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://bodyimpuls-ems.de",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 28884,
+    "canonical_name": "LEXFIT",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://lex-fit.com",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 28905,
+    "canonical_name": "Stromtown",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://www.stromtown.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 28908,
+    "canonical_name": "Top-Fit",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://topfit-club.de/bobingen/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 28909,
+    "canonical_name": "Balance Fitness",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://balance-fitness.de/kappeln/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 28919,
+    "canonical_name": "The Sanctuary",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://thesanctuary.me/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 28938,
+    "canonical_name": "Muckibude",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.muckibude-forchheim.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 28941,
+    "canonical_name": "Balanx Fitness",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.balanxfitness.de/barth",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 28954,
+    "canonical_name": "High5",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.high5.com",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 28958,
+    "canonical_name": "Joy Fitness",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://joyfitness.de/pinneberg/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 28993,
+    "canonical_name": "TheosGym",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.theosgym.de/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 29002,
+    "canonical_name": "Megafit",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://megafit-fitness.de/megafit-dresden/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 29017,
+    "canonical_name": "Moveo",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://www.moveo-bali.de",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 29030,
+    "canonical_name": "iFitnessClub",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.ifitnessclub.de/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 29063,
+    "canonical_name": "Yellow Yoga",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://yellow-yoga.com/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 29070,
+    "canonical_name": "Fit & Fun Fitnessstudio",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://fit-fun-lorch.de",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 29104,
+    "canonical_name": "Peace Yoga Berlin",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.peaceyoga.de",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 29112,
+    "canonical_name": "Sportspaß",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://sportspass.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 29114,
+    "canonical_name": "Michael K Fitness",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://mk-clubs.com/fitness-bad-woerishofen/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 29151,
+    "canonical_name": "La Vida",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.fitnessoase-la-vida.de",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 29278,
+    "canonical_name": "Yoga Glück",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.yoga-familie.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 29289,
+    "canonical_name": "Mein Fitness Club",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.meinfitnessclub.com/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 29296,
+    "canonical_name": "Argo Athletics",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.argo-athletics.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 29311,
+    "canonical_name": "LuckyFitness",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.luckyfitness.de/magdeburg",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 29313,
+    "canonical_name": "Fitness Future",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://www.fitness-future-goettingen.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 29327,
+    "canonical_name": "hello fit",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.hellofit.de/studios/kempten",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 29393,
+    "canonical_name": "Luft",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://luft-studio.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 29452,
+    "canonical_name": "Gym4us",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://gym4us.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 29484,
+    "canonical_name": "KÖRPERFORMEN",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.körperformen.com/standorte/ems-training-hagen/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 29523,
+    "canonical_name": "SportBox",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.sportbox-reutte.at/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 29540,
+    "canonical_name": "redfit",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.redfit-fitness.de/standort/redfit-wittmund",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 29547,
+    "canonical_name": "TopFit 24",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.topfit-24.net/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 29594,
+    "canonical_name": "Golden Gym",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.golden-gym.eu/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 29645,
+    "canonical_name": "sportsisters",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.sportsisters.de/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 29656,
+    "canonical_name": "AROfit",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://www.aro-fit.de",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 29672,
+    "canonical_name": "Dream Fit",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.dreamfit.cz",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 29675,
+    "canonical_name": "Mediana",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.mediana-zentrum.de",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 29677,
+    "canonical_name": "FitVital",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://fitvital-lieweke.de/index.html",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 29701,
+    "canonical_name": "FIT STAR",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.fit-star.de/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 29764,
+    "canonical_name": "Perfect Fitness 24/7",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://perfect-fitness-24-7.de/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 29819,
+    "canonical_name": "Family-Fitness",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.family-fitness-bernburg.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 29822,
+    "canonical_name": "Kundalini Yogazentrum",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://www.yoga-zentrum-bernburg.jimdo.com/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 29826,
+    "canonical_name": "EMS Studio",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.emsstudio-neusaess.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 29837,
+    "canonical_name": "Mitterlehner Training",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.mitterlehner-training.com/standorte/voecklamarkt",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 29955,
+    "canonical_name": "schnell in form",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://schnellinform-baiersdorf.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 30153,
+    "canonical_name": "fitnesspoint",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://fitnesspoints.de/standorte-hilpoltstein",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 30195,
+    "canonical_name": "Gesundheitszentrum bleib fit",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.bleib-fit-gesundheit.de",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 30213,
+    "canonical_name": "Your Classic Gym",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.your-classic-gym.de",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 30264,
+    "canonical_name": "FitYou",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://fityou-fitness.de/fityou-augsburg/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 30294,
+    "canonical_name": "Wellvitale",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://wellvitale-jueterbog.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 30353,
+    "canonical_name": "UNIfit",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.uni-kassel.de/einrichtung/hochschulsport/unifit",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 30382,
+    "canonical_name": "Yoga mit Stephan Evers",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://yoga.stephanevers.de",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 30466,
+    "canonical_name": "Die Fitnessbox",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://die-fitnessbox.de/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 30478,
+    "canonical_name": "Fit forever Fitness",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://fitforeverfitness.de/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 30625,
+    "canonical_name": "DrFit",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://drfit.cz/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 30633,
+    "canonical_name": "EMS concepts",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.emsconcepts-seelze.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 30684,
+    "canonical_name": "Sportstudio Bad Waldsee",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://muscle-palast.jimdosite.com/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 30691,
+    "canonical_name": "Beyond",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://beyondbln.de",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 30773,
+    "canonical_name": "Aktiv & Vital",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.aktivundvital-sportstudio.de/d/index.html",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 30814,
+    "canonical_name": "Feelgood",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.feelgood.eu/at/center/feelgood-germering",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 30851,
+    "canonical_name": "Unlimited Fitness",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://unlimited-fit.de",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 30933,
+    "canonical_name": "Tělocvična",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.skcvondrejove.cz/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 30950,
+    "canonical_name": "All Time Fitness",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://all-time-fitness.de/studios/zeitz",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 31196,
+    "canonical_name": "Life Gym",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://lifegym.de/stockdorf1/",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 31254,
+    "canonical_name": "Gesundheitszentrum Schmorditz",
+    "location_count": 2,
+    "competitive_classification": "unknown",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://gesundheitszentrum-schmorditz.de/",
+    "n_locations_with_this_domain": 2
+  }
+]

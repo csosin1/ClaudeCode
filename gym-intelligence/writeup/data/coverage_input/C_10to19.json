@@ -1,0 +1,352 @@
+[
+  {
+    "chain_id": 10333,
+    "canonical_name": "Piscine municipale",
+    "location_count": 19,
+    "competitive_classification": "non_competitor",
+    "ownership_type": "public",
+    "price_tier": "unknown",
+    "url": "https://mairie.targasonne.fr/piscine-communale/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 12240,
+    "canonical_name": "Gigafit",
+    "location_count": 19,
+    "competitive_classification": "direct_competitor",
+    "ownership_type": "private",
+    "price_tier": "mid_market",
+    "url": "https://gigafit.fr/club/malakoff",
+    "n_locations_with_this_domain": 9
+  },
+  {
+    "chain_id": 12646,
+    "canonical_name": "Keep Cool",
+    "location_count": 19,
+    "competitive_classification": "direct_competitor",
+    "ownership_type": "private",
+    "price_tier": "budget",
+    "url": "https://www.keepcool.fr/",
+    "n_locations_with_this_domain": 8
+  },
+  {
+    "chain_id": 24252,
+    "canonical_name": "Campo Municipal de Fútbol",
+    "location_count": 19,
+    "competitive_classification": "non_competitor",
+    "ownership_type": "public",
+    "price_tier": "unknown",
+    "url": "https://www.losardelavera.com/web/index.php/el-municipio/instalaciones-municipales/28-campo-municipal-de-futbol",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 13052,
+    "canonical_name": "Fitomat",
+    "location_count": 18,
+    "competitive_classification": "unknown",
+    "ownership_type": "private",
+    "price_tier": "unknown",
+    "url": "https://fitomat.club",
+    "n_locations_with_this_domain": 9
+  },
+  {
+    "chain_id": 782,
+    "canonical_name": "Body Street",
+    "location_count": 17,
+    "competitive_classification": "non_competitor",
+    "ownership_type": "private",
+    "price_tier": "premium",
+    "url": "https://www.bodystreet.com",
+    "n_locations_with_this_domain": 3
+  },
+  {
+    "chain_id": 12548,
+    "canonical_name": "FitActive",
+    "location_count": 17,
+    "competitive_classification": "direct_competitor",
+    "ownership_type": "private",
+    "price_tier": "budget",
+    "url": "https://www.fitactive.it/",
+    "n_locations_with_this_domain": 10
+  },
+  {
+    "chain_id": 78,
+    "canonical_name": "Happy Bodies",
+    "location_count": 15,
+    "competitive_classification": "direct_competitor",
+    "ownership_type": "private",
+    "price_tier": "mid_market",
+    "url": "https://www.happybodies.nl",
+    "n_locations_with_this_domain": 14
+  },
+  {
+    "chain_id": 14095,
+    "canonical_name": "Fit Star",
+    "location_count": 15,
+    "competitive_classification": "direct_competitor",
+    "ownership_type": "private",
+    "price_tier": "budget",
+    "url": "https://www.fit-star.de/",
+    "n_locations_with_this_domain": 10
+  },
+  {
+    "chain_id": 339,
+    "canonical_name": "Fit4lady",
+    "location_count": 14,
+    "competitive_classification": "non_competitor",
+    "ownership_type": "private",
+    "price_tier": "unknown",
+    "url": "https://fit4lady.nl/",
+    "n_locations_with_this_domain": 14
+  },
+  {
+    "chain_id": 705,
+    "canonical_name": "David Lloyd",
+    "location_count": 14,
+    "competitive_classification": "non_competitor",
+    "ownership_type": "private",
+    "price_tier": "premium",
+    "url": "https://www.davidlloyd.nl",
+    "n_locations_with_this_domain": 4
+  },
+  {
+    "chain_id": 1734,
+    "canonical_name": "Kraftwerk",
+    "location_count": 14,
+    "competitive_classification": "direct_competitor",
+    "ownership_type": "private",
+    "price_tier": "budget",
+    "url": "https://www.kraftwerk-fitnessclub.de/",
+    "n_locations_with_this_domain": 3
+  },
+  {
+    "chain_id": 12320,
+    "canonical_name": "Body Hit",
+    "location_count": 14,
+    "competitive_classification": "non_competitor",
+    "ownership_type": "private",
+    "price_tier": "premium",
+    "url": "https://bodyhit.fr/",
+    "n_locations_with_this_domain": 5
+  },
+  {
+    "chain_id": 17181,
+    "canonical_name": "Fitness Hut",
+    "location_count": 14,
+    "competitive_classification": "direct_competitor",
+    "ownership_type": "private",
+    "price_tier": "mid_market",
+    "url": "https://www.fitnesshut.pt/",
+    "n_locations_with_this_domain": 3
+  },
+  {
+    "chain_id": 28497,
+    "canonical_name": "wellyou",
+    "location_count": 14,
+    "competitive_classification": "direct_competitor",
+    "ownership_type": "private",
+    "price_tier": "mid_market",
+    "url": "https://wellyou.eu/",
+    "n_locations_with_this_domain": 10
+  },
+  {
+    "chain_id": 825,
+    "canonical_name": "terra sports",
+    "location_count": 13,
+    "competitive_classification": "non_competitor",
+    "ownership_type": "private",
+    "price_tier": "premium",
+    "url": "https://www.terra-sports.de",
+    "n_locations_with_this_domain": 9
+  },
+  {
+    "chain_id": 12263,
+    "canonical_name": "VeniceBeach",
+    "location_count": 13,
+    "competitive_classification": "direct_competitor",
+    "ownership_type": "private",
+    "price_tier": "mid_market",
+    "url": "https://www.venicebeach-fitness.de/clubs/lifestyle-fitness/speyer/",
+    "n_locations_with_this_domain": 7
+  },
+  {
+    "chain_id": 835,
+    "canonical_name": "Terra Sports",
+    "location_count": 12,
+    "competitive_classification": "non_competitor",
+    "ownership_type": "private",
+    "price_tier": "unknown",
+    "url": "https://www.terra-sports.de",
+    "n_locations_with_this_domain": 5
+  },
+  {
+    "chain_id": 1699,
+    "canonical_name": "All Inclusive Fitness",
+    "location_count": 12,
+    "competitive_classification": "direct_competitor",
+    "ownership_type": "private",
+    "price_tier": "budget",
+    "url": "https://www.ai-fitness.de/",
+    "n_locations_with_this_domain": 9
+  },
+  {
+    "chain_id": 2742,
+    "canonical_name": "Peakz Padel",
+    "location_count": 12,
+    "competitive_classification": "non_competitor",
+    "ownership_type": "private",
+    "price_tier": "unknown",
+    "url": "https://www.peakzpadel.nl/locaties/nijmegen",
+    "n_locations_with_this_domain": 12
+  },
+  {
+    "chain_id": 17126,
+    "canonical_name": "Element",
+    "location_count": 12,
+    "competitive_classification": "direct_competitor",
+    "ownership_type": "private",
+    "price_tier": "budget",
+    "url": "https://elementgyms.pt/gyms/foz/",
+    "n_locations_with_this_domain": 12
+  },
+  {
+    "chain_id": 17401,
+    "canonical_name": "Solinca Classic",
+    "location_count": 12,
+    "competitive_classification": "non_competitor",
+    "ownership_type": "private",
+    "price_tier": "unknown",
+    "url": "https://www.solinca.pt/solinca-ginasios/maia/",
+    "n_locations_with_this_domain": 12
+  },
+  {
+    "chain_id": 1348,
+    "canonical_name": "fitbox",
+    "location_count": 11,
+    "competitive_classification": "non_competitor",
+    "ownership_type": "private",
+    "price_tier": "premium",
+    "url": "https://www.fitbox.de",
+    "n_locations_with_this_domain": 3
+  },
+  {
+    "chain_id": 1775,
+    "canonical_name": "Energym",
+    "location_count": 11,
+    "competitive_classification": "not_a_chain",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "http://www.energymlaborieux.fr",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 2611,
+    "canonical_name": "Plaza Padel",
+    "location_count": 11,
+    "competitive_classification": "non_competitor",
+    "ownership_type": "private",
+    "price_tier": "unknown",
+    "url": "https://www.plazapadel.com/sneek/",
+    "n_locations_with_this_domain": 11
+  },
+  {
+    "chain_id": 10178,
+    "canonical_name": "Hall Omnisports",
+    "location_count": 11,
+    "competitive_classification": "non_competitor",
+    "ownership_type": "public",
+    "price_tier": "unknown",
+    "url": "https://www.nassogne.be/fr/ma-commune/services-communaux/gestion-salles/salles-communales/hall-omnisports-nassogne",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 11457,
+    "canonical_name": "Happy Fit",
+    "location_count": 11,
+    "competitive_classification": "unknown",
+    "ownership_type": "private",
+    "price_tier": "unknown",
+    "url": "https://happy-fit-studios.de",
+    "n_locations_with_this_domain": 3
+  },
+  {
+    "chain_id": 1090,
+    "canonical_name": "Injoy",
+    "location_count": 10,
+    "competitive_classification": "non_competitor",
+    "ownership_type": "private",
+    "price_tier": "unknown",
+    "url": "https://www.injoy-gym-swim.de/moenchengladbach",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 2576,
+    "canonical_name": "Fitness",
+    "location_count": 10,
+    "competitive_classification": "non_competitor",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.vert-marine.com/centreaquatiqueintercommunalpvm/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 10118,
+    "canonical_name": "La Salle",
+    "location_count": 10,
+    "competitive_classification": "unknown",
+    "ownership_type": "private",
+    "price_tier": "unknown",
+    "url": "https://www.chameleonfitness.com/parc-orly-rungis",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 10144,
+    "canonical_name": "Iron Bodyfit",
+    "location_count": 10,
+    "competitive_classification": "non_competitor",
+    "ownership_type": "private",
+    "price_tier": "unknown",
+    "url": "https://ironbodyfit.com",
+    "n_locations_with_this_domain": 6
+  },
+  {
+    "chain_id": 12628,
+    "canonical_name": "Planète Fitness",
+    "location_count": 10,
+    "competitive_classification": "direct_competitor",
+    "ownership_type": "private",
+    "price_tier": "budget",
+    "url": "https://www.club-planetefitness.com/salle-de-sport/Nimes-Severine",
+    "n_locations_with_this_domain": 5
+  },
+  {
+    "chain_id": 12935,
+    "canonical_name": "Urban Fitness",
+    "location_count": 10,
+    "competitive_classification": "non_competitor",
+    "ownership_type": "private",
+    "price_tier": "unknown",
+    "url": "https://www.urbanfitness.it/centri/varese-opening-soon/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 19922,
+    "canonical_name": "Pabellón Polideportivo Municipal",
+    "location_count": 10,
+    "competitive_classification": "non_competitor",
+    "ownership_type": "public",
+    "price_tier": "unknown",
+    "url": "http://calzadadevaldunciel.es/pabellon-polideportivo/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 28586,
+    "canonical_name": "Form Factory",
+    "location_count": 10,
+    "competitive_classification": "direct_competitor",
+    "ownership_type": "private",
+    "price_tier": "mid_market",
+    "url": "https://www.formfactory.cz/klub/fitness-eden/",
+    "n_locations_with_this_domain": 7
+  }
+]

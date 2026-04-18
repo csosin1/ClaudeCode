@@ -1,0 +1,142 @@
+[
+  {
+    "chain_id": 13,
+    "canonical_name": "Basic-Fit",
+    "location_count": 1153,
+    "competitive_classification": "direct_competitor",
+    "ownership_type": "private",
+    "price_tier": "budget",
+    "url": "https://basic-fit.com",
+    "n_locations_with_this_domain": 543
+  },
+  {
+    "chain_id": 60,
+    "canonical_name": "CrossFit",
+    "location_count": 538,
+    "competitive_classification": "non_competitor",
+    "ownership_type": "private",
+    "price_tier": "unknown",
+    "url": "https://www.facebook.com/531002430306596",
+    "n_locations_with_this_domain": 5
+  },
+  {
+    "chain_id": 11,
+    "canonical_name": "clever fit",
+    "location_count": 344,
+    "competitive_classification": "direct_competitor",
+    "ownership_type": "private",
+    "price_tier": "budget",
+    "url": "http://clever-fit.com",
+    "n_locations_with_this_domain": 171
+  },
+  {
+    "chain_id": 363,
+    "canonical_name": "Fitness Park",
+    "location_count": 322,
+    "competitive_classification": "direct_competitor",
+    "ownership_type": "private",
+    "price_tier": "budget",
+    "url": "http://fitnesspark.fr",
+    "n_locations_with_this_domain": 86
+  },
+  {
+    "chain_id": 19211,
+    "canonical_name": "Piscina Municipal",
+    "location_count": 299,
+    "competitive_classification": "non_competitor",
+    "ownership_type": "public",
+    "price_tier": "budget",
+    "url": "https://www.casarrubuelos.es/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 10012,
+    "canonical_name": "L'Orange Bleue",
+    "location_count": 212,
+    "competitive_classification": "direct_competitor",
+    "ownership_type": "private",
+    "price_tier": "budget",
+    "url": "http://Lorangebleue.fr",
+    "n_locations_with_this_domain": 104
+  },
+  {
+    "chain_id": 26,
+    "canonical_name": "McFit",
+    "location_count": 199,
+    "competitive_classification": "direct_competitor",
+    "ownership_type": "private",
+    "price_tier": "budget",
+    "url": "http://mcfit.com",
+    "n_locations_with_this_domain": 107
+  },
+  {
+    "chain_id": 17,
+    "canonical_name": "Fico Fitness",
+    "location_count": 184,
+    "competitive_classification": "direct_competitor",
+    "ownership_type": "private",
+    "price_tier": "unknown",
+    "url": "https://www.fitnessfirst.de",
+    "n_locations_with_this_domain": 99
+  },
+  {
+    "chain_id": 9971,
+    "canonical_name": "KeepCool",
+    "location_count": 130,
+    "competitive_classification": "direct_competitor",
+    "ownership_type": "private",
+    "price_tier": "budget",
+    "url": "http://keepcool.fr",
+    "n_locations_with_this_domain": 60
+  },
+  {
+    "chain_id": 6,
+    "canonical_name": "Kieser Training",
+    "location_count": 127,
+    "competitive_classification": "non_competitor",
+    "ownership_type": "private",
+    "price_tier": "premium",
+    "url": "http://www.kieser-training.de/",
+    "n_locations_with_this_domain": 43
+  },
+  {
+    "chain_id": 18,
+    "canonical_name": "SportCity",
+    "location_count": 125,
+    "competitive_classification": "direct_competitor",
+    "ownership_type": "private",
+    "price_tier": "mid_market",
+    "url": "https://www.sportcity.nl/ede",
+    "n_locations_with_this_domain": 122
+  },
+  {
+    "chain_id": 20,
+    "canonical_name": "Anytime Fitness",
+    "location_count": 114,
+    "competitive_classification": "direct_competitor",
+    "ownership_type": "private",
+    "price_tier": "mid_market",
+    "url": "https://www.anytimefitness.nl",
+    "n_locations_with_this_domain": 35
+  },
+  {
+    "chain_id": 758,
+    "canonical_name": "Bodystreet",
+    "location_count": 113,
+    "competitive_classification": "non_competitor",
+    "ownership_type": "private",
+    "price_tier": "premium",
+    "url": "https://www.bodystreet.com",
+    "n_locations_with_this_domain": 65
+  },
+  {
+    "chain_id": 108,
+    "canonical_name": "Mrs. Sporty",
+    "location_count": 102,
+    "competitive_classification": "non_competitor",
+    "ownership_type": "private",
+    "price_tier": "unknown",
+    "url": "https://mrssporty.de/",
+    "n_locations_with_this_domain": 42
+  }
+]

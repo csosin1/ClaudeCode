@@ -1,0 +1,140 @@
+{
+  "bins": {
+    "A_100plus": {
+      "label": "100+",
+      "db_total_chains_in_bin": 18,
+      "db_total_gyms_in_bin": 4639,
+      "chains_with_website": 14,
+      "chains_attempted": 14,
+      "valid_hits": 3,
+      "invalid_hits": 0,
+      "metrics": {
+        "n_valid": 3,
+        "mean_coverage_pct": 105.1,
+        "median_coverage_pct": 62.7,
+        "p10": 50.7,
+        "p25": 50.7,
+        "p75": 202.0,
+        "p90": 202.0,
+        "aggregate_live_sum": 800,
+        "aggregate_ohsome_sum": 605
+      },
+      "estimated_true_gyms_in_bin_median_method": 7398,
+      "estimated_true_gyms_in_bin_aggregate_method": 6134
+    },
+    "B_20to99": {
+      "label": "20-99",
+      "db_total_chains_in_bin": 56,
+      "db_total_gyms_in_bin": 2254,
+      "chains_with_website": 45,
+      "chains_attempted": 45,
+      "valid_hits": 10,
+      "invalid_hits": 1,
+      "metrics": {
+        "n_valid": 10,
+        "mean_coverage_pct": 66.9,
+        "median_coverage_pct": 50.0,
+        "p10": 9.3,
+        "p25": 22.3,
+        "p75": 93.6,
+        "p90": 190.0,
+        "aggregate_live_sum": 1438,
+        "aggregate_ohsome_sum": 529
+      },
+      "estimated_true_gyms_in_bin_median_method": 4508,
+      "estimated_true_gyms_in_bin_aggregate_method": 6127
+    },
+    "C_10to19": {
+      "label": "10-19",
+      "db_total_chains_in_bin": 61,
+      "db_total_gyms_in_bin": 822,
+      "chains_with_website": 35,
+      "chains_attempted": 35,
+      "valid_hits": 6,
+      "invalid_hits": 0,
+      "metrics": {
+        "n_valid": 6,
+        "mean_coverage_pct": 54.4,
+        "median_coverage_pct": 75.0,
+        "p10": 10.0,
+        "p25": 11.3,
+        "p75": 100.0,
+        "p90": 114.3,
+        "aggregate_live_sum": 608,
+        "aggregate_ohsome_sum": 120
+      },
+      "estimated_true_gyms_in_bin_median_method": 1096,
+      "estimated_true_gyms_in_bin_aggregate_method": 4164
+    },
+    "D_4to9": {
+      "label": "4-9",
+      "db_total_chains_in_bin": 256,
+      "db_total_gyms_in_bin": 1386,
+      "chains_with_website": 167,
+      "chains_attempted": 167,
+      "valid_hits": 15,
+      "invalid_hits": 6,
+      "metrics": {
+        "n_valid": 15,
+        "mean_coverage_pct": 39.2,
+        "median_coverage_pct": 33.3,
+        "p10": 13.2,
+        "p25": 16.0,
+        "p75": 50.0,
+        "p90": 83.3,
+        "aggregate_live_sum": 572,
+        "aggregate_ohsome_sum": 124
+      },
+      "estimated_true_gyms_in_bin_median_method": 4162,
+      "estimated_true_gyms_in_bin_aggregate_method": 6393
+    },
+    "E_2to3": {
+      "label": "2-3",
+      "db_total_chains_in_bin": 1209,
+      "db_total_gyms_in_bin": 2657,
+      "chains_with_website": 635,
+      "chains_attempted": 635,
+      "valid_hits": 29,
+      "invalid_hits": 12,
+      "metrics": {
+        "n_valid": 29,
+        "mean_coverage_pct": 39.0,
+        "median_coverage_pct": 25.0,
+        "p10": 5.8,
+        "p25": 10.0,
+        "p75": 45.5,
+        "p90": 83.3,
+        "aggregate_live_sum": 583,
+        "aggregate_ohsome_sum": 119
+      },
+      "estimated_true_gyms_in_bin_median_method": 10628,
+      "estimated_true_gyms_in_bin_aggregate_method": 13017
+    },
+    "F_1": {
+      "label": "1 (single-location)",
+      "db_total_chains_in_bin": 29997,
+      "db_total_gyms_in_bin": 29997,
+      "note": "Single-location entries: user directive applies E_2to3 (2-3 chain) coverage as the estimate for single-location completeness. No direct measurement.",
+      "applied_coverage_from": "E_2to3 median",
+      "applied_coverage_pct": 25.0,
+      "estimated_true_gyms_in_bin_median_method": 119988
+    }
+  },
+  "aggregate": {
+    "total_db_gyms_all_bins": 41755,
+    "total_estimated_true_gyms_all_bins": 147780,
+    "overall_coverage_pct": 28.3
+  },
+  "methodology": {
+    "primary_method": "Per chain: scrape chain's store-locator page, extract stated count or count structured data entries. Compare to OHSOME 2026-03-31 snapshot total.",
+    "bin_extrapolation": "For each size bin: use median per-chain coverage ratio of scraped chains as the bin's coverage estimate. Extrapolate to unscraped chains (MCAR assumption).",
+    "single_location_assumption": "Single-location entries (29997 chains / 29997 gyms) cannot be directly validated (no multi-gym list to compare). Per user directive, apply 2-3 chain bin coverage as the estimate — weakest link, flagged.",
+    "filters": "scraped_count filtered to [5,5000], year-range numbers (2019-2030) excluded unless context is unambiguous, coverage ratio outliers >20x or <0.05x rejected as extraction bugs.",
+    "caveats": [
+      "Hit rate is low (~15-25%) because many chain websites are bot-protected or SPA-rendered, and Playwright fallback didn't materially improve extraction. Estimates are MCAR-extrapolated from the scrapable subset within each bin.",
+      "The 2-3 chain bin is treated as the proxy for single-location coverage per user directive. This is an assumption, not a measurement; real single-gym completeness may be materially different.",
+      "OHSOME 2026-03-31 has its own documented accuracy issues (F-006 through F-010 in AUDIT_FINDINGS.md) — those biases are baked into the numerator here.",
+      "Chain-matcher false positives (F-010: Fitness Park overcount) can produce coverage ratios > 100%. Not filtered out — reflects real data quality."
+    ]
+  }
+}

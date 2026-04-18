@@ -1,0 +1,452 @@
+[
+  {
+    "chain_id": 127,
+    "canonical_name": "FitX",
+    "location_count": 93,
+    "competitive_classification": "direct_competitor",
+    "ownership_type": "private",
+    "price_tier": "budget",
+    "url": "https://fitx.de/",
+    "n_locations_with_this_domain": 78
+  },
+  {
+    "chain_id": 12,
+    "canonical_name": "Körperformen",
+    "location_count": 76,
+    "competitive_classification": "non_competitor",
+    "ownership_type": "private",
+    "price_tier": "premium",
+    "url": "http://www.körperformen.com",
+    "n_locations_with_this_domain": 28
+  },
+  {
+    "chain_id": 1000,
+    "canonical_name": "EasyFitness",
+    "location_count": 74,
+    "competitive_classification": "direct_competitor",
+    "ownership_type": "private",
+    "price_tier": "budget",
+    "url": "https://easyfitness.club",
+    "n_locations_with_this_domain": 47
+  },
+  {
+    "chain_id": 13505,
+    "canonical_name": "Gimnasio Municipal",
+    "location_count": 73,
+    "competitive_classification": "non_competitor",
+    "ownership_type": "public",
+    "price_tier": "unknown",
+    "url": "https://clubdeportivovillamantilla.webnode.es/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 384,
+    "canonical_name": "Snap Fitness",
+    "location_count": 71,
+    "competitive_classification": "direct_competitor",
+    "ownership_type": "private",
+    "price_tier": "mid_market",
+    "url": "https://www.snapfitness.com/",
+    "n_locations_with_this_domain": 7
+  },
+  {
+    "chain_id": 4212,
+    "canonical_name": "Sporthalle",
+    "location_count": 66,
+    "competitive_classification": "not_a_chain",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.duererschule.de/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 12231,
+    "canonical_name": "Activ Fitness",
+    "location_count": 63,
+    "competitive_classification": "direct_competitor",
+    "ownership_type": "private",
+    "price_tier": "mid_market",
+    "url": "https://www.activfitness.ch/",
+    "n_locations_with_this_domain": 54
+  },
+  {
+    "chain_id": 501,
+    "canonical_name": "GO fit",
+    "location_count": 59,
+    "competitive_classification": "direct_competitor",
+    "ownership_type": "private",
+    "price_tier": "mid_market",
+    "url": "https://www.go-fit.es",
+    "n_locations_with_this_domain": 8
+  },
+  {
+    "chain_id": 47,
+    "canonical_name": "Viva Fitness",
+    "location_count": 57,
+    "competitive_classification": "direct_competitor",
+    "ownership_type": "private",
+    "price_tier": "budget",
+    "url": "https://www.vivafitness.de",
+    "n_locations_with_this_domain": 15
+  },
+  {
+    "chain_id": 12269,
+    "canonical_name": "PureGym",
+    "location_count": 54,
+    "competitive_classification": "direct_competitor",
+    "ownership_type": "private",
+    "price_tier": "budget",
+    "url": "https://www.puregym.com/gyms/fareham/",
+    "n_locations_with_this_domain": 20
+  },
+  {
+    "chain_id": 12319,
+    "canonical_name": "Magic Form",
+    "location_count": 54,
+    "competitive_classification": "direct_competitor",
+    "ownership_type": "private",
+    "price_tier": "budget",
+    "url": "https://magic-form.fr/clubs/sens/",
+    "n_locations_with_this_domain": 47
+  },
+  {
+    "chain_id": 19039,
+    "canonical_name": "Piscinas Municipales",
+    "location_count": 54,
+    "competitive_classification": "non_competitor",
+    "ownership_type": "public",
+    "price_tier": "budget",
+    "url": "https://www.villarcayo.org/piscinas",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 1702,
+    "canonical_name": "L'Appart Fitness",
+    "location_count": 52,
+    "competitive_classification": "direct_competitor",
+    "ownership_type": "private",
+    "price_tier": "mid_market",
+    "url": "https://clubs.lappartfitness.com/30-l-appart-fitness-eybens",
+    "n_locations_with_this_domain": 15
+  },
+  {
+    "chain_id": 1539,
+    "canonical_name": "Fit7",
+    "location_count": 51,
+    "competitive_classification": "non_competitor",
+    "ownership_type": "private",
+    "price_tier": "unknown",
+    "url": "https://fitplus-club.de/",
+    "n_locations_with_this_domain": 4
+  },
+  {
+    "chain_id": 19158,
+    "canonical_name": "Poliesportiu Municipal",
+    "location_count": 51,
+    "competitive_classification": "non_competitor",
+    "ownership_type": "public",
+    "price_tier": "unknown",
+    "url": "https://molinsderei.cat/equipament/poliesportiu-municipal/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 12418,
+    "canonical_name": "VivaGym",
+    "location_count": 50,
+    "competitive_classification": "direct_competitor",
+    "ownership_type": "private",
+    "price_tier": "unknown",
+    "url": "https://www.vivagym.com/es-es/gimnasios/burgos/capital/pentasa/",
+    "n_locations_with_this_domain": 4
+  },
+  {
+    "chain_id": 64,
+    "canonical_name": "Fitbox",
+    "location_count": 47,
+    "competitive_classification": "direct_competitor",
+    "ownership_type": "private",
+    "price_tier": "budget",
+    "url": "https://fitbox.de",
+    "n_locations_with_this_domain": 27
+  },
+  {
+    "chain_id": 17277,
+    "canonical_name": "Piscina municipal",
+    "location_count": 46,
+    "competitive_classification": "non_competitor",
+    "ownership_type": "public",
+    "price_tier": "budget",
+    "url": "http://piscinapoblafarnals.com/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 28,
+    "canonical_name": "Fitness World",
+    "location_count": 42,
+    "competitive_classification": "not_a_chain",
+    "ownership_type": "private",
+    "price_tier": "unknown",
+    "url": "https://wellfitness.pl/silownia/",
+    "n_locations_with_this_domain": 4
+  },
+  {
+    "chain_id": 766,
+    "canonical_name": "Jims",
+    "location_count": 42,
+    "competitive_classification": "direct_competitor",
+    "ownership_type": "private",
+    "price_tier": "budget",
+    "url": "https://www.jims.be/nl/clubs/jims-geel",
+    "n_locations_with_this_domain": 39
+  },
+  {
+    "chain_id": 1687,
+    "canonical_name": "INJOY Fitness",
+    "location_count": 41,
+    "competitive_classification": "non_competitor",
+    "ownership_type": "private",
+    "price_tier": "premium",
+    "url": "https://www.injoy-xpress.de/injoy-xpress-dessau",
+    "n_locations_with_this_domain": 2
+  },
+  {
+    "chain_id": 12582,
+    "canonical_name": "Bodyhit",
+    "location_count": 39,
+    "competitive_classification": "non_competitor",
+    "ownership_type": "private",
+    "price_tier": "unknown",
+    "url": "https://bodyhit.fr/",
+    "n_locations_with_this_domain": 37
+  },
+  {
+    "chain_id": 10609,
+    "canonical_name": "Gymnase",
+    "location_count": 37,
+    "competitive_classification": "non_competitor",
+    "ownership_type": "private",
+    "price_tier": "unknown",
+    "url": "http://saintjustlemartel.fr/categorie/association_sportive/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 724,
+    "canonical_name": "John Reed",
+    "location_count": 36,
+    "competitive_classification": "non_competitor",
+    "ownership_type": "private",
+    "price_tier": "mid_market",
+    "url": "https://johnreed.fitness/at",
+    "n_locations_with_this_domain": 24
+  },
+  {
+    "chain_id": 21362,
+    "canonical_name": "Piscines Municipals",
+    "location_count": 33,
+    "competitive_classification": "non_competitor",
+    "ownership_type": "public",
+    "price_tier": "budget",
+    "url": "http://www.piscinamollerussa.com/",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 158,
+    "canonical_name": "Curves",
+    "location_count": 32,
+    "competitive_classification": "non_competitor",
+    "ownership_type": "private",
+    "price_tier": "budget",
+    "url": "https://curves.nl/",
+    "n_locations_with_this_domain": 5
+  },
+  {
+    "chain_id": 10113,
+    "canonical_name": "On Air",
+    "location_count": 31,
+    "competitive_classification": "direct_competitor",
+    "ownership_type": "unknown",
+    "price_tier": "mid_market",
+    "url": "https://onair-fitness.fr/club/velizy/",
+    "n_locations_with_this_domain": 16
+  },
+  {
+    "chain_id": 1691,
+    "canonical_name": "Altafit",
+    "location_count": 30,
+    "competitive_classification": "direct_competitor",
+    "ownership_type": "private",
+    "price_tier": "budget",
+    "url": "http://www.altafitgymclub.com",
+    "n_locations_with_this_domain": 5
+  },
+  {
+    "chain_id": 21,
+    "canonical_name": "Brooklyn Fitboxing",
+    "location_count": 29,
+    "competitive_classification": "non_competitor",
+    "ownership_type": "private",
+    "price_tier": "unknown",
+    "url": "http://brooklynfitboxing.com",
+    "n_locations_with_this_domain": 13
+  },
+  {
+    "chain_id": 4188,
+    "canonical_name": "DIR",
+    "location_count": 29,
+    "competitive_classification": "non_competitor",
+    "ownership_type": "private",
+    "price_tier": "unknown",
+    "url": "https://dir.cat/",
+    "n_locations_with_this_domain": 5
+  },
+  {
+    "chain_id": 52,
+    "canonical_name": "Beat81",
+    "location_count": 28,
+    "competitive_classification": "non_competitor",
+    "ownership_type": "private",
+    "price_tier": "premium",
+    "url": "https://www.beat81.com",
+    "n_locations_with_this_domain": 5
+  },
+  {
+    "chain_id": 12578,
+    "canonical_name": "Neoness",
+    "location_count": 28,
+    "competitive_classification": "direct_competitor",
+    "ownership_type": "private",
+    "price_tier": "budget",
+    "url": "https://neoness.fr",
+    "n_locations_with_this_domain": 14
+  },
+  {
+    "chain_id": 3,
+    "canonical_name": "Holmes Place",
+    "location_count": 27,
+    "competitive_classification": "non_competitor",
+    "ownership_type": "private",
+    "price_tier": "premium",
+    "url": "http://holmesplace.de/de/clubs.html",
+    "n_locations_with_this_domain": 9
+  },
+  {
+    "chain_id": 11565,
+    "canonical_name": "Liberty Gym",
+    "location_count": 27,
+    "competitive_classification": "direct_competitor",
+    "ownership_type": "private",
+    "price_tier": "budget",
+    "url": "https://libertygym.fr",
+    "n_locations_with_this_domain": 7
+  },
+  {
+    "chain_id": 12356,
+    "canonical_name": "Elancia",
+    "location_count": 27,
+    "competitive_classification": "non_competitor",
+    "ownership_type": "private",
+    "price_tier": "premium",
+    "url": "https://www.elancia.fr/",
+    "n_locations_with_this_domain": 10
+  },
+  {
+    "chain_id": 2710,
+    "canonical_name": "The Padellers",
+    "location_count": 26,
+    "competitive_classification": "non_competitor",
+    "ownership_type": "private",
+    "price_tier": "premium",
+    "url": "https://www.thepadellers.nl/court-booking/hoorn",
+    "n_locations_with_this_domain": 25
+  },
+  {
+    "chain_id": 1,
+    "canonical_name": "TrainMore",
+    "location_count": 24,
+    "competitive_classification": "direct_competitor",
+    "ownership_type": "private",
+    "price_tier": "mid_market",
+    "url": "https://trainmore.com/nl-NL/clubs/amsterdam/singel/",
+    "n_locations_with_this_domain": 9
+  },
+  {
+    "chain_id": 12243,
+    "canonical_name": "update Fitness",
+    "location_count": 24,
+    "competitive_classification": "direct_competitor",
+    "ownership_type": "private",
+    "price_tier": "budget",
+    "url": "https://www.update-fitness.ch",
+    "n_locations_with_this_domain": 18
+  },
+  {
+    "chain_id": 13421,
+    "canonical_name": "Synergym",
+    "location_count": 24,
+    "competitive_classification": "direct_competitor",
+    "ownership_type": "private",
+    "price_tier": "budget",
+    "url": "https://synergym.es/",
+    "n_locations_with_this_domain": 12
+  },
+  {
+    "chain_id": 86,
+    "canonical_name": "all inclusive Fitness",
+    "location_count": 23,
+    "competitive_classification": "direct_competitor",
+    "ownership_type": "private",
+    "price_tier": "budget",
+    "url": "https://www.ai-fitness.de",
+    "n_locations_with_this_domain": 14
+  },
+  {
+    "chain_id": 452,
+    "canonical_name": "The Gym",
+    "location_count": 23,
+    "competitive_classification": "not_a_chain",
+    "ownership_type": "unknown",
+    "price_tier": "unknown",
+    "url": "https://www.thegymgroup.com/find-a-gym/isle-of-wight/",
+    "n_locations_with_this_domain": 16
+  },
+  {
+    "chain_id": 10850,
+    "canonical_name": "Piscine Municipale",
+    "location_count": 22,
+    "competitive_classification": "non_competitor",
+    "ownership_type": "public",
+    "price_tier": "unknown",
+    "url": "https://www.ville-leguevin.fr/piscine_municipale.aspx",
+    "n_locations_with_this_domain": 1
+  },
+  {
+    "chain_id": 12759,
+    "canonical_name": "Vita Liberté",
+    "location_count": 21,
+    "competitive_classification": "direct_competitor",
+    "ownership_type": "private",
+    "price_tier": "mid_market",
+    "url": "https://www.vitaliberte.fr/",
+    "n_locations_with_this_domain": 12
+  },
+  {
+    "chain_id": 12345,
+    "canonical_name": "Virgin Active",
+    "location_count": 20,
+    "competitive_classification": "non_competitor",
+    "ownership_type": "private",
+    "price_tier": "premium",
+    "url": "https://www.virginactive.it/",
+    "n_locations_with_this_domain": 9
+  },
+  {
+    "chain_id": 12480,
+    "canonical_name": "FITSEVENELEVEN",
+    "location_count": 20,
+    "competitive_classification": "direct_competitor",
+    "ownership_type": "private",
+    "price_tier": "budget",
+    "url": "https://fitseveneleven.de",
+    "n_locations_with_this_domain": 15
+  }
+]
