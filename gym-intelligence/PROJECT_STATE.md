@@ -1,6 +1,6 @@
 # Gym Intelligence — Project State
 
-_Last updated: 2026-04-17 ~20:40 UTC — present-day coverage validation shipped (commit 479852a)_
+_Last updated: 2026-04-18 ~00:55 UTC — full-DB coverage scrape complete (commit fbe731e); results flagged for duplicate/scope bias before trust_
 
 ## Host topology (post-migration 2026-04-17)
 
@@ -17,7 +17,8 @@ _Last updated: 2026-04-17 ~20:40 UTC — present-day coverage validation shipped
 
 - **Thesis writeup shipped on preview** (chapters 1–6, 11.6k words, inline SVG chart, PDF download). Live at `/gym-intelligence/preview/thesis`. Audit findings (F-001–F-010) documented in `AUDIT_FINDINGS.md`. Scope narrowed to honest investor-grade diagnosis + directional evidence from the clean subset (Germany +55.6pp excess clustering) + remediation plan.
 - **16-quarter OHSOME backfill complete** (2022-Q2 through 2026-Q1, 0 failures). Time-series artifact at `writeup/data/clean-subset-timeseries.json`. Germany BF share 18.5% → 23.8% monotonic rise. Per-gym lat/lon not stored (aggregate counts only) — flagged in chapter 6 as a remediation item.
-- **Present-day coverage validation shipped** (commit 479852a, `writeup/data/present-day-coverage-validation.json`). 19 chains compared OHSOME 2026-Q1 vs live/public sources. Aggregate 97.8% coverage; per-chain 3 at <60% (KeepCool, EasyFitness, L'Appart — French suburban OSM gaps), 3 at >150% (Fitness Park, PureGym, Activ Fitness — matcher false-positives). Basic-Fit 98.9% — trustworthy for hypothesis test. Historical (Wayback) validation not yet run.
+- **Present-day coverage validation shipped** (commit 479852a). 19 top chains compared; Basic-Fit 98.9% — trustworthy.
+- **Full-DB coverage scrape shipped** (commit fbe731e). 897 multi-location chains across 5 size bins on prod. Hit rate 15–25%/bin due to bot protection + SPA rendering; Playwright fallback pw_hits=0. Naive weighted coverage 28.3%, estimated true pop ~148k — both numbers known-biased by (a) matcher duplicates (KeepCool/Keep Cool across bins), (b) scope mismatch (Virgin Active global 250 vs our EU-6 20). Honest true coverage likely 40–70% for chains; single-location completeness not measurable with scrape method. Industry-structure analysis not yet trustworthy without matcher cleanup + per-country chain counts. Raw data at `writeup/data/coverage_output/` and `coverage-model.json`.
 - **Altafit ownership corrected** public → private on both DBs (prod).
 - **Live venv orphan purge shipped** (580MB → 30MB); deploy script self-cleans on future deploys.
 
