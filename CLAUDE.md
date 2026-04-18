@@ -2,8 +2,11 @@
 
 _Master rules at /root/.claude/CLAUDE.md + /opt/site-deploy/SKILLS/ apply globally. This file adds only what's unique to this project._
 
+## Host topology — READ FIRST (enforced by watchdog)
+**abs-dashboard runs on PROD (10.116.0.3, `ssh prod-private`). Dev is a 4GB rollback snapshot only.** All heavy compute MUST be launched with `ssh prod-private` prefix: Markov training, `compute_methodology.py`, regressions, dashboard regeneration, pandas loads, any Python that streams `loan_performance`. Watchers that poll for cache files must `ssh prod-private 'test -f …'`, not check local paths. Dev Python is a guard wrapper that refuses by default (override: `ALLOW_DEV_COMPUTE=1`). A cron watchdog SIGTERMs wrong-host heavy Python after 120s. See PROJECT_STATE.md "Host topology" for incident log + rule details.
+
 ## Runtime
-- **Python venv: `/opt/abs-venv/`** (shared across projects, not owned by us). `/opt/abs-venv/bin/python` for all scripts.
+- **Python venv: `/opt/abs-venv/`** (shared across projects, not owned by us). `/opt/abs-venv/bin/python` for all scripts — but run them on prod.
 - Live URL: https://casinv.dev/CarvanaLoanDashBoard/
 - Deploy branch (auto-deploys via webhook): `claude/carvana-loan-dashboard-4QMPM`
 - Daily ingest cron: **14:17 UTC** (`deploy/cron_ingest.sh`) — pulls new filings, rebuilds summaries, re-exports dashboard.db, reruns model, regenerates + promotes preview→live.
