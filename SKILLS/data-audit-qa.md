@@ -182,6 +182,70 @@ The full finding list lives in `AUDIT_FINDINGS.md` with URLs/line refs and resol
 - **Fix-and-move-on within an iteration.** After a fix, the loop *reruns* — do not mark findings resolved without re-audit verification. A "fix" that doesn't pass re-audit is a worse bug than the original (false confidence).
 - **Infinite looping.** `MAX_ITERATIONS` exists. If the loop can't converge, stop and escalate to the user — the fix is probably touching a symptom, not the cause.
 
+## Phase 5 — Display-layer sanity ranges
+
+DB-layer audits (Phases 1-4) catch parser, ingestion, and stored-column defects. They do **not** catch bugs in **derived/computed columns rendered at display time** — values that exist only at render, never stored, so Phase 1's outlier scan has no surface to see them. Two production bugs on abs-dashboard in 36 hours share this root cause: the 2026-04-17 rendering-unit bug (percent-unit DB value re-multiplied by 100 in the formatter; `Exp Loss` showed 347.58% vs true 3.48%) and the 2026-04-18 WAL-collapse bug (pure-compute WAL derived from too-thin pool_performance rendered 0.1-2.1y across deals where prime-auto WAL should be 1.8-2.5y; cascaded into Total Excess Spread, Expected Residual Profit, and Variance columns). Neither bug had a stored row to audit. Phase 5 closes this gap.
+
+### Requirements (every project with user-facing computed columns must do this)
+
+1. **Define a `DISPLAY_RANGES` dict per user-facing tab/view**, one entry per rendered derived column, at the point of column definition.
+2. **Each entry specifies**: `bounds` (min, max), `severity` (HALT or WARN), `provenance` (1-2 lines on where the range came from — domain knowledge, historical quantile, regulator-mandated, etc.), `rationale` (why out-of-range = bad), and optional `agg_bounds` for weighted-average aggregate sanity.
+3. **On every dashboard regen and every promote**, invoke `helpers/audit_display_ranges.py` (or a project-local equivalent) with the rendered data + the `DISPLAY_RANGES` dict. HALT findings block the promote pipeline. WARN findings fire `notify.sh` at default priority for human review; pipeline continues.
+4. **Aggregate sanity**: the weighted-or-simple average of each column across rendered rows should fall within a tighter band than per-cell bounds. Helper supports this via the optional per-column `agg_bounds` field (e.g., per-row WAL ∈ [0.5, 10]y HALT, but aggregate avg WAL should land in [1.8, 2.5]y).
+5. **Cross-column consistency**: where derived columns chain (e.g., `total_excess_spread = excess_yr × WAL`), each project implements its own consistency check in-project — the generic helper does **not** cover this because the relationships are project-specific.
+
+### Severity tiers — how to choose
+
+- **HALT**: out-of-range means the value is definitely wrong. E.g., WAL outside [0.5, 10]y is physically impossible for auto-ABS; negative cumulative losses are impossible; tranche % > 100. Blocks the promote pipeline.
+- **WARN**: out-of-range means suspicious-but-possible. E.g., WAL outside [1.5, 3.5]y is unusual for prime auto but legal for some structures; negative excess spread can occur transiently in distressed deals. Fires notify default-priority; doesn't block.
+
+Rule of thumb: **HALT** if "a reasonable domain expert would say this can never happen." **WARN** if "a reasonable domain expert would want to look at this but wouldn't immediately say it's wrong."
+
+### The `DISPLAY_RANGES` dict schema
+
+```python
+DISPLAY_RANGES = {
+    "wal_years": {
+        "bounds": (0.5, 10.0),
+        "severity": "HALT",
+        "provenance": "Physical: auto-ABS amortize over <=10y; no deal has WAL <0.5y at issuance.",
+        "rationale": "WAL outside these bounds implies parser bug or empty pool_performance.",
+        "agg_bounds": (1.8, 2.5),  # optional — weighted avg of rendered rows
+    },
+    "cum_net_loss_pct": {
+        "bounds": (0.0, 30.0),
+        "severity": "HALT",
+        "provenance": "Domain: auto-ABS pools historically cap around 15-20% CNL; 30% is near-zero prior.",
+        "rationale": "CNL > 30% almost certainly indicates parser error or restated-with-stale-data.",
+    },
+    "excess_spread_yr": {
+        "bounds": (-2.0, 15.0),
+        "severity": "WARN",
+        "provenance": "Historical: most deals run 4-8% excess spread; negative is transient, >15% suggests unit-error.",
+        "rationale": "Values outside this range possible in distressed deals but warrant inspection.",
+    },
+}
+```
+
+### Run cadence
+
+The helper runs on:
+- **every `generate_preview` pass** (catch before the user ever sees bad numbers),
+- **every `promote` pass** (last-chance gate before live),
+- **any daily cron-regenerated dashboard**.
+
+Findings emit to `/var/log/<project>-display-audit.log`. HALT findings additionally fire `notify.sh` at high priority and raise `DisplayAuditHalt` so the calling pipeline exits non-zero. Auditing is project-local inline — no infra-side daemon.
+
+### When to update the ranges
+
+- **After a WARN fires repeatedly without a real issue** → range is too tight; widen it. Note the widening rationale in `provenance`.
+- **After a HALT slips through (bug found post-deployment)** → range was too wide; tighten + add a `LESSONS.md` entry about the miss and how the new bound catches it.
+- **When a new deal/entity type enters the universe with legitimately different characteristics** → evaluate whether ranges still apply or need per-segment DISPLAY_RANGES dicts.
+
+### Integration with the halt-fix-rerun loop
+
+Phase 5 findings feed into the same loop as Phases 1-4. The QA agent collects display-audit findings alongside DB-audit findings, halts on the first, the orchestrator groups by root cause (often a single formatter or unit-conversion bug produces many Phase 5 findings across one column), the builder fixes at the upstream compute site, QA reruns. Same severity rubric, same pass criteria.
+
 ## Integration
 
 - `SKILLS/parallel-execution.md` — the dispatch primitives. Phase 2 is the canonical use case.
