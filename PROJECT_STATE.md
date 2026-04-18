@@ -2,6 +2,17 @@
 
 _Last updated: 2026-04-14 (pre-resize checkpoint)_
 
+## Meta-goal (framing for ALL analysis)
+
+**This dashboard exists to help the user understand Carvana's auto-ABS business insofar as it impacts Carvana (the company).** Carvana is the SUBJECT. CarMax is the BENCHMARK. Analysis, charts, narrative, and callouts should reflect this asymmetry:
+
+- **Recent Trends tab:** lead with Carvana performance (Prime + Non-Prime). CarMax is the comparison peer, not a co-subject.
+- **Methodology & Findings tab:** regression comparisons are valid, but findings should be framed as "what this means for Carvana" (e.g. if CarMax outperforms by X bps, that tells us about Carvana's underwriting spread vs. a legacy operator).
+- **Residual Economics tab:** keep chronological but emphasize Carvana deals in any narrative summaries/callouts.
+- **Deep-dives + spot checks:** prioritize Carvana's most-recent vintages (the deals still building their loss curve) — those are the ones that materially affect Carvana equity.
+
+If an agent produces symmetric Carvana-vs-CarMax framing, that's acceptable but leaves value on the table. A morning framing pass should add Carvana-centric interpretation callouts where the compute already lives.
+
 ## Host topology (MUST OBEY)
 
 **abs-dashboard runs on PROD, not dev.** Overnight migration 2026-04-16/17 moved `/opt/abs-dashboard/` to the prod droplet (10.116.0.3, `ssh prod-private`, 8GB RAM, 4 CPUs, 154GB disk). Dev copy at 159.223.127.125 is a rollback snapshot only — any writes to dev paths are discarded within 48hr; dev is memory-constrained (4GB, shared with other projects) and will OOM under real workloads.
