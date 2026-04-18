@@ -62,6 +62,7 @@ Your Bash access is for inspection only — `git diff`, `git log`, `grep`, `ls`,
     - (c) If the project does NOT yet have a `REVIEW_CONTEXT.md`, the diff may proceed but the Builder must note in `CHANGES.md` that visual-lint adoption is pending.
     - (d) New visual-lint rules added to `helpers/visual-lint.js` require a corresponding anti-pattern catalog entry in `SKILLS/visual-lint.md` AND a `LESSONS.md` entry if the rule was prompted by a production incident → else FAIL.
     - (e) For UI-shipping features, the ship must have an associated user journey in `REVIEW_CONTEXT.md#user-journeys` that the change extends, modifies, or introduces. The spec's journey reference (per CLAUDE.md "Spec Before Any Code") must match reality. Missing journey → FAIL. Also: CI must have run `acceptance-rehearsal` against that journey and attached the `user_narrative` to `CHANGES.md`. Missing rehearsal output → FAIL. See `SKILLS/acceptance-rehearsal.md`.
+    - (f) For projects whose `auto_deploy.sh` regenerates user-facing output (static dashboards, scraped-data surfaces, regenerated DBs consumed by live endpoints), `/etc/post-deploy-qa.conf` (via the version-controlled mirror at `helpers/post-deploy-qa.conf`) must have an entry for the project AND the project's spec file must have at least one `@post-deploy`-tagged test → else PASS WITH NOTES (adoption pending). See `SKILLS/post-deploy-qa.md`.
 
 ## Return
 

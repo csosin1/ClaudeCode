@@ -119,11 +119,18 @@ if [ "$LOCAL" != "$REMOTE" ]; then
 
     # Per-droplet helper scripts (keep /usr/local/bin copy in sync with repo)
     if [ -d "$REPO_DIR/helpers" ]; then
-        for s in claude-project.sh end-project.sh task-status.sh notify.sh start-claude.sh; do
+        for s in claude-project.sh end-project.sh task-status.sh notify.sh start-claude.sh post-deploy-qa-hook.sh; do
             if [ -f "$REPO_DIR/helpers/$s" ]; then
                 install -m 755 "$REPO_DIR/helpers/$s" /usr/local/bin/$s 2>/dev/null || true
             fi
         done
+        # Sync post-deploy-qa conf (version-controlled mirror → /etc). Only
+        # copy when the repo copy differs, so operators can edit /etc/ for a
+        # quick ad-hoc change and have it survive until the mirror catches up.
+        if [ -f "$REPO_DIR/helpers/post-deploy-qa.conf" ] && \
+           ! cmp -s "$REPO_DIR/helpers/post-deploy-qa.conf" /etc/post-deploy-qa.conf 2>/dev/null; then
+            install -m 644 "$REPO_DIR/helpers/post-deploy-qa.conf" /etc/post-deploy-qa.conf 2>/dev/null || true
+        fi
         # start-claude.sh goes to /root as well
         [ -f "$REPO_DIR/helpers/start-claude.sh" ] && install -m 755 "$REPO_DIR/helpers/start-claude.sh" /root/start-claude.sh
         # systemd unit for claude-tmux
@@ -136,17 +143,64 @@ if [ "$LOCAL" != "$REMOTE" ]; then
     echo "$(date): Static files deployed to preview (live unchanged; promote via deploy/promote.sh)." >> "$LOG"
 
     # === STEP 3: SERVER-SIDE PROJECTS (each project sources its own deploy script) ===
+    # Per-project live-URL map — used by the post-deploy QA hook (Gap 3 fix,
+    # 2026-04-17 Hazard-by-LTV incident). Add a row when a new project opts
+    # in to post-deploy QA by writing an entry in /etc/post-deploy-qa.conf.
+    # Project name is derived from the deploy/<project>.sh filename stem.
+    declare -A PROJECT_LIVE_URL=(
+        [abs-dashboard]="https://casinv.dev/CarvanaLoanDashBoard/"
+        [carvana-abs]="https://casinv.dev/CarvanaLoanDashBoard/"
+        [car-offers]="https://casinv.dev/car-offers/"
+        [gym-intelligence]="https://casinv.dev/gym-intelligence/"
+        [timeshare-surveillance]="https://casinv.dev/timeshare-surveillance/"
+    )
+
     for deploy_script in "$REPO_DIR"/deploy/*.sh; do
         script_name="$(basename "$deploy_script")"
         # Skip infrastructure scripts
         case "$script_name" in
             auto_deploy_general.sh|update_nginx.sh|setup_*.sh) continue ;;
         esac
+        project_name="${script_name%.sh}"
+
+        # Freeze gate: if the post-deploy QA hook previously failed with
+        # --freeze-on-fail, skip this project's regen until an operator
+        # clears /var/run/auto-deploy-frozen-<project>. Notify once per
+        # skipped cycle so the user knows work is blocked.
+        if [ -f "/var/run/auto-deploy-frozen-$project_name" ]; then
+            echo "$(date): SKIP deploy/$script_name — frozen by post-deploy QA (rm /var/run/auto-deploy-frozen-$project_name to unfreeze)." >> "$LOG"
+            if [ -x /usr/local/bin/notify.sh ]; then
+                /usr/local/bin/notify.sh \
+                    "Auto-deploy SKIPPED $project_name — frozen by post-deploy QA. Investigate, then rm /var/run/auto-deploy-frozen-$project_name." \
+                    "Auto-deploy frozen: $project_name" \
+                    urgent \
+                    "https://casinv.dev/projects.html" >> "$LOG" 2>&1 || true
+            fi
+            continue
+        fi
+
         echo "$(date): Running deploy/$script_name..." >> "$LOG"
         (
             cd "$REPO_DIR" || exit 1
             source "$deploy_script"
         ) >> "$LOG" 2>&1 || echo "$(date): WARNING — deploy/$script_name failed." >> "$LOG"
+
+        # Post-deploy QA gate. Runs the project's @post-deploy-tagged tests
+        # against the live URL after regen. Opt-in via a row in
+        # /etc/post-deploy-qa.conf; absence = silent skip. Failure notifies
+        # and (if configured) writes a freeze sentinel consulted above.
+        if [ -f /etc/post-deploy-qa.conf ] && [ -x /usr/local/bin/post-deploy-qa-hook.sh ]; then
+            if grep -qE "^${project_name}[[:space:]]" /etc/post-deploy-qa.conf; then
+                live_url="${PROJECT_LIVE_URL[$project_name]:-}"
+                if [ -n "$live_url" ]; then
+                    /usr/local/bin/post-deploy-qa-hook.sh "$project_name" "$live_url" \
+                        >> /var/log/post-deploy-qa.log 2>&1 || \
+                        echo "$(date): post-deploy QA failed for $project_name; see /var/log/post-deploy-qa.log" >> "$LOG"
+                else
+                    echo "$(date): WARNING — $project_name has a post-deploy-qa.conf row but no live URL mapped in auto_deploy_general.sh; skipping hook." >> "$LOG"
+                fi
+            fi
+        fi
     done
 
     # === STEP 4: STATUS PAGE + DIAGNOSTICS ===
