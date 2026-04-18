@@ -17,18 +17,18 @@ iPhone prompts are short and sometimes autocorrected. If a request is ambiguous,
 ## Challenge the Approach
 Users describe **outcomes**, not methods. Before building what was literally asked, ask: is there a simpler tool, managed service, or pattern that delivers the same outcome with dramatically less complexity, cost, or fragility? If yes, surface it in plain English, recommend one, and ask before spending hours on the harder path. Rough bar: would the alternative save >30% of the time or cost, or eliminate a meaningful failure mode? Frame as "here's the cheaper way, shipping it unless you object" — not a menu of options.
 
-## Every Task Passes Three Gates
-Nothing defective reaches the user. Each task runs through three checkpoints — use subagents so each has a fresh perspective.
-
-1. **Build** — Builder subagent writes the feature AND Playwright tests in `tests/<project>.spec.ts`. Tests must exercise the feature like a user (click, fill, assert real values — no NaN/blanks).
-2. **Review** — Reviewer subagent reads the diff against the spec, `LESSONS.md`, and the security baseline. Must return PASS before deploy.
-3. **QA** — push to `main` deploys to the project's preview URL; `.github/workflows/qa.yml` runs Playwright against preview at 390px and 1280px, asserting functional, perf, and UX budgets per `SKILLS/perceived-latency.md`. Regressions fail. On fail: fix and redeploy, no approval needed.
-4. **Accept** — when QA is green, share the preview URL. User's "ship it" is the only approval gate. On accept: promote preview → live.
+## Every Task Passes The Gates
+Nothing defective reaches the user. Each gate uses a fresh subagent.
+1. **Build** — Builder writes the feature + Playwright tests in `tests/<project>.spec.ts` that exercise it like a user (click, fill, assert real values — no NaN/blanks).
+2. **Review** — Reviewer reads the diff against spec, `LESSONS.md`, security baseline. Must return PASS before deploy.
+3. **QA** — push to `main` deploys to preview; `qa.yml` runs Playwright at 390px + 1280px per `SKILLS/perceived-latency.md` + `SKILLS/visual-lint.md`. Regressions fail; fix and redeploy without approval.
+4. **Rehearse** — after QA green, `acceptance-rehearsal` walks the declared user journey (per `SKILLS/acceptance-rehearsal.md`) and attaches a narrative to `CHANGES.md`.
+5. **Accept** — share the preview URL + narrative. User's "ship it" is the only approval gate. On accept: promote preview → live.
 
 The main session orchestrates — it does not write code directly.
 
 ## Spec Before Any Code
-Surface to the user and wait for "go": what will be built (1-2 sentences), success criteria (what QA will verify), file locations (mandatory, no speculative paths), non-goals.
+Surface to the user and wait for "go": what will be built (1-2 sentences), success criteria (what QA will verify), file locations (mandatory, no speculative paths), non-goals. For UI-shipping changes, also name which user journey (from project `REVIEW_CONTEXT.md`) this extends, modifies, or introduces — specs without journey-anchoring for UI changes return to Clarify.
 
 ## Parallel Execution
 **Never do work sequentially that can run in parallel** — tool calls, subagents, builders, research queries. Independent tool calls go in a single assistant message with multiple tool-use blocks. See `SKILLS/parallel-execution.md`.
