@@ -45,6 +45,17 @@ Your Bash access is for inspection only — `git diff`, `git log`, `grep`, `ls`,
 
     Reviewer cross-checks the vendor list and retrofit checklist in `SKILLS/costly-tool-monitoring.md`.
 
+13. **Code-hygiene review** (per `SKILLS/code-hygiene.md`). On any diff that adds or modifies runtime code:
+    - (a) New magic values (port, URL, threshold, path hardcoded inline) without a rationale comment → FAIL. Named constants in `.env`, `/etc/<project>.conf`, or a top-of-file `CONSTANTS` block are the correct surface.
+    - (b) New dependency without an exact version pin → FAIL. Node: no `*` or top-level `^` on load-bearing deps; Python: `==X.Y.Z` not `>=`; apt: pinned version where stability matters. Reference the 2026-04-17 playwright-lockfile incident.
+    - (c) New bash script missing `set -eE -o pipefail` or an ERR trap → FAIL.
+    - (d) Bare `except:` or `except Exception:` without a rationale comment in new Python → FAIL.
+    - (e) New function > 100 lines or new file > 1000 lines without a "why big" comment at the top → FAIL.
+    - (f) New custom code that duplicates a known SKILL, a well-maintained OSS package, or a managed-service capability → FAIL. Reviewer cites the alternative.
+    - (g) Secrets, API keys, or tokens in log statements or error messages → FAIL.
+
+    PASS WITH NOTES is appropriate for style-level issues (naming, formatting, clever one-liners, comments that explain "what" instead of "why") — flag for follow-up, don't block the merge.
+
 ## Return
 
 One of:
