@@ -8,7 +8,11 @@ sunset: null
 
 ## When to use
 
-Use this skill when working on session resilience. (Placeholder — sharpen with the specific triggers: which tasks, which error modes, which project phases invoke it.)
+Use this skill when: a chat is exhibiting flaky state (hanging tool calls, stale "Remote Control" prompt, missing from tmux), a droplet reboot or resize is planned, a chat just came back from respawn and needs context recovery, or when deciding what to put in PROJECT_STATE vs hold in conversation memory.
+
+## The `rescue` tmux window (window 0) is never killed
+
+The `rescue` window runs a plain shell with no claude process — it's the escape hatch if a claude session crashes before the respawn cron picks it up. Use it to attach to tmux, inspect `/opt/site-deploy/helpers/*`, read logs, force a respawn, or run `git status` on a project. **Never propose retiring it.** If you see a bare shell window in the tmux layout without a claude process attached, that's intentional.
 
 ## Guiding Principle
 
