@@ -31,8 +31,8 @@ Nothing defective reaches the user. Each gate uses a fresh subagent.
 ## Non-Blocking Prompt Intake
 **The main thread is a coordinator, not an executor.** When a new user prompt arrives while other work is in flight, hand it off to a fresh subagent immediately (if independent) — don't make the user wait for the in-flight stack to drain. Status questions always spawn; corrections interrupt; clarifications refine. See `SKILLS/non-blocking-prompt-intake.md`.
 
-## Project Isolation
-Each project owns only: `/opt/<project>/`, `deploy/<project>.sh`, `tests/<project>.spec.ts`, `PROJECT_STATE.md`, its nginx location block, systemd unit, `/var/log/<project>/`, logrotate, uptime cron. Shared paths (`deploy/auto_deploy_general.sh`, `deploy/update_nginx.sh`, `deploy/landing.html`, `.github/workflows/*`, `CLAUDE.md`, `LESSONS.md`, `RUNBOOK.md`, `.claude/agents/*.md`, `SKILLS/*.md`) are modified only via `CHANGES.md` proposals from project chats. Writing outside own paths is a bug.
+## Chat Topology
+Two kinds of chat: **`lead`** (cwd `/opt/site-deploy`) is the single platform chat — directly edits all shared infra + global harnessing (this file, SKILLS, LESSONS, RUNBOOK, .claude/agents/, deploy/, helpers/, /etc/nginx, /etc/systemd, /etc/cron*). **Product chats** (one per product: `car-offers`, `gym-intelligence`, `carvana-abs-2`, future) touch only their own `/opt/<project>/`, `tests/<project>.spec.ts`, `PROJECT_STATE.md`, nginx location block, systemd unit, log path, uptime cron. Product chats propose shared-infra changes via `CHANGES.md`; lead picks them up. Product chat writing outside own paths is a bug. See `LEAD.md` for the full role doc.
 
 ## Continuous Platform Improvement
 **A problem solved once should never need to be solved again.** Every session leaves one artifact that makes future sessions cheaper: a new skill, a sharper rule, a removed manual step, or a trimmed doc. CLAUDE.md stays thin — it's the constitution. Power lives in `SKILLS/`. See `SKILLS/platform-stewardship.md` for where different kinds of learning belong and when to write them up.
