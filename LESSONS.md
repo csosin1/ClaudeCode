@@ -11,6 +11,19 @@ Append an entry when something breaks in a way that wasn't obvious from the code
 - **What to do differently:**
 ```
 
+## 2026-04-19 — Watches on other chats confirmed artifacts, not liveness; respawned chat emitted stale self-identifier
+
+<!--lesson
+preventive_mechanism: reviewer_rule
+enforcer_path: SKILLS/session-resilience.md
+date: 2026-04-19
+family: watch-liveness
+-->
+- **Symptom:** At 21:08 UTC 2026-04-18 the lead chat set a fix-watch on carvana-abs-2 expecting fresh commits to land. The watch ran passively for 4+ hours. The target chat had respawned sometime during that window and was in fact idle, but its self-identifier still reported "currently running Phase 5 meta-test" — plausibly-current prose reflecting pre-respawn state. The watch's passive-artifact inspection (git log, file mtimes) matched the self-identifier's claim closely enough to keep waiting. Four hours elapsed with zero new commits on a chat that was not actually working.
+- **Root cause:** Watches inspect passive artifacts (last commit time, CHANGES.md diff, PROJECT_STATE.md mtime) and self-identifiers that the target chat emits, but they do not confirm the target is *actively working right now*. Session-respawned chats pick up their JSONL and can reconstruct prose-level self-descriptions from the last few pre-respawn messages — producing a convincing "still working on X" report even though no tool calls have fired since respawn. The two failure modes (target is genuinely idle; target emits stale prose) are indistinguishable from artifact-only evidence.
+- **Preventive rule:** When a lead sets a watch on another chat's work, the watch's decision tree must escalate from passive-inspection to **direct liveness probe** after a bounded stall. Concretely: if N hours elapse with no artifact change *and* no new tool-call telemetry from the target chat, the next step is to direct-ask the target "what tool call is in flight right now?" via `tmux send-keys` or an explicit prompt — not to passive-wait longer, not to escalate to the user yet. A live chat answers with a concrete tool name or phase; a respawned-idle chat answers with prose that matches its stale self-identifier, at which point the watch has confirmed the drift and can either re-dispatch the task or escalate. Rough defaults: 30 min stall on a multi-hour task = probe; 2 hr stall = probe-and-escalate.
+- **Fix:** Added a "Stale self-identifiers after respawn" section to `SKILLS/session-resilience.md` covering the failure mode + the liveness-probe decision tree. Future watch-setters are directed there from the infra-reviewer watch rule and from this lesson's enforcer_path.
+
 ## 2026-04-18 — Platform behaviours were conditional on assumed user attention; walk-away is now the default
 
 <!--lesson

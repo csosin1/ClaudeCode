@@ -1,0 +1,37 @@
+# post-deploy-qa.conf.template — frozen reference copy.
+#
+# This file documents the format only. The LIVE authoritative config is
+# `helpers/post-deploy-qa.conf` (mirrored by auto_deploy_general.sh into
+# /etc/post-deploy-qa.conf on every deploy). Edit there, not here.
+#
+# The hook does NOT read this file. It is checked into git so reviewers,
+# doc-reality-check, and new contributors can see the schema without having
+# to diff whatever the live config happens to be at the moment.
+#
+# ============================================================================
+# Format (TAB-separated; one project per row; `#` comments lines):
+#
+#   <project-slug>\t<cmd_template>\t<timeout_seconds>\t[--freeze-on-fail]
+#
+# <project-slug>        Matches the project_name derived from deploy/<slug>.sh
+#                       in auto_deploy_general.sh. Must also have an entry in
+#                       the PROJECT_LIVE_URL associative map there.
+#
+# <cmd_template>        Shell command to run. May contain the literal token
+#                       {LIVE_URL}; the hook substitutes the project's live URL
+#                       at runtime. Run under `bash -c` with a timeout wrapper.
+#
+# <timeout_seconds>     Integer seconds. Hard cap — `timeout --kill-after=10s`
+#                       will TERM then KILL if exceeded. Default: 300s.
+#
+# Column 4 (optional)   Literal `--freeze-on-fail`. If present, a non-zero test
+#                       exit writes /var/run/auto-deploy-frozen-<project> and
+#                       auto-deploy skips this project's regen until the
+#                       sentinel is removed manually. Absent column 4 =
+#                       notify-only on failure.
+#
+# ============================================================================
+# Example rows (placeholders — do NOT uncomment in the template):
+
+# <project-slug>	cd /opt/<project-slug> && BASE_URL={LIVE_URL} npx playwright test tests/<project-slug>.spec.ts --grep=@post-deploy --project=mobile	180	--freeze-on-fail
+# <project-slug>	cd /opt/site-deploy && BASE_URL={LIVE_URL} npx playwright test tests/<project-slug>.spec.ts --grep=@post-deploy --project=mobile	120

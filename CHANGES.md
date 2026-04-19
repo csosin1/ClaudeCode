@@ -11,6 +11,32 @@ Builder appends a per-task entry here after each build. Format:
 - **Things for the reviewer:**
 ```
 
+## 2026-04-19 — infra: ship missing post-deploy-qa install + stale-self-identifier LESSONS
+
+- **What was built:** Two-part shared-infra landing.
+  - **Part A — post-deploy-qa hook adoption.** Task #36 shipped the hook + version-controlled mirror conf to the repo in 2026-04-18, but the install side never ran — `/etc/post-deploy-qa.conf` and `/usr/local/bin/post-deploy-qa-hook.sh` did not exist on the droplet, so carvana-abs-2 (and every other project chat) saw an absent hook even though `helpers/post-deploy-qa-hook.sh` had been in git for a day. This commit (1) installs both paths to their live system locations, (2) populates the previously-all-commented `helpers/post-deploy-qa.conf` with an active `abs-dashboard` row (`--freeze-on-fail`, tests/abs-dashboard.spec.ts `@post-deploy` subset, 180s timeout) and commented placeholder rows for car-offers / gym-intelligence / timeshare-surveillance pending their `@post-deploy` tagging, (3) adds a frozen `helpers/post-deploy-qa.conf.template` reference copy documenting the TSV schema for reviewers, and (4) adds `--dry-run` + long-flag `--project <name>` argument parsing to the hook so operators can validate config changes without executing tests. Backward-compat preserved: auto_deploy_general.sh's positional `post-deploy-qa-hook.sh <project> <live_url>` invocation still works.
+  - **Part B — LESSONS + SKILLS entry on stale self-identifiers after session respawn.** Documents the 2026-04-18 incident where a fix-watch set by lead ran 4+ hours on an idle target chat because the target had respawned and was emitting plausibly-current prose drawn from its pre-respawn JSONL. Preventive rule: watches must escalate from passive-artifact inspection to a direct liveness probe ("what tool call is in flight right now?") after a bounded stall — defaults 30 min probe / 2 hr probe-and-escalate.
+- **Files modified:**
+  - `helpers/post-deploy-qa-hook.sh` — added `--dry-run`, long-flag `--project <name>`, bad-args usage, and informational dry-run output at every config-state branch (no-conf-file / no-conf-entry / resolved). Positional 3-arg invocation still works.
+  - `helpers/post-deploy-qa.conf` — activated `abs-dashboard` row with `--freeze-on-fail`; added commented placeholder rows for 3 other projects plus header comment noting the /etc sync direction.
+  - `helpers/post-deploy-qa.conf.template` — **new**, frozen schema reference with placeholder `<project-slug>` rows. Uses placeholders (not real URLs) because the authoritative live config is `helpers/post-deploy-qa.conf`; the template is for the format only.
+  - `/usr/local/bin/post-deploy-qa-hook.sh` — installed (chmod 755) from the repo copy. Next auto-deploy will keep it in sync via the existing install loop at auto_deploy_general.sh:146.
+  - `/etc/post-deploy-qa.conf` — installed (chmod 644) from the repo copy. Next auto-deploy will keep it in sync via auto_deploy_general.sh:154.
+  - `LESSONS.md` — new 2026-04-19 entry with `<!--lesson preventive_mechanism: reviewer_rule ... family: watch-liveness -->` frontmatter.
+  - `SKILLS/session-resilience.md` — new H2 "Stale self-identifiers after respawn" section between Automatic Resilience and Manual Recovery Playbook.
+  - `CHANGES.md` — this entry.
+- **Gates run before commit:**
+  - `bash -n helpers/post-deploy-qa-hook.sh` — OK.
+  - `helpers/post-deploy-qa-hook.sh --project abs-dashboard --dry-run` — exit 0, prints resolved plan.
+  - `helpers/projects-smoketest.sh gate` — see below.
+  - `helpers/doc-reality-check.sh` — see below.
+  - `helpers/lessons-lint.sh` — see below.
+  - `helpers/skills-shape-lint.sh` — see below.
+- **Things for the reviewer:**
+  1. The task brief described the hook as "missing" with `--project <name>` required and INI config. Reality: the hook existed (188 lines, TSV format, positional args) — the *install* was missing. Judgment call: I added `--project` + `--dry-run` as parallel long-flag interfaces rather than rewriting a tested hook, preserving the positional-args contract that auto_deploy_general.sh already uses. Rewriting to INI would have forced a rewrite of 188 lines of working code for cosmetic reasons.
+  2. Only `abs-dashboard` gets an active conf row because only its spec has `@post-deploy`-tagged tests. The other three projects have commented placeholder rows so adoption is one-line uncomment + test-tag. This matches the existing opt-in convention in the file's header comment.
+  3. Installed to live system paths directly (not waiting for next auto-deploy) so carvana-abs-2 and other in-flight project chats see the artifacts immediately.
+
 ## 2026-04-18 — infra: kickoff protocol reshape — collaborative refinement loop
 
 - **What was built:** Reshape of commit 2a641c1 (task #49). NOT a net-new protocol — this re-frames kickoff as a **collaborative refinement loop with the user** instead of a one-shot report-delivery pipeline. User feedback (`feedback_committee_collaborative.md`, 2026-04-18): "the point of this process is to work with the user to help the user refine and clarify the request so that it can be done well." Silent merge of agent disagreements is the anti-pattern that reshape removes.

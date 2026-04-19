@@ -46,6 +46,14 @@ Because any chat can die, every chat at all times must:
 - **`claude-respawn-boot.service`** (on droplet boot, +15 s): brings every expected chat back after a reboot / resize.
 - **`/etc/claude-projects.conf`** lists every expected chat. Add / remove / rename entries to reflect the current project roster.
 
+## Stale self-identifiers after respawn
+
+When a chat respawns (crash + cron revive, or boot), `claude --continue` replays its JSONL and the chat can emit convincing, present-tense prose about what it was doing — "currently running Phase 5 meta-test", "waiting on the vectorizer" — drawn from the last few pre-respawn messages. That prose looks plausibly-current but reflects pre-respawn state: no tool call has actually fired since revive. If the chat is genuinely idle post-respawn, the self-identifier lies by omission.
+
+This matters specifically when a *lead* chat sets a watch on another chat's work. Watches that inspect only passive artifacts (git log, PROJECT_STATE.md mtime, CHANGES.md diff) plus the target chat's self-identifier can sit for hours on an idle target because every passive signal matches the stale claim. The only reliable way to tell a working chat from a respawned-idle chat is a **direct liveness probe**: ask "what tool call is in flight right now?" via `tmux send-keys` or an explicit prompt. A live chat answers with a concrete tool name or phase; a respawned-idle chat answers in the same shape as its stale self-identifier.
+
+Decision tree for a watch-setter: if N hours elapse with no artifact change *and* no new tool-call telemetry, probe directly before passive-waiting longer and before escalating to the user. Rough defaults — 30 min stall on a multi-hour task fires a probe; 2 hr stall fires probe-and-escalate. The 2026-04-19 LESSONS entry captures the incident that motivated this rule (4+ hours lost on a fix-watch where the target had respawned into idle and the watch trusted the stale self-identifier). Treat any multi-hour passive watch without periodic liveness probes as a bug in the watch, not a patience virtue.
+
 ## Manual Recovery Playbook
 
 When a chat appears "lost" from the user's perspective:

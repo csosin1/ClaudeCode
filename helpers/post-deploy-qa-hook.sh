@@ -9,6 +9,12 @@
 #
 # Usage:
 #   post-deploy-qa-hook.sh <project> <live_url> [--freeze-on-fail]
+#   post-deploy-qa-hook.sh --project <name> --dry-run
+#
+# --dry-run parses /etc/post-deploy-qa.conf and prints the resolved plan
+# (test command template, timeout, freeze-on-fail) without executing. Used
+# by operators + pre-commit gates to validate config changes. No LIVE_URL
+# is required for --dry-run; {LIVE_URL} placeholders are shown verbatim.
 #
 # Reads /etc/post-deploy-qa.conf for the per-project test command template.
 # Config format (TAB-separated):
@@ -48,9 +54,68 @@ on_hook_fail() {
 }
 trap 'on_hook_fail $? $LINENO' ERR
 
-PROJECT="${1:?usage: post-deploy-qa-hook.sh <project> <live_url> [--freeze-on-fail]}"
-LIVE_URL="${2:?usage: post-deploy-qa-hook.sh <project> <live_url> [--freeze-on-fail]}"
-CLI_FREEZE="${3:-}"
+# --- Argument parsing -------------------------------------------------------
+# Two supported calling conventions:
+#   1. Positional (auto_deploy_general.sh, historical callers):
+#        post-deploy-qa-hook.sh <project> <live_url> [--freeze-on-fail]
+#   2. Long-flag (operators, dry-run validation):
+#        post-deploy-qa-hook.sh --project <name> [--dry-run] [--freeze-on-fail]
+# Dry-run mode skips execution and prints the resolved plan; LIVE_URL optional.
+PROJECT=""
+LIVE_URL=""
+CLI_FREEZE=""
+DRY_RUN=0
+POSITIONAL=()
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --project)
+            PROJECT="${2:?--project requires a value}"
+            shift 2
+            ;;
+        --dry-run)
+            DRY_RUN=1
+            shift
+            ;;
+        --freeze-on-fail)
+            CLI_FREEZE="--freeze-on-fail"
+            shift
+            ;;
+        --)
+            shift
+            break
+            ;;
+        -*)
+            echo "usage: post-deploy-qa-hook.sh <project> <live_url> [--freeze-on-fail]" >&2
+            echo "   or: post-deploy-qa-hook.sh --project <name> [--dry-run] [--freeze-on-fail]" >&2
+            exit 2
+            ;;
+        *)
+            POSITIONAL+=("$1")
+            shift
+            ;;
+    esac
+done
+# Fill positional slots if long-flag didn't already set them.
+if [ -z "$PROJECT" ] && [ "${#POSITIONAL[@]}" -ge 1 ]; then
+    PROJECT="${POSITIONAL[0]}"
+fi
+if [ -z "$LIVE_URL" ] && [ "${#POSITIONAL[@]}" -ge 2 ]; then
+    LIVE_URL="${POSITIONAL[1]}"
+fi
+if [ -z "$CLI_FREEZE" ] && [ "${#POSITIONAL[@]}" -ge 3 ]; then
+    CLI_FREEZE="${POSITIONAL[2]}"
+fi
+
+if [ -z "$PROJECT" ]; then
+    echo "usage: post-deploy-qa-hook.sh <project> <live_url> [--freeze-on-fail]" >&2
+    echo "   or: post-deploy-qa-hook.sh --project <name> [--dry-run] [--freeze-on-fail]" >&2
+    exit 2
+fi
+# LIVE_URL is only required outside dry-run.
+if [ -z "$LIVE_URL" ] && [ "$DRY_RUN" != "1" ]; then
+    echo "post-deploy-qa-hook: missing <live_url> (required unless --dry-run)" >&2
+    exit 2
+fi
 
 CONF=/etc/post-deploy-qa.conf
 LOG=/var/log/post-deploy-qa.log
@@ -70,6 +135,10 @@ esac
 
 # Config file presence. Absence is benign: projects opt in by adding an entry.
 if [ ! -f "$CONF" ]; then
+    if [ "$DRY_RUN" = "1" ]; then
+        echo "plan: project=$PROJECT conf=$CONF missing; would skip (no-conf-file)"
+        exit 0
+    fi
     echo "$(date -Iseconds) $PROJECT skip no-conf-file" >> "$LOG"
     exit 0
 fi
@@ -83,6 +152,10 @@ ROW=$(awk -F'\t' -v p="$PROJECT" '
 ' "$CONF")
 
 if [ -z "$ROW" ]; then
+    if [ "$DRY_RUN" = "1" ]; then
+        echo "plan: project=$PROJECT conf=$CONF has no row for this project; would skip (no-conf-entry)"
+        exit 0
+    fi
     echo "$(date -Iseconds) $PROJECT skip no-conf-entry" >> "$LOG"
     exit 0
 fi
@@ -109,6 +182,29 @@ fi
 # Substitute {LIVE_URL} placeholder. Use bash parameter expansion (no shell
 # interpretation of the URL beyond literal substitution).
 CMD="${CMD_TEMPLATE//\{LIVE_URL\}/$LIVE_URL}"
+
+# Dry-run: emit the resolved plan and exit 0 without executing. No lock, no
+# log file writes, no ntfy, no freeze sentinel. Used by operators and the
+# pre-commit gate to validate config changes.
+if [ "$DRY_RUN" = "1" ]; then
+    if [ -n "$LIVE_URL" ]; then
+        RESOLVED_CMD_DISPLAY="$CMD"
+    else
+        RESOLVED_CMD_DISPLAY="(LIVE_URL not provided — template shown verbatim)"
+    fi
+    cat <<EOF
+plan for project: $PROJECT
+  conf file:       $CONF
+  cmd template:    $CMD_TEMPLATE
+  resolved cmd:    $RESOLVED_CMD_DISPLAY
+  live url:        ${LIVE_URL:-<not provided>}
+  timeout:         ${TIMEOUT}s
+  freeze on fail:  $([ "$FREEZE_ON_FAIL" = "1" ] && echo "YES (sentinel: $FREEZE_SENTINEL)" || echo "no (notify-only)")
+  log file:        $LOG
+  lock file:       $LOCK
+EOF
+    exit 0
+fi
 
 # Single-flight. If another run holds the lock, we skip rather than queue —
 # the next regen will re-trigger us anyway. A lock file that we just created
