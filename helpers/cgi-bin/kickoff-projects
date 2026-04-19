@@ -1,0 +1,32 @@
+#!/bin/bash
+# CGI: returns JSON list of existing projects suitable for the new-project.html
+# "existing project" dropdown. Sources /etc/claude-projects.conf (one-per-line
+# "<name> <path>"), with helpers/claude-projects.conf as fallback.
+
+set -u
+
+printf 'Status: 200 OK\r\n'
+printf 'Content-Type: application/json\r\n'
+printf 'Cache-Control: no-store\r\n\r\n'
+
+CONF=""
+for candidate in /etc/claude-projects.conf /opt/site-deploy/helpers/claude-projects.conf; do
+    if [ -r "$candidate" ]; then
+        CONF="$candidate"
+        break
+    fi
+done
+
+python3 - "$CONF" <<'PY'
+import json, sys, pathlib
+conf = sys.argv[1]
+names = []
+if conf:
+    for line in pathlib.Path(conf).read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"): continue
+        name = line.split(None, 1)[0]
+        if name and all(c.isalnum() or c == "-" for c in name):
+            names.append(name)
+print(json.dumps({"projects": sorted(set(names))}))
+PY

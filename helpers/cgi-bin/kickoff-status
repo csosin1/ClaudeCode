@@ -1,0 +1,101 @@
+#!/bin/bash
+# CGI: JSON status poll for a kickoff.
+# Query: ?project=<slug>[&expect=<round_N>]
+#
+# Returns JSON:
+#   {round: N, ready: true|false, card_url: ".../kickoff-<slug>-rN.html",
+#    has_research, has_peers_any, has_all_peers, has_report, step_label}
+#
+# "ready" means: the card for round >= expect exists on disk. If expect is
+# omitted, ready iff any card exists.
+
+set -u
+
+urldecode() {
+    local s="${1//+/ }"
+    printf '%b' "${s//%/\\x}"
+}
+
+PROJECT_RAW=""
+EXPECT_RAW=""
+OLD_IFS="$IFS"
+IFS='&'
+for pair in ${QUERY_STRING:-}; do
+    key="${pair%%=*}"
+    val="${pair#*=}"
+    case "$key" in
+        project) PROJECT_RAW="$val" ;;
+        expect)  EXPECT_RAW="$val" ;;
+    esac
+done
+IFS="$OLD_IFS"
+PROJECT=$(urldecode "$PROJECT_RAW")
+EXPECT=$(urldecode "$EXPECT_RAW")
+
+printf 'Status: 200 OK\r\n'
+printf 'Content-Type: application/json\r\n'
+printf 'Cache-Control: no-store\r\n\r\n'
+
+if ! [[ "$PROJECT" =~ ^[a-z0-9][a-z0-9-]{1,28}[a-z0-9]$ ]]; then
+    printf '{"error":"invalid project slug"}\n'
+    exit 0
+fi
+
+STATE="/opt/$PROJECT/.kickoff-state"
+CARDS="/var/www/landing/accept-cards"
+
+has_research=false; [ -s "$STATE/research.md" ] && has_research=true
+has_understand=false; [ -s "$STATE/understand.yaml" ] && has_understand=true
+has_challenge=false; [ -s "$STATE/challenge.yaml" ] && has_challenge=true
+has_improver=false; [ -s "$STATE/improver.yaml" ] && has_improver=true
+has_peers_any=false
+if $has_understand || $has_challenge || $has_improver; then has_peers_any=true; fi
+has_all_peers=false
+if $has_understand && $has_challenge && $has_improver; then has_all_peers=true; fi
+has_report=false; [ -s "/opt/$PROJECT/KICKOFF_REPORT.md" ] && has_report=true
+
+# Determine current round from round.log
+CUR_ROUND=0
+if [ -f "$STATE/round.log" ]; then
+    CUR_ROUND=$(awk -F'|' '/^r[0-9]+/ {gsub(/^r/,"",$1); if($1+0>max) max=$1+0} END {print max+0}' "$STATE/round.log")
+fi
+
+target_round="${EXPECT:-$CUR_ROUND}"
+[ -z "$target_round" ] && target_round=0
+ready=false
+card_url=""
+# Ready if the expected round's card exists on disk
+if [ "$target_round" -ge 1 ] && [ -s "$CARDS/kickoff-${PROJECT}-r${target_round}.html" ]; then
+    ready=true
+    card_url="/accept-cards/kickoff-${PROJECT}-r${target_round}.html"
+elif [ "$CUR_ROUND" -ge 1 ] && [ -s "$CARDS/kickoff-${PROJECT}-r${CUR_ROUND}.html" ] && [ -z "$EXPECT" ]; then
+    # No specific expectation; any existing card counts
+    ready=true
+    card_url="/accept-cards/kickoff-${PROJECT}-r${CUR_ROUND}.html"
+fi
+
+step_label="Starting committee…"
+if $has_research && ! $has_peers_any; then step_label="Research complete — peers dispatching"; fi
+if $has_peers_any && ! $has_all_peers; then step_label="Peer agents running in parallel…"; fi
+if $has_all_peers && ! $has_report; then step_label="Merging committee output…"; fi
+if $has_report && ! $ready; then step_label="Rendering Draft Plan card…"; fi
+if $ready; then step_label="Draft Plan ready"; fi
+
+# Emit JSON (python for safe escaping, stdlib only)
+python3 - "$CUR_ROUND" "$ready" "$card_url" "$step_label" \
+    "$has_research" "$has_peers_any" "$has_all_peers" "$has_report" <<'PY'
+import json, sys
+(round_n, ready, card_url, step_label, r, pa, ap, rep) = sys.argv[1:9]
+def tob(s): return s == "true"
+out = {
+    "round":         int(round_n),
+    "ready":         tob(ready),
+    "card_url":      card_url or None,
+    "step_label":    step_label,
+    "has_research":  tob(r),
+    "has_peers_any": tob(pa),
+    "has_all_peers": tob(ap),
+    "has_report":    tob(rep),
+}
+print(json.dumps(out))
+PY

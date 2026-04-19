@@ -1,0 +1,19 @@
+[Unit]
+Description=Watch /opt/*/.kickoff-state/ for BUILDER_READY sentinels
+Documentation=file:///opt/site-deploy/SKILLS/project-kickoff.md
+
+[Path]
+# PathModified fires when a file is created, modified, or renamed under any
+# of these dirs. We pre-create the .kickoff-state dir for each existing project
+# so the watcher attaches before any kickoff completes.
+PathModified=/opt/car-offers/.kickoff-state
+PathModified=/opt/gym-intelligence/.kickoff-state
+PathModified=/opt/carvana-abs-2/.kickoff-state
+PathModified=/opt/timeshare-dashboard/.kickoff-state
+PathModified=/opt/infra/.kickoff-state
+# New projects registered via kickoff-start get their state dir created by
+# kickoff.sh; append new lines here and reload when onboarding a new project.
+# (A full-glob PathModified pattern is not supported by systemd.)
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Start new project kickoff</title>
+<style>
+  :root { --fg:#111; --mut:#555; --bg:#fafafa; --card:#fff; --accent:#0b5fff; --border:#e3e3e3; --err:#a33; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; padding:0; background:var(--bg); color:var(--fg);
+               font: 16px/1.45 -apple-system, system-ui, Segoe UI, Roboto, sans-serif; }
+  main { max-width: 560px; margin: 0 auto; padding: 24px 16px 140px; }
+  h1 { font-size: 22px; margin: 4px 0 4px; }
+  .lede { color:var(--mut); font-size:14px; margin:0 0 20px; }
+  label { display:block; font-size:13px; color:var(--mut); text-transform:uppercase;
+          letter-spacing:0.04em; margin: 16px 0 6px; }
+  input[type=text], textarea, select {
+    width:100%; font: inherit; padding:12px; border:1px solid var(--border);
+    border-radius:10px; background:#fff; color:var(--fg); min-height:48px;
+  }
+  textarea { min-height:140px; resize:vertical; }
+  .radios { display:flex; gap:10px; flex-wrap:wrap; }
+  .radios label.opt { display:flex; align-items:center; gap:8px; padding:12px 14px;
+                      border:1px solid var(--border); border-radius:10px; background:#fff;
+                      min-height:48px; font-size:15px; text-transform:none; letter-spacing:0;
+                      color:var(--fg); margin:0; cursor:pointer; flex:1; }
+  .radios input[type=radio] { width:20px; height:20px; }
+  .err { color: var(--err); font-size:13px; margin-top:6px; min-height:16px; }
+  .submit-row { position: fixed; left:0; right:0; bottom:0; padding:12px 16px;
+                background:var(--card); border-top:1px solid var(--border);
+                display:flex; gap:10px; justify-content:flex-end; }
+  button.btn { min-height:52px; min-width:160px; padding:0 20px; font-size:16px;
+               border-radius:12px; border:1px solid var(--accent);
+               background:var(--accent); color:#fff; cursor:pointer; font-weight:600; }
+  button.btn[disabled] { opacity:0.55; cursor:not-allowed; }
+  .note { font-size:13px; color:var(--mut); margin-top:16px; line-height:1.5; }
+  #existing-wrap { display:none; margin-top:10px; }
+  @media (min-width: 720px) {
+    main { padding: 32px 24px 32px; }
+    .submit-row { position: static; border: 0; padding: 20px 0 0; background: transparent;
+                  justify-content: flex-start; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>Start a new project kickoff</h1>
+  <p class="lede">Committee will spin up: research, three peer agents in parallel, then a Draft Plan card you can refine with me.</p>
+
+  <form id="kickoff-form" method="POST" action="/cgi-bin/kickoff-start" novalidate>
+    <label for="project">Project name</label>
+    <input type="text" id="project" name="project" autocomplete="off"
+           placeholder="my-new-thing" minlength="3" maxlength="30" required
+           pattern="[a-z0-9][a-z0-9-]{1,28}[a-z0-9]">
+    <div class="err" id="project-err"></div>
+
+    <label for="prompt">Your prompt</label>
+    <textarea id="prompt" name="prompt" required minlength="5"
+              placeholder="What do you want to build? Rough is fine — committee will refine with you."></textarea>
+    <div class="err" id="prompt-err"></div>
+
+    <label>Scope</label>
+    <div class="radios">
+      <label class="opt"><input type="radio" name="scope" value="new" checked> New project</label>
+      <label class="opt"><input type="radio" name="scope" value="existing-big"> Existing project (&gt;8h)</label>
+    </div>
+
+    <div id="existing-wrap">
+      <label for="existing-project">Which existing project?</label>
+      <select id="existing-project" name="existing_project">
+        <option value="">— select —</option>
+      </select>
+    </div>
+
+    <p class="note">Kickoff takes about 30 to 45 minutes. You will get a Draft Plan card to refine with me. No outside spend.</p>
+
+    <div class="submit-row">
+      <button type="submit" class="btn" id="submit-btn">Start kickoff</button>
+    </div>
+  </form>
+</main>
+<script>
+(function() {
+  var form = document.getElementById('kickoff-form');
+  var projInput = document.getElementById('project');
+  var projErr = document.getElementById('project-err');
+  var promptInput = document.getElementById('prompt');
+  var promptErr = document.getElementById('prompt-err');
+  var scopeRadios = document.getElementsByName('scope');
+  var existingWrap = document.getElementById('existing-wrap');
+  var existingSelect = document.getElementById('existing-project');
+  var submitBtn = document.getElementById('submit-btn');
+
+  // Populate the existing-projects dropdown from a tiny JSON endpoint.
+  fetch('/cgi-bin/kickoff-projects')
+    .then(function(r) { return r.ok ? r.json() : {projects:[]}; })
+    .then(function(j) {
+      (j.projects || []).forEach(function(p) {
+        var o = document.createElement('option');
+        o.value = p; o.textContent = p;
+        existingSelect.appendChild(o);
+      });
+    })
+    .catch(function() { /* silent — select stays empty */ });
+
+  function onScopeChange() {
+    var scope = '';
+    for (var i=0; i<scopeRadios.length; i++) {
+      if (scopeRadios[i].checked) { scope = scopeRadios[i].value; break; }
+    }
+    existingWrap.style.display = (scope === 'existing-big') ? 'block' : 'none';
+  }
+  for (var i=0; i<scopeRadios.length; i++) {
+    scopeRadios[i].addEventListener('change', onScopeChange);
+  }
+  onScopeChange();
+
+  function validateSlug(s) {
+    if (!s) return 'Project name required.';
+    if (s.length < 3 || s.length > 30) return 'Must be 3-30 chars.';
+    if (!/^[a-z0-9][a-z0-9-]{1,28}[a-z0-9]$/.test(s)) {
+      return 'Lowercase letters, digits, hyphens only. Cannot start or end with a hyphen.';
+    }
+    return '';
+  }
+
+  projInput.addEventListener('input', function() {
+    // Gentle auto-normalize as user types
+    var v = projInput.value.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+    if (v !== projInput.value) projInput.value = v;
+    projErr.textContent = validateSlug(projInput.value);
+  });
+
+  form.addEventListener('submit', function(e) {
+    var slugErr = validateSlug(projInput.value);
+    projErr.textContent = slugErr;
+    promptErr.textContent = promptInput.value.trim().length < 5 ? 'Prompt required.' : '';
+    if (slugErr || promptErr.textContent) {
+      e.preventDefault();
+      return false;
+    }
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Starting...';
+  });
+})();
+</script>
+</body>
+</html>

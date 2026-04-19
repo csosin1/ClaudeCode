@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kickoff in progress</title>
+<style>
+  :root { --fg:#111; --mut:#555; --bg:#fafafa; --card:#fff; --accent:#0b5fff; --border:#e3e3e3; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; padding:0; background:var(--bg); color:var(--fg);
+               font: 16px/1.5 -apple-system, system-ui, Segoe UI, Roboto, sans-serif; }
+  main { max-width: 560px; margin: 0 auto; padding: 32px 16px; }
+  h1 { font-size: 22px; margin: 0 0 6px; }
+  .project { color: var(--accent); font-family: ui-monospace, Menlo, monospace; }
+  .lede { color: var(--mut); margin: 0 0 24px; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:20px; }
+  .spinner {
+    width:28px; height:28px; border-radius:50%;
+    border:3px solid #e3e3e3; border-top-color:var(--accent);
+    animation: spin 1s linear infinite; margin:0 auto 12px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .step { font-size:15px; text-align:center; color:var(--fg); }
+  .sub  { font-size:13px; text-align:center; color:var(--mut); margin-top:6px; }
+  .steps { margin-top:18px; padding:0; list-style:none; font-size:14px; color:var(--mut); }
+  .steps li { padding:6px 0; border-top:1px solid var(--border); display:flex; align-items:center; gap:8px; }
+  .steps li.done { color:#2a7d3a; }
+  .steps li.active { color: var(--fg); font-weight:600; }
+  .check { width:18px; text-align:center; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Kickoff running for <span class="project" id="slug">…</span></h1>
+  <p class="lede">Committee is working. Takes about 30 to 45 minutes. You can close this tab and wait for the ntfy; it will reopen when the Draft Plan is ready.</p>
+  <div class="card">
+    <div class="spinner" aria-hidden="true"></div>
+    <div class="step" id="step-line">Starting committee…</div>
+    <div class="sub"  id="sub-line">waiting for first artifact</div>
+
+    <ul class="steps" id="steps">
+      <li data-key="research"   ><span class="check">·</span> Research (first, alone)</li>
+      <li data-key="peers"      ><span class="check">·</span> Three peer agents in parallel</li>
+      <li data-key="merge"      ><span class="check">·</span> Deterministic template merge</li>
+      <li data-key="card"       ><span class="check">·</span> Draft Plan card ready</li>
+    </ul>
+  </div>
+</main>
+<script>
+(function() {
+  var qs = new URLSearchParams(window.location.search);
+  var project = qs.get('project') || '';
+  document.getElementById('slug').textContent = project || '(missing)';
+  if (!project) {
+    document.getElementById('step-line').textContent = 'Missing project slug in URL.';
+    return;
+  }
+
+  var steps = {
+    research: document.querySelector('.steps li[data-key=research]'),
+    peers:    document.querySelector('.steps li[data-key=peers]'),
+    merge:    document.querySelector('.steps li[data-key=merge]'),
+    card:     document.querySelector('.steps li[data-key=card]'),
+  };
+
+  function mark(key, state) {
+    var el = steps[key]; if (!el) return;
+    el.classList.remove('done','active');
+    if (state) el.classList.add(state);
+    var c = el.querySelector('.check');
+    if (state === 'done')       c.textContent = '✓';
+    else if (state === 'active')c.textContent = '●';
+    else                        c.textContent = '·';
+  }
+
+  function poll() {
+    fetch('/cgi-bin/kickoff-status?project=' + encodeURIComponent(project))
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(j) {
+        if (!j) return;
+        // Update step indicators based on artifacts
+        if (j.has_research) mark('research', 'done'); else mark('research', 'active');
+        if (j.has_peers_any) mark('peers', j.has_all_peers ? 'done' : 'active');
+        if (j.has_all_peers && j.has_report) mark('merge', 'done');
+        else if (j.has_all_peers) mark('merge', 'active');
+        if (j.ready) mark('card', 'done');
+
+        var label = j.step_label || (j.ready ? 'Draft Plan ready' : 'Working…');
+        document.getElementById('step-line').textContent = label;
+        document.getElementById('sub-line').textContent  = j.round ? ('round r' + j.round) : '';
+
+        if (j.ready && j.card_url) {
+          window.location.replace(j.card_url);
+        }
+      })
+      .catch(function() { /* silent; retry */ });
+  }
+  poll();
+  setInterval(poll, 5000);
+})();
+</script>
+</body>
+</html>

@@ -268,6 +268,23 @@ helpers/kickoff-retro.sh --project <name> [--since <ISO>]
 - Do NOT add a reviewer rule enforcing "kickoff was run" — this protocol is a helper, not a gate.
 - Do NOT let the three peer agents see each other's output mid-run — groupthink bug, see `SKILLS/four-agent-debate.md`.
 
+## End-to-end wiring (phone → committee → builder)
+
+Entry point: tap **Start new project** on https://casinv.dev/ — leads to `/new-project.html` (source `deploy/new-project.html`). Form POSTs to `/cgi-bin/kickoff-start` (source `helpers/cgi-bin/kickoff-start`), which fires `helpers/kickoff.sh` in the background and redirects to `/kickoff-status.html?project=<slug>`. That page polls `/cgi-bin/kickoff-status` every 5s and redirects to the Draft Plan card when ready.
+
+Draft Plan card action buttons (Ask / Push back / Add constraint / Answer / Override / Discuss / Finalize / Cancel) render as HTML forms POSTing to `/cgi-bin/kickoff-action` (source `helpers/cgi-bin/kickoff-action`). The CGI backgrounds the `kickoff.sh <subcommand>` call and redirects back to the status page polling for round N+1.
+
+Nginx routes `/cgi-bin/` via `fastcgi_pass unix:/run/fcgiwrap.socket`. Set `KICKOFF_DRY_RUN=1` by appending `?dry_run=1` to any CGI URL — invocation is logged to `/tmp/kickoff-cgi-dryrun/` without dispatching real agents.
+
+On `finalize`, `kickoff.sh` touches `/opt/<project>/.kickoff-state/BUILDER_READY`. The `kickoff-builder-watcher.path` systemd unit (source `helpers/kickoff-builder-watcher.path`) triggers `helpers/kickoff-builder-watcher.sh --once` which:
+1. Moves the sentinel to `BUILDER_DISPATCHED` (race-free claim).
+2. Reads the finalized `KICKOFF_REPORT.md § Synthesized Spec` + constraints.
+3. Dispatches a Claude Code builder subagent via `claude -p <brief>` in the background.
+4. Fires a milestone-tier ntfy with the project's preview URL as the click target.
+5. Appends one JSONL line to `/var/log/kickoff-dispatches.jsonl` with fields: `ts, project, spec_sha, builder_agent_id, notify_tier, status`.
+
+Onboarding a new project to the watcher: add a `PathModified=/opt/<slug>/.kickoff-state` line to `helpers/kickoff-builder-watcher.path` and `systemctl daemon-reload; systemctl restart kickoff-builder-watcher.path`.
+
 ## Related
 
 - `SKILLS/four-agent-debate.md` — the committee pattern; see new section "Disagreements must be user-visible".
@@ -277,4 +294,7 @@ helpers/kickoff-retro.sh --project <name> [--since <ISO>]
 - `SKILLS/kickoff-retros.md` — accumulated spec-vs-reality deltas consulted when writing new kickoffs.
 - `helpers/accept-card.sh` — emitter; supports `--kind draft-plan` for the refinement loop.
 - `helpers/kickoff.sh` / `helpers/kickoff-retro.sh` — the implementations.
+- `helpers/kickoff-builder-watcher.sh` / `.path` / `.service` — systemd-driven dispatch on finalize.
+- `helpers/cgi-bin/kickoff-start` / `kickoff-action` / `kickoff-status` / `kickoff-projects` — phone-tap CGI front-end.
+- `deploy/new-project.html` / `deploy/kickoff-status.html` — entry + status pages.
 - `feedback_committee_collaborative.md` — principle driving the reshape (collaborative refinement, not report delivery).

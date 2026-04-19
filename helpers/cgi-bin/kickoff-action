@@ -1,0 +1,215 @@
+#!/bin/bash
+# CGI: receive Draft Plan card action POSTs.
+#
+# Form fields: project, action, agent (optional), on_id (optional), text (optional),
+#              question_id (optional)
+#
+# action ∈ {ask, pushback, constrain, answer, refine, finalize, cancel}
+#
+# On success: background-dispatch the kickoff subcommand then redirect to the
+#             next round's card URL (polling pattern), or a confirmation page
+#             for finalize/cancel.
+#
+# Idempotent on retry: if the requested round has already been produced we
+# redirect to the existing card rather than re-dispatching. Check is based on
+# the current max round number in round.log before dispatch.
+
+set -u
+
+KICKOFF_SH="/opt/site-deploy/helpers/kickoff.sh"
+LOG_DIR="/var/log/kickoff-cgi"
+DRY_RUN="${KICKOFF_DRY_RUN:-0}"
+mkdir -p "$LOG_DIR" 2>/dev/null || true
+
+urldecode() {
+    local s="${1//+/ }"
+    printf '%b' "${s//%/\\x}"
+}
+
+html_err() {
+    local code="$1" msg="$2"
+    printf 'Status: %s\r\n' "$code"
+    printf 'Content-Type: text/html; charset=utf-8\r\n\r\n'
+    cat <<HTML
+<!doctype html><meta charset="utf-8">
+<title>Kickoff action error</title>
+<style>body{font:16px/1.5 -apple-system,system-ui,sans-serif;max-width:520px;margin:40px auto;padding:0 16px;color:#111}.err{color:#a33}a{color:#0b5fff}</style>
+<h1>Action failed</h1>
+<p class="err">$msg</p>
+HTML
+}
+
+redirect_to() {
+    local url="$1"
+    printf 'Status: 303 See Other\r\n'
+    printf 'Location: %s\r\n' "$url"
+    printf 'Content-Type: text/plain\r\n\r\n'
+    printf 'Redirecting to %s\n' "$url"
+}
+
+confirm_page() {
+    local title="$1" body="$2" backlink="$3"
+    printf 'Status: 200 OK\r\n'
+    printf 'Content-Type: text/html; charset=utf-8\r\n\r\n'
+    cat <<HTML
+<!doctype html><meta charset="utf-8">
+<title>$title</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>body{font:16px/1.5 -apple-system,system-ui,sans-serif;max-width:520px;margin:40px auto;padding:0 16px;color:#111}a.btn{display:inline-block;margin-top:16px;padding:12px 20px;background:#0b5fff;color:#fff;border-radius:10px;text-decoration:none;min-height:44px}</style>
+<h1>$title</h1>
+<p>$body</p>
+<p><a class="btn" href="$backlink">Back to dashboard</a></p>
+HTML
+}
+
+current_round() {
+    # Read max round number from round.log (0 if missing)
+    local log="/opt/$1/.kickoff-state/round.log"
+    [ -f "$log" ] || { echo 0; return; }
+    awk -F'|' '/^r[0-9]+/ {gsub(/^r/,"",$1); if($1+0>max) max=$1+0} END {print max+0}' "$log"
+}
+
+if [ "${REQUEST_METHOD:-GET}" != "POST" ]; then
+    html_err "405 Method Not Allowed" "POST required."
+    exit 0
+fi
+
+CL="${CONTENT_LENGTH:-0}"
+if ! [[ "$CL" =~ ^[0-9]+$ ]] || [ "$CL" -gt 32768 ]; then
+    html_err "413 Payload Too Large" "Body too large or missing."
+    exit 0
+fi
+
+BODY=""
+[ "$CL" -gt 0 ] && BODY=$(head -c "$CL")
+
+PROJECT_RAW=""
+ACTION_RAW=""
+AGENT_RAW=""
+ON_RAW=""
+TEXT_RAW=""
+QID_RAW=""
+OLD_IFS="$IFS"
+IFS='&'
+for pair in $BODY; do
+    key="${pair%%=*}"
+    val="${pair#*=}"
+    case "$key" in
+        project)      PROJECT_RAW="$val" ;;
+        action)       ACTION_RAW="$val" ;;
+        agent)        AGENT_RAW="$val" ;;
+        on_id)        ON_RAW="$val" ;;
+        text)         TEXT_RAW="$val" ;;
+        question_id)  QID_RAW="$val" ;;
+    esac
+done
+IFS="$OLD_IFS"
+
+PROJECT=$(urldecode "$PROJECT_RAW")
+ACTION=$(urldecode "$ACTION_RAW")
+AGENT=$(urldecode "$AGENT_RAW")
+ON_ID=$(urldecode "$ON_RAW")
+TEXT=$(urldecode "$TEXT_RAW")
+QID=$(urldecode "$QID_RAW")
+
+if ! [[ "$PROJECT" =~ ^[a-z0-9][a-z0-9-]{1,28}[a-z0-9]$ ]]; then
+    html_err "400 Bad Request" "Invalid project slug."
+    exit 0
+fi
+
+case "$ACTION" in
+    ask|pushback|constrain|answer|refine|finalize|cancel) ;;
+    *) html_err "400 Bad Request" "Unknown action."; exit 0 ;;
+esac
+
+PRE_ROUND=$(current_round "$PROJECT")
+TS=$(date -u +%Y%m%dT%H%M%SZ)
+LOGFILE="$LOG_DIR/${PROJECT}-${ACTION}-${TS}.log"
+
+# Build the kickoff.sh argv per action
+ARGS=()
+case "$ACTION" in
+    ask)
+        [ -n "$AGENT" ] && [ -n "$TEXT" ] || { html_err "400 Bad Request" "ask requires agent + text."; exit 0; }
+        case "$AGENT" in understand|challenge|improver) ;; *) html_err "400 Bad Request" "invalid agent"; exit 0 ;; esac
+        ARGS=(ask --project "$PROJECT" --agent "$AGENT" --question "$TEXT")
+        ;;
+    pushback)
+        [ -n "$ON_ID" ] && [ -n "$TEXT" ] || { html_err "400 Bad Request" "pushback requires on_id + text."; exit 0; }
+        ARGS=(pushback --project "$PROJECT" --on "$ON_ID" --text "$TEXT")
+        ;;
+    constrain)
+        [ -n "$TEXT" ] || { html_err "400 Bad Request" "constrain requires text."; exit 0; }
+        ARGS=(constrain --project "$PROJECT" --text "$TEXT")
+        ;;
+    answer)
+        [ -n "$QID" ] && [ -n "$TEXT" ] || { html_err "400 Bad Request" "answer requires question_id + text."; exit 0; }
+        ARGS=(answer --project "$PROJECT" --question "$QID" --text "$TEXT")
+        ;;
+    refine)
+        ARGS=(refine --project "$PROJECT") ;;
+    finalize)
+        ARGS=(finalize --project "$PROJECT") ;;
+    cancel)
+        ARGS=(cancel --project "$PROJECT") ;;
+esac
+
+# Terminal actions: do their work synchronously (finalize + cancel are fast;
+# they don't dispatch LLMs inline — finalize just stamps + seeds + touches
+# BUILDER_READY, cancel just moves files).
+if [ "$ACTION" = "finalize" ] || [ "$ACTION" = "cancel" ]; then
+    if [ "$DRY_RUN" = "1" ]; then
+        mkdir -p /tmp/kickoff-cgi-dryrun
+        echo "CMD: $KICKOFF_SH ${ARGS[*]}" > "/tmp/kickoff-cgi-dryrun/${PROJECT}-${ACTION}-${TS}.invocation"
+        if [ "$ACTION" = "finalize" ]; then
+            confirm_page "Finalizing — dispatching builder..." \
+                "Your Draft Plan is being finalized (dry-run). Builder watcher will pick it up and dispatch the builder agent." \
+                "https://casinv.dev/"
+        else
+            confirm_page "Cancelled — scaffold rolled back" \
+                "This kickoff has been cancelled (dry-run). Scaffold cleared." \
+                "https://casinv.dev/"
+        fi
+        exit 0
+    fi
+    "$KICKOFF_SH" "${ARGS[@]}" >"$LOGFILE" 2>&1 || {
+        html_err "500 Internal Server Error" "kickoff.sh $ACTION failed. See $LOGFILE"
+        exit 0
+    }
+    if [ "$ACTION" = "finalize" ]; then
+        confirm_page "Finalizing — dispatching builder..." \
+            "Your Draft Plan has been finalized. The builder watcher will dispatch the first builder agent shortly. You'll get a ntfy when ready." \
+            "https://casinv.dev/"
+    else
+        confirm_page "Cancelled — scaffold rolled back" \
+            "This kickoff has been cancelled. Scaffold cleared." \
+            "https://casinv.dev/"
+    fi
+    exit 0
+fi
+
+# Non-terminal: background dispatch, redirect to status page polling for the
+# next round's card.
+NEXT_ROUND=$((PRE_ROUND + 1))
+EXPECTED_CARD="/accept-cards/kickoff-${PROJECT}-r${NEXT_ROUND}.html"
+
+if [ "$DRY_RUN" = "1" ]; then
+    mkdir -p /tmp/kickoff-cgi-dryrun
+    echo "CMD: $KICKOFF_SH ${ARGS[*]}" > "/tmp/kickoff-cgi-dryrun/${PROJECT}-${ACTION}-${TS}.invocation"
+    redirect_to "/kickoff-status.html?project=$PROJECT&expect=$NEXT_ROUND&dry=1"
+    exit 0
+fi
+
+# Idempotent check: if somehow round already advanced past expected, redirect
+# directly to the existing card (user hit retry after success).
+CUR=$(current_round "$PROJECT")
+if [ "$CUR" -ge "$NEXT_ROUND" ]; then
+    redirect_to "/accept-cards/kickoff-${PROJECT}-r${CUR}.html"
+    exit 0
+fi
+
+nohup setsid "$KICKOFF_SH" "${ARGS[@]}" >"$LOGFILE" 2>&1 &
+disown || true
+
+redirect_to "/kickoff-status.html?project=$PROJECT&expect=$NEXT_ROUND"
+exit 0

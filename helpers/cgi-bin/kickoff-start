@@ -1,0 +1,148 @@
+#!/bin/bash
+# CGI: receive new-project.html POST, validate, dispatch kickoff in background,
+# redirect to status page.
+#
+# Env inputs: REQUEST_METHOD, CONTENT_LENGTH, CONTENT_TYPE (from nginx fastcgi).
+# stdin: urlencoded form body.
+#
+# Outputs an HTTP 303 redirect to /kickoff-status.html?project=<slug>.
+# On validation error: returns a small HTML 400 page.
+#
+# Dry-run: set KICKOFF_DRY_RUN=1 in nginx fastcgi_param to skip the real dispatch.
+
+set -u
+
+KICKOFF_SH="/opt/site-deploy/helpers/kickoff.sh"
+LOG_DIR="/var/log/kickoff-cgi"
+DRY_RUN="${KICKOFF_DRY_RUN:-0}"
+mkdir -p "$LOG_DIR" 2>/dev/null || true
+
+# --- tiny urldecode (pure bash) ---------------------------------------------
+urldecode() {
+    local s="${1//+/ }"
+    printf '%b' "${s//%/\\x}"
+}
+
+html_err() {
+    local code="$1" msg="$2"
+    printf 'Status: %s\r\n' "$code"
+    printf 'Content-Type: text/html; charset=utf-8\r\n\r\n'
+    cat <<HTML
+<!doctype html><meta charset="utf-8">
+<title>Kickoff input error</title>
+<style>body{font:16px/1.5 -apple-system,system-ui,sans-serif;max-width:520px;margin:40px auto;padding:0 16px;color:#111}.err{color:#a33}a{color:#0b5fff}</style>
+<h1>Could not start kickoff</h1>
+<p class="err">$msg</p>
+<p><a href="/new-project.html">Back to form</a></p>
+HTML
+}
+
+redirect_to() {
+    local url="$1"
+    printf 'Status: 303 See Other\r\n'
+    printf 'Location: %s\r\n' "$url"
+    printf 'Content-Type: text/plain\r\n\r\n'
+    printf 'Redirecting to %s\n' "$url"
+}
+
+# --- read body --------------------------------------------------------------
+if [ "${REQUEST_METHOD:-GET}" != "POST" ]; then
+    html_err "405 Method Not Allowed" "POST required."
+    exit 0
+fi
+
+CL="${CONTENT_LENGTH:-0}"
+if ! [[ "$CL" =~ ^[0-9]+$ ]] || [ "$CL" -gt 16384 ]; then
+    html_err "413 Payload Too Large" "Body too large or missing."
+    exit 0
+fi
+
+BODY=""
+if [ "$CL" -gt 0 ]; then
+    BODY=$(head -c "$CL")
+fi
+
+# --- parse form -------------------------------------------------------------
+PROJECT_RAW=""
+PROMPT_RAW=""
+SCOPE_RAW=""
+EXISTING_RAW=""
+OLD_IFS="$IFS"
+IFS='&'
+for pair in $BODY; do
+    key="${pair%%=*}"
+    val="${pair#*=}"
+    case "$key" in
+        project)          PROJECT_RAW="$val" ;;
+        prompt)           PROMPT_RAW="$val" ;;
+        scope)            SCOPE_RAW="$val" ;;
+        existing_project) EXISTING_RAW="$val" ;;
+    esac
+done
+IFS="$OLD_IFS"
+
+PROJECT=$(urldecode "$PROJECT_RAW")
+PROMPT=$(urldecode "$PROMPT_RAW")
+SCOPE=$(urldecode "$SCOPE_RAW")
+EXISTING=$(urldecode "$EXISTING_RAW")
+
+# --- validate ---------------------------------------------------------------
+case "$SCOPE" in
+    new|existing-big) ;;
+    *) html_err "400 Bad Request" "Invalid scope (must be 'new' or 'existing-big')."; exit 0 ;;
+esac
+
+# If scope = existing-big, the slug is the existing project name
+if [ "$SCOPE" = "existing-big" ]; then
+    [ -n "$EXISTING" ] || { html_err "400 Bad Request" "Existing-project requires selecting a project."; exit 0; }
+    PROJECT="$EXISTING"
+fi
+
+if ! [[ "$PROJECT" =~ ^[a-z0-9][a-z0-9-]{1,28}[a-z0-9]$ ]]; then
+    html_err "400 Bad Request" "Invalid project slug (lowercase, 3-30 chars, hyphens ok)."
+    exit 0
+fi
+
+if [ ${#PROMPT} -lt 5 ]; then
+    html_err "400 Bad Request" "Prompt too short."
+    exit 0
+fi
+
+# Prevent clobbering an in-flight kickoff for the same project (simple lock via state dir)
+STATE_DIR="/opt/$PROJECT/.kickoff-state"
+if [ -f "$STATE_DIR/understand.yaml" ] && [ ! -f "$STATE_DIR/FINALIZED" ]; then
+    # Already in progress — redirect to status (idempotent re-entry)
+    redirect_to "/kickoff-status.html?project=$PROJECT"
+    exit 0
+fi
+
+# --- dispatch ---------------------------------------------------------------
+TS=$(date -u +%Y%m%dT%H%M%SZ)
+LOGFILE="$LOG_DIR/${PROJECT}-${TS}.log"
+
+if [ "$DRY_RUN" = "1" ]; then
+    # Emit a marker file so the smoketest can observe what would have been invoked.
+    mkdir -p /tmp/kickoff-cgi-dryrun
+    DRY_MARKER="/tmp/kickoff-cgi-dryrun/${PROJECT}-${TS}.invocation"
+    {
+        echo "REQUEST: kickoff-start"
+        echo "PROJECT: $PROJECT"
+        echo "SCOPE: $SCOPE"
+        echo "PROMPT: $PROMPT"
+        echo "CMD: $KICKOFF_SH --prompt '...' --project '$PROJECT' --scope '$SCOPE' (dry-run)"
+    } > "$DRY_MARKER"
+    echo "DRY_MARKER=$DRY_MARKER" > "$LOGFILE"
+    redirect_to "/kickoff-status.html?project=$PROJECT&dry=1"
+    exit 0
+fi
+
+# Fire-and-forget. setsid detaches from the CGI process group entirely so nginx
+# / fcgiwrap don't wait on it. The long-running kickoff runs as www-data; state
+# dirs under /opt/<project>/ must be writable by www-data (verified at setup).
+nohup setsid bash -c "
+  '$KICKOFF_SH' --prompt \"\$PROMPT\" --project '$PROJECT' --scope '$SCOPE'
+" <<<"$PROMPT" >"$LOGFILE" 2>&1 &
+disown || true
+
+redirect_to "/kickoff-status.html?project=$PROJECT"
+exit 0

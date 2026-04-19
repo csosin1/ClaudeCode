@@ -1,0 +1,18 @@
+[Unit]
+Description=Dispatch builder subagent when a kickoff BUILDER_READY sentinel appears
+Documentation=file:///opt/site-deploy/SKILLS/project-kickoff.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/site-deploy/helpers/kickoff-builder-watcher.sh --once
+# Give the dispatcher enough room to fork the builder, log, and ntfy
+TimeoutStartSec=45s
+# Inherit PATH and common env; claude CLI is typically in /usr/local/bin or similar
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# Write logs to journal; optional stdout redirect to DISPATCH_LOG_DIR happens inside the script.
+StandardOutput=journal
+StandardError=journal
+# The script runs as root (default). Finalization already seeded state dirs owned by
+# the invoking user; root can move sentinels regardless.

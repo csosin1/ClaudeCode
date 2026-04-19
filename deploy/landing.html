@@ -44,6 +44,16 @@
             border-color: #60a5fa;
             background: #1e3a5f;
         }
+        a.card.primary {
+            background: #1e40af;
+            border-color: #60a5fa;
+        }
+        a.card.primary:hover {
+            background: #1e4fc5;
+        }
+        a.card.primary .card-title {
+            color: #ffffff;
+        }
         .card-title {
             font-size: 1.1rem;
             font-weight: 600;
@@ -66,6 +76,11 @@
     <div class="container">
         <h1>Projects</h1>
         <div class="projects">
+            <a class="card primary" href="/new-project.html">
+                <div class="card-title">Start new project</div>
+                <div class="card-desc">Kick off a committee-refined spec. Takes ~30-45 min.</div>
+                <div class="card-path">/new-project.html</div>
+            </a>
             <a class="card" href="/carvana/">
                 <div class="card-title">Carvana</div>
                 <div class="card-desc">ABS loan analytics, car offer comparison tool, and more.</div>

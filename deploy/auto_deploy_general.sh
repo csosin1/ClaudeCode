@@ -117,6 +117,30 @@ if [ "$LOCAL" != "$REMOTE" ]; then
         [ -s /var/www/landing/live/projects.html ] || cp "$REPO_DIR/deploy/projects.html" /var/www/landing/live/projects.html
     fi
 
+    # Kickoff entry + status pages (copied to /var/www/landing/ directly — served by root location)
+    for h in new-project.html kickoff-status.html; do
+        if [ -f "$REPO_DIR/deploy/$h" ]; then
+            cp "$REPO_DIR/deploy/$h" "/var/www/landing/$h"
+        fi
+    done
+
+    # Kickoff CGI endpoints (served by fcgiwrap via nginx /cgi-bin/ location)
+    if [ -d "$REPO_DIR/helpers/cgi-bin" ]; then
+        mkdir -p /var/www/landing/cgi-bin
+        for f in "$REPO_DIR/helpers/cgi-bin"/kickoff-*; do
+            [ -f "$f" ] && install -m 755 "$f" "/var/www/landing/cgi-bin/$(basename "$f")"
+        done
+    fi
+
+    # Kickoff builder-dispatch watcher (systemd path + service units)
+    for u in kickoff-builder-watcher.path kickoff-builder-watcher.service; do
+        if [ -f "$REPO_DIR/helpers/$u" ] && ! cmp -s "$REPO_DIR/helpers/$u" "/etc/systemd/system/$u" 2>/dev/null; then
+            cp "$REPO_DIR/helpers/$u" "/etc/systemd/system/$u"
+            systemctl daemon-reload
+            [ "$u" = "kickoff-builder-watcher.path" ] && systemctl enable --now kickoff-builder-watcher.path 2>/dev/null || true
+        fi
+    done
+
     # Per-droplet helper scripts (keep /usr/local/bin copy in sync with repo)
     if [ -d "$REPO_DIR/helpers" ]; then
         for s in claude-project.sh end-project.sh task-status.sh notify.sh start-claude.sh post-deploy-qa-hook.sh; do

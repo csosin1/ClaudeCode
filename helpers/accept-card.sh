@@ -215,10 +215,23 @@ def bullets(items):
     if not items: return "<div class='muted'>(none)</div>"
     return "<ul>" + "".join(f"<li>{esc(i)}</li>" for i in items) + "</ul>"
 
+# Derive project slug from DRAFT_STATE_DIR (/opt/<slug>/.kickoff-state)
+project_slug = ""
+try:
+    parts = str(state_dir).rstrip("/").split("/")
+    if len(parts) >= 3 and parts[-1] == ".kickoff-state":
+        project_slug = parts[-2]
+except Exception:
+    project_slug = ""
+
+def hidden(name, value):
+    return f'<input type="hidden" name="{esc(name)}" value="{esc(value)}">'
+
 dis_html = ""
 if disagreements:
     rows = []
     for d in disagreements:
+        # Each disagreement row becomes a mini-form: Override (pushback with "keep mine") OR Discuss (pushback w/ user text)
         rows.append(f"""
         <div class="dis-row">
           <div class="dis-head"><span class="owner">[{esc(d['owner'])}]</span> vs <span class="owner">[{esc(d['other_agent'])}]</span> <span class="did">id: {esc(d['id'])}</span></div>
@@ -226,10 +239,22 @@ if disagreements:
           <div class="dis-pos"><b>theirs:</b> {esc(d['their_position'])}</div>
           <div class="dis-trade"><b>tradeoff:</b> {esc(d['tradeoff'])}</div>
           <div class="dis-rec"><b>recommendation:</b> {esc(d['my_recommendation'])} &mdash; {esc(d['rationale'])}</div>
-          <div class="dis-btns">
-            <button class="btn btn-small" data-action="override" data-id="{esc(d['id'])}">Override — keep mine</button>
-            <button class="btn btn-small" data-action="pushback" data-id="{esc(d['id'])}">Discuss — push back</button>
-          </div>
+          <form class="inline-form" method="POST" action="/cgi-bin/kickoff-action">
+            {hidden("project", project_slug)}
+            {hidden("action",  "pushback")}
+            {hidden("on_id",   d['id'])}
+            <textarea name="text" rows="2" placeholder="Your pushback (leave blank to 'override — keep mine')">{esc("")}</textarea>
+            <div class="dis-btns">
+              <button type="submit" class="btn btn-small btn-primary">Discuss — push back</button>
+            </div>
+          </form>
+          <form class="inline-form" method="POST" action="/cgi-bin/kickoff-action" style="display:inline">
+            {hidden("project", project_slug)}
+            {hidden("action",  "pushback")}
+            {hidden("on_id",   d['id'])}
+            {hidden("text",    "Override: keep the original position — user declined to justify")}
+            <button type="submit" class="btn btn-small">Override — keep mine</button>
+          </form>
         </div>""")
     dis_html = "<h2>Disagreements</h2>" + "".join(rows)
 else:
@@ -243,7 +268,13 @@ if open_qs:
         <div class="oq-row">
           <div class="oq-q"><b>{esc(q['id'])}:</b> {esc(q['question'])}</div>
           <div class="oq-def"><b>default-if-no-answer:</b> {esc(q['default_if_no_answer'])}</div>
-          <div class="oq-btns"><button class="btn btn-small" data-action="answer" data-id="{esc(q['id'])}">Answer</button></div>
+          <form class="inline-form" method="POST" action="/cgi-bin/kickoff-action">
+            {hidden("project",     project_slug)}
+            {hidden("action",      "answer")}
+            {hidden("question_id", q['id'])}
+            <textarea name="text" rows="2" placeholder="Your answer (overrides the default)" required></textarea>
+            <div class="oq-btns"><button type="submit" class="btn btn-small btn-primary">Answer</button></div>
+          </form>
         </div>""")
     oq_html = "<h2>Open Questions</h2>" + "".join(rows)
 else:
@@ -298,6 +329,13 @@ page = f"""<!doctype html>
  .dis-pos, .dis-trade, .dis-rec {{ font-size:14px; margin:2px 0; }}
  .dis-btns, .oq-btns {{ margin-top:8px; display:flex; gap:8px; flex-wrap:wrap; }}
  .answers {{ background:#f3f3f3; padding:10px; border-radius:6px; font-size:13px; white-space:pre-wrap; }}
+ .inline-form textarea {{ width:100%; box-sizing:border-box; font:inherit; padding:8px; margin:6px 0;
+                          border:1px solid var(--border); border-radius:8px; min-height:40px; resize:vertical; }}
+ .inline-form select {{ font:inherit; padding:8px; margin:4px 8px 8px 4px; min-height:36px;
+                        border:1px solid var(--border); border-radius:8px; background:#fff; }}
+ .inline-form label {{ display:inline-flex; flex-direction:column; font-size:12px; color:var(--mut); }}
+ .refine-block {{ border:1px solid var(--border); border-radius:8px; padding:10px 12px; margin:8px 0; background:#fff; }}
+ .refine-block summary {{ cursor:pointer; font-weight:600; padding:4px 0; }}
  .btn {{ min-height:44px; min-width:96px; padding:0 14px; font-size:15px;
          border-radius:10px; border:1px solid var(--border); background:#fff; color:var(--fg); cursor:pointer; }}
  .btn:focus {{ outline:3px solid var(--accent); outline-offset:2px; }}
@@ -331,13 +369,46 @@ page = f"""<!doctype html>
     {oq_html}
     {answers_html}
     <h2>Refine actions</h2>
-    <div class="refine-row">
-      <button class="btn" data-action="ask">Ask a question</button>
-      <button class="btn" data-action="pushback">Push back on an item</button>
-      <button class="btn" data-action="constrain">Add a constraint</button>
-    </div>
+
+    <details class="refine-block">
+      <summary>Ask a question of a specific agent</summary>
+      <form method="POST" action="/cgi-bin/kickoff-action" class="inline-form">
+        <input type="hidden" name="project" value="{esc(project_slug)}">
+        <input type="hidden" name="action"  value="ask">
+        <label>Agent
+          <select name="agent" required>
+            <option value="understand">understand</option>
+            <option value="challenge">challenge</option>
+            <option value="improver">improver</option>
+          </select>
+        </label>
+        <textarea name="text" rows="3" placeholder="Your question for this agent" required></textarea>
+        <button type="submit" class="btn btn-primary">Ask</button>
+      </form>
+    </details>
+
+    <details class="refine-block">
+      <summary>Add a constraint (all three peers re-run)</summary>
+      <form method="POST" action="/cgi-bin/kickoff-action" class="inline-form">
+        <input type="hidden" name="project" value="{esc(project_slug)}">
+        <input type="hidden" name="action"  value="constrain">
+        <textarea name="text" rows="3" placeholder="e.g. 'must use SQLite, no Postgres'" required></textarea>
+        <button type="submit" class="btn btn-primary">Add constraint</button>
+      </form>
+    </details>
+
     <div class="terminal" role="group" aria-label="Terminal actions">
-      {"".join(term_btns)}
+      <form method="POST" action="/cgi-bin/kickoff-action" style="display:inline">
+        <input type="hidden" name="project" value="{esc(project_slug)}">
+        <input type="hidden" name="action"  value="finalize">
+        <button type="submit" class="btn btn-primary">Finalize</button>
+      </form>
+      <form method="POST" action="/cgi-bin/kickoff-action" style="display:inline"
+            onsubmit="return confirm('Cancel this kickoff? Scaffold will be rolled back.');">
+        <input type="hidden" name="project" value="{esc(project_slug)}">
+        <input type="hidden" name="action"  value="cancel">
+        <button type="submit" class="btn btn-cancel">Cancel</button>
+      </form>
     </div>
   </div>
 </main>
